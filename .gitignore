@@ -1,0 +1,14 @@
+# Relay
+/relay/miga-relay
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# OS / editors
+.DS_Store
+.vscode/
