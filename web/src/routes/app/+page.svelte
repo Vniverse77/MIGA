@@ -10,6 +10,9 @@
 		randomId,
 		type Identity
 	} from '../../lib/crypto';
+	import logo from '../../lib/assets/favicon.svg';
+	import { t } from '../../lib/i18n.svelte';
+	import LangSelect from '../../lib/LangSelect.svelte';
 	import { RelayClient, type Status } from '../../lib/relay';
 	import {
 		loadChats,
@@ -55,7 +58,7 @@
 				// Anything we cannot open is acknowledged too, so it does not clog the queue.
 				if (!plain) return true;
 				if (!contacts.some((c) => c.address === m.from)) {
-					contacts.push({ address: m.from, name: 'Unknown ' + m.from.slice(0, 6) });
+					contacts.push({ address: m.from, name: t('name_unknown') + ' ' + m.from.slice(0, 6) });
 				}
 				if (!chats[m.from]) chats[m.from] = [];
 				const list = chats[m.from];
@@ -74,7 +77,7 @@
 			onSent: (id) => setMessageState(id, 'sent'),
 			onError: (code, id) => {
 				if (id) setMessageState(id, 'failed');
-				notice = 'The relay rejected a message: ' + code;
+				notice = t('n_relay_rejected', { code });
 			}
 		});
 		relay.connect();
@@ -115,7 +118,7 @@
 		const text = draft.trim();
 		if (!text || !active || !identity) return;
 		if (text.length > MAX_TEXT) {
-			notice = `That message is too long (limit: ${MAX_TEXT} characters).`;
+			notice = t('n_too_long', { max: MAX_TEXT });
 			return;
 		}
 		const id = randomId();
@@ -131,15 +134,15 @@
 		event.preventDefault();
 		const address = newAddress.trim().toLowerCase();
 		if (!isAddress(address)) {
-			notice = 'That is not a valid MIGA address (64 letters and digits).';
+			notice = t('n_bad_address');
 			return;
 		}
 		if (address === identity?.address) {
-			notice = 'That is your own address.';
+			notice = t('n_own_address');
 			return;
 		}
 		if (!contacts.some((c) => c.address === address)) {
-			contacts.push({ address, name: newName.trim() || 'Contact ' + address.slice(0, 6) });
+			contacts.push({ address, name: newName.trim() || t('name_contact') + ' ' + address.slice(0, 6) });
 			persist();
 		}
 		newAddress = '';
@@ -152,73 +155,77 @@
 		if (!identity) return;
 		try {
 			await navigator.clipboard.writeText(identity.address);
-			notice = 'Your address was copied.';
+			notice = t('n_copied');
 		} catch {
-			notice = 'Could not copy. Select the address and copy it by hand.';
+			notice = t('n_copy_failed');
 		}
 	}
 
 	async function backupKey(): Promise<void> {
 		if (!identity) return;
-		if (!confirm('Your secret key gives full access to your identity. Copy it to the clipboard?'))
-			return;
+		if (!confirm(t('q_backup'))) return;
 		try {
 			await navigator.clipboard.writeText(bytesToHex(identity.secret));
-			notice = 'Secret key copied. Store it somewhere safe and clear your clipboard.';
+			notice = t('n_key_copied');
 		} catch {
-			notice = 'Could not copy the key.';
+			notice = t('n_key_copy_failed');
 		}
 	}
 
 	function restoreKey(): void {
-		const value = prompt('Paste the secret key to restore (64 characters):')?.trim().toLowerCase();
+		const value = prompt(t('q_restore_prompt'))?.trim().toLowerCase();
 		if (!value) return;
 		if (!/^[0-9a-f]{64}$/.test(value)) {
-			notice = 'That is not a valid secret key.';
+			notice = t('n_bad_key');
 			return;
 		}
-		if (!confirm('This replaces the identity stored in this browser. Continue?')) return;
+		if (!confirm(t('q_restore_confirm'))) return;
 		saveIdentity(identityFromSecret(hexToBytes(value)));
 		location.reload();
 	}
 
+	const initial = (name: string) => [...name.trim()][0] ?? '?';
 	const shortAddress = (a: string) => a.slice(0, 8) + '…' + a.slice(-6);
 	const timeOf = (ts: number) =>
 		new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-	const stateLabel: Record<Message['state'], string> = {
-		pending: 'waiting to send',
-		sent: 'sent',
-		failed: 'not sent',
-		received: ''
-	};
+	const stateLabel = (state: Message['state']) =>
+		state === 'received' ? '' : t(`state_${state}`);
 </script>
 
 <svelte:head>
 	<title>MIGA</title>
 </svelte:head>
 
-<div class="app" class:chat-open={active !== null}>
-	<aside>
-		<header>
-			<a class="brand" href="/">MIGA</a>
-			<span class="status {status}">{status}</span>
-		</header>
+<div class="shell" class:chat-open={active !== null}>
+	<header class="top">
+		<a class="brand" href="/">
+			<img src={logo} alt="" width="30" height="30" />
+			<span>MIGA</span>
+		</a>
+		<nav aria-label="Main">
+			<a class="link" href="https://vniverse77.com/">Vniverse77</a>
+			<a class="link" href="https://forum.vniverse77.com/">Forum</a>
+			<span class="status {status}">{t(`status_${status}`)}</span>
+			<LangSelect />
+		</nav>
+	</header>
 
-		<div class="me">
-			<span class="label">Your address</span>
+	<aside>
+		<section class="card">
+			<h2>{t('your_address')}</h2>
 			<code>{identity?.address ?? '…'}</code>
 			<div class="row">
-				<button type="button" onclick={copyAddress}>Copy address</button>
-				<button type="button" class="quiet" onclick={backupKey}>Back up key</button>
-				<button type="button" class="quiet" onclick={restoreKey}>Restore</button>
+				<button type="button" class="primary" onclick={copyAddress}>{t('copy_address')}</button>
+				<button type="button" onclick={backupKey}>{t('backup_key')}</button>
+				<button type="button" onclick={restoreKey}>{t('restore')}</button>
 			</div>
-		</div>
+		</section>
 
-		<form class="add" onsubmit={addContact}>
-			<span class="label">New conversation</span>
-			<input bind:value={newAddress} placeholder="Their MIGA address" autocomplete="off" spellcheck="false" />
-			<input bind:value={newName} placeholder="Name (only you see it)" autocomplete="off" maxlength="40" />
-			<button type="submit">Start chat</button>
+		<form class="card add" onsubmit={addContact}>
+			<h2>{t('new_conversation')}</h2>
+			<input bind:value={newAddress} placeholder={t('ph_address')} autocomplete="off" spellcheck="false" />
+			<input bind:value={newName} placeholder={t('ph_name')} autocomplete="off" maxlength="40" />
+			<button type="submit" class="primary">{t('start_chat')}</button>
 		</form>
 
 		{#if notice}
@@ -227,30 +234,38 @@
 
 		<ul class="contacts">
 			{#each contacts as contact (contact.address)}
+				{@const last = chats[contact.address]?.at(-1)}
 				<li>
 					<button
 						type="button"
+						class="contact"
 						class:selected={contact.address === active}
 						onclick={() => (active = contact.address)}
 					>
-						<strong>{contact.name}</strong>
-						<small>{shortAddress(contact.address)}</small>
+						<span class="avatar" aria-hidden="true">{initial(contact.name)}</span>
+						<span class="who">
+							<strong>{contact.name}</strong>
+							<small>{last ? last.text : shortAddress(contact.address)}</small>
+						</span>
+						{#if last}<small class="when">{timeOf(last.ts)}</small>{/if}
 					</button>
 				</li>
 			{:else}
-				<li class="empty">No conversations yet. Share your address with someone to begin.</li>
+				<li class="empty">{t('no_conversations')}</li>
 			{/each}
 		</ul>
 	</aside>
 
 	<main>
 		{#if activeContact}
-			<header>
-				<button type="button" class="back quiet" onclick={() => (active = null)}>Back</button>
-				<div>
+			<header class="chat-head">
+				<button type="button" class="back" onclick={() => (active = null)}>← {t('back')}</button>
+				<span class="avatar" aria-hidden="true">{initial(activeContact.name)}</span>
+				<div class="who">
 					<strong>{activeContact.name}</strong>
 					<small>{shortAddress(activeContact.address)}</small>
 				</div>
+				<span class="lock">{t('f1_title')}</span>
 			</header>
 
 			<div class="messages" bind:this={scroller}>
@@ -258,171 +273,304 @@
 					<div class="bubble" class:mine={message.mine} class:failed={message.state === 'failed'}>
 						<p>{message.text}</p>
 						<small>
-							{timeOf(message.ts)}{#if message.mine}
-								· {stateLabel[message.state]}{/if}
+							{timeOf(message.ts)}{#if message.mine}{' · ' + stateLabel(message.state)}{/if}
 						</small>
 					</div>
 				{:else}
-					<p class="empty">No messages yet. Messages are encrypted before they leave this device.</p>
+					<p class="empty center">{t('no_messages')}</p>
 				{/each}
 			</div>
 
 			<form class="composer" onsubmit={sendMessage}>
-				<input bind:value={draft} placeholder="Write a message" autocomplete="off" maxlength={MAX_TEXT} />
-				<button type="submit" disabled={!draft.trim()}>Send</button>
+				<input bind:value={draft} placeholder={t('ph_message')} autocomplete="off" maxlength={MAX_TEXT} />
+				<button type="submit" class="primary" disabled={!draft.trim()}>{t('send')}</button>
 			</form>
 		{:else}
-			<p class="empty center">Pick a conversation, or start one with someone's MIGA address.</p>
+			<div class="welcome">
+				<img src={logo} alt="" width="72" height="72" />
+				<h1>MIGA</h1>
+				<p class="tagline">Make Internet Great Again</p>
+				<p>{t('pick')}</p>
+			</div>
 		{/if}
 	</main>
 </div>
 
 <style>
-	.app {
+	.shell {
 		display: grid;
-		grid-template-columns: 21rem 1fr;
+		grid-template-columns: 22rem 1fr;
+		grid-template-rows: 3.5rem 1fr;
 		height: 100dvh;
 	}
+
+	/* Top bar, same as the landing page */
+	.top {
+		grid-column: 1 / -1;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 0 1.25rem;
+		border-bottom: 0.5px solid var(--line);
+		background: var(--panel);
+	}
+	.brand {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.6rem;
+		color: var(--heading);
+		font-weight: 700;
+		letter-spacing: 0.14em;
+		text-decoration: none;
+	}
+	.brand img {
+		display: block;
+	}
+	nav {
+		display: flex;
+		align-items: center;
+		gap: 1.25rem;
+	}
+	.link {
+		color: var(--dim);
+		font-size: 0.9rem;
+		text-decoration: none;
+		transition: color 0.15s ease;
+	}
+	.link:hover {
+		color: var(--accent-2);
+	}
+	.status {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.2rem 0.65rem;
+		border: 0.5px solid var(--line-strong);
+		border-radius: 999px;
+		color: var(--muted);
+		font-size: 0.8rem;
+	}
+	.status::before {
+		content: '';
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 50%;
+		background: var(--dim);
+	}
+	.status.online {
+		color: var(--accent-2);
+	}
+	.status.online::before {
+		background: var(--accent-2);
+	}
+	.status.offline::before {
+		background: var(--danger);
+	}
+
+	/* Sidebar */
 	aside {
 		display: flex;
 		flex-direction: column;
 		gap: 0.9rem;
 		min-height: 0;
 		padding: 1rem;
-		border-right: 1px solid var(--line);
-		background: var(--panel);
+		border-right: 0.5px solid var(--line);
 		overflow-y: auto;
 	}
-	aside header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
+	.card {
+		padding: 1rem;
+		border: 0.5px solid var(--line);
+		border-radius: var(--radius-lg);
+		background: var(--panel);
 	}
-	.brand {
-		color: var(--text);
-		font-size: 1.3rem;
-		font-weight: 700;
-		letter-spacing: 0.12em;
-		text-decoration: none;
-	}
-	.status {
-		font-size: 0.8rem;
-		color: var(--muted);
-	}
-	.status::before {
-		content: '';
-		display: inline-block;
-		width: 0.55rem;
-		height: 0.55rem;
-		margin-right: 0.35rem;
-		border-radius: 50%;
-		background: var(--muted);
-	}
-	.status.online::before {
-		background: var(--accent);
-	}
-	.status.offline::before {
-		background: var(--danger);
-	}
-	.label {
-		display: block;
-		margin-bottom: 0.3rem;
-		color: var(--muted);
-		font-size: 0.8rem;
+	h2 {
+		margin: 0 0 0.6rem;
+		color: var(--dim);
+		font-size: 0.75rem;
+		font-weight: 500;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
 	}
 	code {
 		display: block;
-		padding: 0.5rem;
-		border-radius: 0.4rem;
+		padding: 0.6rem 0.7rem;
+		border: 0.5px solid var(--line);
+		border-radius: var(--radius);
 		background: var(--bg);
+		color: var(--accent-2);
 		font-size: 0.75rem;
+		line-height: 1.5;
 		overflow-wrap: anywhere;
 		user-select: all;
 	}
 	.row {
-		display: flex;
-		flex-wrap: wrap;
+		display: grid;
+		grid-template-columns: 1fr 1fr;
 		gap: 0.4rem;
-		margin-top: 0.5rem;
+		margin-top: 0.6rem;
 	}
+	.row .primary {
+		grid-column: 1 / -1;
+	}
+	.add {
+		display: grid;
+		gap: 0.5rem;
+	}
+	.add h2 {
+		margin-bottom: 0.1rem;
+	}
+
+	/* Controls */
 	button {
-		padding: 0.45rem 0.8rem;
-		border: 0;
-		border-radius: 0.45rem;
+		padding: 0.5rem 0.9rem;
+		border: 0.5px solid var(--line-strong);
+		border-radius: var(--radius);
+		background: transparent;
+		color: var(--accent-2);
+		font-size: 0.85rem;
+		font-weight: 500;
+		cursor: pointer;
+		transition:
+			background-color 0.2s ease,
+			color 0.2s ease,
+			border-color 0.2s ease;
+	}
+	button:hover:not(:disabled) {
+		border-color: var(--accent);
 		background: var(--accent);
 		color: var(--accent-ink);
-		font-weight: 600;
-		cursor: pointer;
 	}
-	button.quiet {
-		background: var(--panel-2);
-		color: var(--text);
-		font-weight: 400;
+	button.primary {
+		border-color: var(--accent);
+		background: var(--accent);
+		color: var(--accent-ink);
+	}
+	button.primary:hover:not(:disabled) {
+		border-color: var(--accent-2);
+		background: var(--accent-2);
 	}
 	button:disabled {
-		opacity: 0.5;
+		opacity: 0.45;
 		cursor: default;
 	}
 	input {
 		width: 100%;
-		padding: 0.55rem 0.7rem;
-		border: 1px solid var(--line);
-		border-radius: 0.45rem;
+		padding: 0.6rem 0.75rem;
+		border: 0.5px solid var(--line-strong);
+		border-radius: var(--radius);
 		background: var(--bg);
+		font-size: 0.9rem;
+		transition: border-color 0.2s ease;
 	}
-	.add {
-		display: grid;
-		gap: 0.4rem;
+	input::placeholder {
+		color: var(--dim);
+	}
+	input:focus {
+		border-color: var(--accent-2);
+		outline: none;
 	}
 	.notice {
 		margin: 0;
-		padding: 0.5rem 0.7rem;
-		border-radius: 0.45rem;
-		background: var(--panel-2);
+		padding: 0.6rem 0.75rem;
+		border: 0.5px solid var(--line-strong);
+		border-left: 2px solid var(--accent-2);
+		border-radius: var(--radius);
+		background: var(--panel);
 		font-size: 0.85rem;
 	}
+
+	/* Conversation list */
 	.contacts {
 		display: grid;
-		gap: 0.3rem;
+		gap: 0.35rem;
 		margin: 0;
 		padding: 0;
 		list-style: none;
 	}
-	.contacts button {
-		display: grid;
+	.contact {
+		display: flex;
+		align-items: center;
+		gap: 0.7rem;
 		width: 100%;
-		background: transparent;
+		padding: 0.6rem 0.7rem;
+		border-color: transparent;
 		color: var(--text);
-		font-weight: 400;
 		text-align: left;
 	}
-	.contacts button:hover,
-	.contacts button.selected {
+	.contact:hover:not(:disabled) {
+		border-color: var(--line);
+		background: var(--panel);
+		color: var(--text);
+	}
+	.contact.selected,
+	.contact.selected:hover {
+		border-color: var(--line-strong);
 		background: var(--panel-2);
+	}
+	.avatar {
+		display: grid;
+		flex: none;
+		place-items: center;
+		width: 2.3rem;
+		height: 2.3rem;
+		border: 0.5px solid var(--line-strong);
+		border-radius: 50%;
+		background: var(--panel-2);
+		color: var(--accent-2);
+		font-weight: 700;
+		text-transform: uppercase;
+	}
+	.who {
+		display: grid;
+		flex: 1;
+		min-width: 0;
+	}
+	.who strong {
+		color: var(--heading);
+		font-size: 0.92rem;
+	}
+	.who strong,
+	.who small {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	small {
 		color: var(--muted);
 		font-size: 0.75rem;
 	}
+	.when {
+		flex: none;
+		color: var(--dim);
+	}
 	.empty {
 		color: var(--muted);
 		font-size: 0.9rem;
 	}
+
+	/* Chat */
 	main {
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
 		min-height: 0;
 	}
-	main header {
+	.chat-head {
 		display: flex;
 		align-items: center;
 		gap: 0.8rem;
-		padding: 0.8rem 1rem;
-		border-bottom: 1px solid var(--line);
+		padding: 0.7rem 1.25rem;
+		border-bottom: 0.5px solid var(--line);
+		background: var(--panel);
 	}
-	main header div {
-		display: grid;
+	.lock {
+		padding: 0.2rem 0.65rem;
+		border: 0.5px solid var(--line);
+		border-radius: 999px;
+		color: var(--dim);
+		font-size: 0.75rem;
+		white-space: nowrap;
 	}
 	.back {
 		display: none;
@@ -433,50 +581,89 @@
 		flex-direction: column;
 		gap: 0.5rem;
 		min-height: 0;
-		padding: 1rem;
+		padding: 1.25rem;
 		overflow-y: auto;
 	}
 	.bubble {
 		align-self: flex-start;
-		max-width: min(34rem, 85%);
-		padding: 0.5rem 0.75rem;
-		border-radius: 0.8rem;
-		background: var(--panel-2);
+		max-width: min(36rem, 85%);
+		padding: 0.55rem 0.8rem;
+		border: 0.5px solid var(--line);
+		border-radius: var(--radius-lg);
+		border-bottom-left-radius: 3px;
+		background: var(--panel);
 	}
 	.bubble.mine {
 		align-self: flex-end;
-		background: #17443f;
+		border-color: var(--line-strong);
+		border-radius: var(--radius-lg);
+		border-bottom-right-radius: 3px;
+		background: var(--mine);
 	}
 	.bubble.failed {
-		outline: 1px solid var(--danger);
+		border-color: var(--danger);
 	}
 	.bubble p {
-		margin: 0;
+		margin: 0 0 0.15rem;
+		color: var(--heading);
 		overflow-wrap: anywhere;
 		white-space: pre-wrap;
 	}
 	.composer {
 		display: flex;
-		gap: 0.5rem;
-		padding: 0.8rem 1rem;
-		border-top: 1px solid var(--line);
+		gap: 0.6rem;
+		padding: 0.9rem 1.25rem;
+		border-top: 0.5px solid var(--line);
+		background: var(--panel);
+	}
+	.composer button {
+		padding-inline: 1.4rem;
 	}
 	.center {
 		margin: auto;
 		padding: 1rem;
 		text-align: center;
 	}
+	.welcome {
+		display: grid;
+		justify-items: center;
+		gap: 0.4rem;
+		max-width: 30rem;
+		margin: auto;
+		padding: 2rem;
+		color: var(--muted);
+		text-align: center;
+	}
+	.welcome h1 {
+		margin: 0.8rem 0 0;
+		color: var(--heading);
+		font-size: 2.2rem;
+		letter-spacing: 0.1em;
+		line-height: 1;
+	}
+	.welcome .tagline {
+		margin: 0 0 0.8rem;
+		color: var(--accent-2);
+		font-weight: 600;
+	}
+	.welcome p {
+		margin: 0;
+	}
 
-	@media (max-width: 720px) {
-		.app {
+	@media (max-width: 760px) {
+		.shell {
 			grid-template-columns: 1fr;
 		}
-		.app.chat-open aside,
-		.app:not(.chat-open) main {
+		.shell.chat-open aside,
+		.shell:not(.chat-open) main {
 			display: none;
 		}
 		.back {
 			display: block;
+		}
+		.link,
+		.lock {
+			display: none;
 		}
 	}
 </style>
