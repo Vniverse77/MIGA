@@ -11,6 +11,7 @@ try {
 } catch {
 	// not a git checkout: keep "dev"
 }
-export const info = { version: pkg.version, commit, built: new Date().toISOString().slice(0, 16) + 'Z' };
+export const target = ['desktop', 'mobile'].includes(process.env.MIGA_TARGET ?? '') ? process.env.MIGA_TARGET : 'web';
+export const info = { target, version: pkg.version, commit, built: new Date().toISOString().slice(0, 16) + 'Z' };
 writeFileSync(new URL('./static/version.json', import.meta.url), JSON.stringify(info) + '\n');
 

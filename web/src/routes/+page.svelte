@@ -363,5 +363,19 @@
 		.link {
 			display: none;
 		}
+		.wrap {
+			padding: 0 1rem;
+		}
+		.bar {
+			gap: 0.5rem;
+		}
+		nav {
+			flex-wrap: nowrap;
+			gap: 0.5rem;
+			min-width: 0;
+		}
+		.btn.small {
+			padding: 0.4rem 0.7rem;
+		}
 	}
 </style>

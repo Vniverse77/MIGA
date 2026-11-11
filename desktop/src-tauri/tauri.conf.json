@@ -2,9 +2,9 @@
 	"$schema": "https://schema.tauri.app/config/2",
 	"productName": "MIGA",
 	"mainBinaryName": "miga",
-	"version": "0.2.1",
+	"version": "0.3.0",
 	"identifier": "com.vniverse77.miga",
-	"build": { "frontendDist": "../../web/build" },
+	"build": { "frontendDist": "../../web/build-desktop" },
 	"app": {
 		"windows": [
 			{ "title": "MIGA", "width": 1100, "height": 760, "minWidth": 380, "minHeight": 560, "url": "app/" }

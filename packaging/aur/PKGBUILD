@@ -2,7 +2,7 @@
 # Builds MIGA desktop from source. Not published yet: it needs a git tag v$pkgver on GitHub,
 # and the licence field must be filled in once the project licence is chosen.
 pkgname=miga
-pkgver=0.2.1
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="End-to-end encrypted messenger with no account"
 arch=('x86_64')
@@ -16,7 +16,7 @@ sha256sums=('SKIP')
 build() {
 	cd "$srcdir/$pkgname/web"
 	npm install --no-audit --no-fund
-	npm run build
+	npm run build:desktop
 	cd "$srcdir/$pkgname/desktop"
 	npm install --no-audit --no-fund
 	npx tauri build --no-bundle

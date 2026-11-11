@@ -1,6 +1,6 @@
 {
 	"name": "web",
-	"version": "0.2.1",
+	"version": "0.3.0",
 	"private": true,
 	"type": "module",
 	"imports": {
@@ -10,6 +10,8 @@
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
+		"build:desktop": "MIGA_TARGET=desktop vite build",
+		"build:mobile": "MIGA_TARGET=mobile vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",

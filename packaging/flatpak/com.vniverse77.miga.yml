@@ -4,7 +4,7 @@
 # Build:  flatpak-builder --user --install --force-clean build-dir packaging/flatpak/com.vniverse77.miga.yml
 app-id: com.vniverse77.miga
 runtime: org.gnome.Platform
-runtime-version: '48'
+runtime-version: '51'
 sdk: org.gnome.Sdk
 command: miga
 finish-args:
@@ -18,7 +18,7 @@ modules:
     buildsystem: simple
     sources:
       - type: file
-        path: ../../desktop/src-tauri/target/release/bundle/deb/MIGA_0.2.1_amd64.deb
+        path: ../../desktop/src-tauri/target/release/bundle/deb/MIGA_0.3.0_amd64.deb
         dest-filename: miga.deb
       - type: file
         path: ../linux/com.vniverse77.miga.desktop

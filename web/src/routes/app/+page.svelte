@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { platform } from '../../lib/platform';
 	import { VERSION_LABEL, VERSION_TITLE } from '../../lib/version';
 	import { onMount } from 'svelte';
 	import {
@@ -103,13 +104,7 @@
 	/** The name sent along with messages, or undefined when the user stays anonymous. */
 	const sharedName = $derived(profile.share && myName ? myName : undefined);
 
-	// A page served by a relay talks to that relay. The packaged desktop and mobile apps are not served
-	// by one (their pages come from inside the package), so they use the public relay.
-	const PUBLIC_RELAY = 'wss://miga.vniverse77.com/ws';
-	const relayUrl = () => {
-		const web = /^https?:$/.test(location.protocol) && location.hostname !== 'tauri.localhost';
-		return web ? (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws' : PUBLIC_RELAY;
-	};
+	const relayUrl = () => platform.relayUrl();
 
 	/**
 	 * A link like /app/#to=<address>&name=<label> opens a conversation with that address.
@@ -1362,9 +1357,40 @@
 		margin: 0;
 	}
 
+	/* Nothing may be wider than the screen: grid and flex children shrink instead of pushing the page out. */
+	.shell > :global(*),
+	.top > :global(*) {
+		min-width: 0;
+	}
 	@media (max-width: 760px) {
 		.shell {
-			grid-template-columns: 1fr;
+			grid-template-columns: minmax(0, 1fr);
+		}
+		.top {
+			gap: 0.5rem;
+			padding: 0 0.75rem;
+		}
+		nav {
+			gap: 0.5rem;
+		}
+		/* The dot carries the state; the word comes back on wider screens. */
+		.status {
+			font-size: 0;
+			gap: 0;
+			padding: 0.4rem;
+		}
+		/* Comfortable touch targets, and 16px inputs so phones do not zoom in on focus. */
+		.shell :global(button),
+		.shell :global(.btn) {
+			min-height: 2.75rem;
+		}
+		.shell :global(input),
+		.shell :global(textarea),
+		.shell :global(select) {
+			font-size: 16px;
+		}
+		.composer {
+			padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
 		}
 		.shell.chat-open aside,
 		.shell:not(.chat-open) main {

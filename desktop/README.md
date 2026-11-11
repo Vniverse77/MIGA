@@ -7,7 +7,7 @@ swap the app's code. No native command is exposed to the page.
 ## Build
 
 ```sh
-cd web && deno task build            # or: npm install && npm run build
+cd web && deno task build:desktop    # or: npm install && npm run build:desktop
 cd ../desktop && npm install
 npx tauri build --bundles deb        # binary + .deb in src-tauri/target/release/
 ```

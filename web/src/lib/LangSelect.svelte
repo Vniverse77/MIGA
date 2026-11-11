@@ -22,5 +22,12 @@
 		font: inherit;
 		font-size: 0.85rem;
 		cursor: pointer;
+		max-width: 100%;
+	}
+	@media (max-width: 760px) {
+		select {
+			max-width: 7rem;
+			padding: 0.35rem 0.3rem;
+		}
 	}
 </style>

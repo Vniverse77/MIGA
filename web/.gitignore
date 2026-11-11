@@ -24,3 +24,5 @@ vite.config.ts.timestamp-*
 
 # Written by vite.config.ts on every build
 /static/version.json
+/build-desktop
+/build-mobile
