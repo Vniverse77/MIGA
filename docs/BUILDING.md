@@ -26,7 +26,7 @@ Needs: Rust stable (`rustup default stable`), Node with npm, WebKitGTK 4.1 devel
 ```sh
 cd web && deno task build:desktop
 cd ../desktop && npm install
-npx tauri build --bundles deb     # binary: src-tauri/target/release/miga, package: .../bundle/deb/
+npx tauri build --bundles deb     # binary: src-tauri/target/release/miga-messenger, package: .../bundle/deb/
 ```
 
 The relay must list `tauri://localhost` in `MIGA_ORIGINS`, otherwise it answers 403 and the app shows "offline".
@@ -39,10 +39,10 @@ The relay must list `tauri://localhost` in `MIGA_ORIGINS`, otherwise it answers 
 cd packaging/aur && makepkg -si           # local test build and install
 namcap PKGBUILD *.pkg.tar.zst             # lint
 # publish (needs an AUR account with your SSH public key):
-git clone ssh://aur@aur.archlinux.org/miga.git aur-miga
+git clone ssh://aur@aur.archlinux.org/miga-messenger.git aur-miga
 cp PKGBUILD aur-miga/ && cd aur-miga
 makepkg --printsrcinfo > .SRCINFO
-git add PKGBUILD .SRCINFO && git commit -m "miga <version>" && git push
+git add PKGBUILD .SRCINFO && git commit -m "miga-messenger <version>" && git push
 ```
 Before publishing: the tag `v<version>` must exist on GitHub and `license=` must name the real licence.
 

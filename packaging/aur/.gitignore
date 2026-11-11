@@ -1,0 +1,7 @@
+# Local makepkg and AUR working files
+/aur-miga/
+/src/
+/pkg/
+/miga/
+*.pkg.tar.zst
+*.log
