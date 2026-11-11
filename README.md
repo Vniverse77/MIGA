@@ -63,3 +63,10 @@ Relay settings (environment variables):
 3. Censorship resistance: multiple relays, fallback domains, direct peer-to-peer links
    where the network allows, obfuscated transports in the native apps.
 4. Forward secrecy (ratchet), then voice calls.
+
+## License
+
+AGPL-3.0-or-later. See [LICENSE](LICENSE).
+
+In short: you may use, study, change and share MIGA. If you distribute a changed version, or run a
+changed relay as a service for others, you must publish your changes under the same licence.

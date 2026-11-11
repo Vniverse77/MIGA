@@ -19,6 +19,7 @@
 		"shortDescription": "End-to-end encrypted messenger with no account",
 		"longDescription": "MIGA (Make Internet Great Again) is an end-to-end encrypted text messenger. No phone number, no e-mail: your identity is a key that stays on your device.",
 		"homepage": "https://miga.vniverse77.com",
-		"publisher": "Vniverse77"
+		"publisher": "Vniverse77",
+		"license": "AGPL-3.0-or-later"
 	}
 }

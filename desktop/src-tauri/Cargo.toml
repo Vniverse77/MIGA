@@ -3,6 +3,7 @@ name = "miga"
 version = "0.3.0"
 description = "MIGA desktop: end-to-end encrypted messenger with no account"
 authors = ["Vniverse77"]
+license = "AGPL-3.0-or-later"
 edition = "2021"
 rust-version = "1.77"
 
