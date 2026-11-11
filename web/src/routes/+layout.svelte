@@ -2,17 +2,56 @@
 	// Self-hosted font: no request to a third-party font service.
 	import '@fontsource-variable/jetbrains-mono/wght.css';
 	import { onMount } from 'svelte';
-	import { initLanguage } from '../lib/i18n.svelte';
+	import { initLanguage, t } from '../lib/i18n.svelte';
+	import { newerBuildOnServer } from '../lib/version';
 	import type { LayoutProps } from './$types';
 
 	let { children }: LayoutProps = $props();
 
-	onMount(initLanguage);
+	// A cached copy keeps the app opening when the site cannot be reached; this tells the user when
+	// the server has a newer build than the one running.
+	let updateReady = $state(false);
+
+	onMount(() => {
+		initLanguage();
+		newerBuildOnServer().then((yes) => (updateReady = yes));
+	});
 </script>
 
 {@render children()}
 
+{#if updateReady}
+	<div class="update" role="status">
+		<span>{t('update_ready')}</span>
+		<button type="button" onclick={() => location.reload()}>{t('update_reload')}</button>
+	</div>
+{/if}
+
 <style>
+	.update {
+		position: fixed;
+		left: 50%;
+		bottom: 1rem;
+		transform: translateX(-50%);
+		z-index: 50;
+		display: flex;
+		align-items: center;
+		gap: 0.8rem;
+		padding: 0.5rem 0.6rem 0.5rem 0.9rem;
+		background: var(--panel-2);
+		border: 0.5px solid var(--line-strong);
+		border-radius: var(--radius-lg);
+		font-size: 0.85rem;
+		max-width: calc(100vw - 2rem);
+	}
+	.update button {
+		background: var(--accent);
+		color: var(--accent-ink);
+		border: 0;
+		border-radius: var(--radius);
+		padding: 0.3rem 0.8rem;
+		cursor: pointer;
+	}
 	/* Design tokens shared with vniverse77.com so the two sites read as one family. */
 	:global(:root) {
 		--bg: #070b14;
@@ -52,6 +91,8 @@
 	}
 	:global(*) {
 		box-sizing: border-box;
+		scrollbar-color: var(--line-strong) transparent;
+		scrollbar-width: thin;
 	}
 	:global(html, body) {
 		height: 100%;

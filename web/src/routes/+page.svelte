@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { VERSION_LABEL, VERSION_TITLE } from '../lib/version';
 	import logo from '#lib/assets/favicon.svg';
 	import LangSelect from '../lib/LangSelect.svelte';
 	import { t } from '../lib/i18n.svelte';
@@ -17,6 +18,7 @@
 		<a class="brand" href="/">
 			<img src={logo} alt="" width="30" height="30" />
 			<span>MIGA</span>
+			<span class="ver" title={VERSION_TITLE}>{VERSION_LABEL}</span>
 		</a>
 		<nav aria-label="Main">
 			<a class="link" href="https://vniverse77.com/">Vniverse77</a>
@@ -133,6 +135,15 @@
 		font-weight: 700;
 		letter-spacing: 0.14em;
 		text-decoration: none;
+	}
+	.ver {
+		font-size: 0.68rem;
+		font-weight: 500;
+		letter-spacing: 0.04em;
+		color: var(--muted);
+		border: 0.5px solid var(--line-strong);
+		border-radius: var(--radius);
+		padding: 0.05rem 0.4rem;
 	}
 	.brand img {
 		display: block;

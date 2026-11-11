@@ -22,7 +22,9 @@ Status: experimental. Not audited. Do not rely on it for safety-critical communi
 1. Both Ed25519 keys are converted to X25519 (Montgomery form).
 2. `shared = X25519(my_secret, peer_public)`
 3. `key = HKDF-SHA256(ikm = shared, salt = "miga-v0", info = sort(addrA, addrB) joined, 32 bytes)`
-4. Plaintext is JSON `{"v":0,"text":"...","ts":<unix ms>}`, padded with spaces to a multiple
+4. Plaintext is JSON `{"v":0,"text":"...","ts":<unix ms>}` with an optional `"name"` (the
+   sender's display name, at most 40 characters, sent only if the sender chose to share it;
+   the relay never sees it), padded with spaces to a multiple
    of 256 bytes (hides exact message length).
 5. `body = base64(nonce(24 random bytes) || XChaCha20-Poly1305(key, nonce, plaintext))`
 
@@ -55,6 +57,58 @@ Rules enforced by the relay:
 
 Clients must de-duplicate deliveries by `(from, id)`: a message is re-sent on every
 reconnect until it is acknowledged.
+
+## Linked devices
+
+One account can be used on several devices. The relay is not involved beyond forwarding
+opaque bodies: it keeps no account, no device list and no code.
+
+**Keys.** All devices of an account hold the same account key. Each device also has its own
+*device key* (Ed25519, made on that device, never shared). A device keeps two connections
+to the relay: one as the account address, one as its device address.
+
+**Linking with a code.** The device that already has the account shows a one-time code:
+12 characters of Crockford base32 (60 bits).
+
+1. `out = scrypt(code, salt = "miga-link-v0", N = 2^15, r = 8, p = 1, 64 bytes)`.
+   `out[0..32]` is the secret of a throwaway *mailbox* key, `out[32..64]` the bundle key.
+2. The old device sends one message to the mailbox address. Its body is
+   `base64(nonce || XChaCha20-Poly1305(bundle key, nonce, bundle))`, where the bundle is JSON
+   `{"k":"link","secret":<account secret hex>,"sponsor":<device address>,"exp":<unix ms>,
+   "profile":{...},"devices":[...]}`.
+3. The new device derives the same two keys from the typed code, connects as the mailbox
+   address, receives the bundle, rejects it if `exp` has passed, and acknowledges it (the
+   relay then deletes it).
+4. The new device makes its own device key and sends `hello` (below) to every device in the
+   bundle. The sponsor answers with the profile, contacts, device list and recent history.
+
+A code is valid for 10 minutes. When it is used, cancelled or expires, the old device
+connects as the mailbox and acknowledges whatever is there, so no copy of the bundle is
+left. If the tab was closed first, this happens the next time the app is opened on that
+device; until then the sealed bundle can stay on the relay for up to the normal 30 days.
+
+**Sync between devices.** Messages between device addresses have the body
+`base64(nonce || XChaCha20-Poly1305(sync key, nonce, JSON, aad = from || to))` with
+`sync key = HKDF-SHA256(ikm = account secret, salt = "miga-v0", info = "sync", 32 bytes)`.
+Only holders of the account key can make or read them, which is also how a device proves it
+belongs to the account. JSON kinds:
+
+| `k` | Meaning |
+|---|---|
+| `hello` | A new device announces itself: `label`, `sponsor`. |
+| `state` | Any of `profile`, `contacts`, `devices` to merge. |
+| `history` | `chats`: a piece of recent message history. |
+| `msg` | A copy of one message just sent or received: `peer`, `message`, optional `name`. |
+| `bye` | `address` of a device that left or was removed. The named device erases itself. |
+
+The relay pushes a message for the account address to every device online at that moment and
+deletes it on the first acknowledgement; the receiving device forwards a `msg` copy so
+devices that were offline get it too. Clients de-duplicate by message id.
+
+**Limits to know.** Removing a device is cooperative: it erases itself the next time it
+connects, but it did hold the account key. If a device is lost, the only real fix is a new
+address. The relay can see that the account address and its device addresses connect from
+the same IP and exchange messages, so it can tell which devices belong together.
 
 ## What the relay can see
 

@@ -12,7 +12,7 @@ import { sha256 } from '@noble/hashes/sha2';
 import { bytesToHex, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils';
 
 export type Identity = { secret: Uint8Array; address: string };
-export type Plain = { text: string; ts: number };
+export type Plain = { text: string; ts: number; name?: string };
 
 const PAD = 256;
 const NONCE = 24;
@@ -60,8 +60,11 @@ function sharedKey(id: Identity, peer: string): Uint8Array {
 	return key;
 }
 
-export function encrypt(id: Identity, peer: string, text: string): string {
-	const json = utf8ToBytes(JSON.stringify({ v: 0, text, ts: Date.now() }));
+/** `name` is the sender's optional display name. It travels inside the ciphertext only. */
+export function encrypt(id: Identity, peer: string, text: string, name?: string): string {
+	const json = utf8ToBytes(
+		JSON.stringify({ v: 0, text, ts: Date.now(), ...(name ? { name } : {}) })
+	);
 	const padded = new Uint8Array(Math.ceil(json.length / PAD) * PAD).fill(0x20);
 	padded.set(json);
 	const nonce = randomBytes(NONCE);
@@ -81,7 +84,11 @@ export function decrypt(id: Identity, peer: string, body: string): Plain | null 
 		);
 		const parsed = JSON.parse(new TextDecoder().decode(opened));
 		if (parsed?.v !== 0 || typeof parsed.text !== 'string') return null;
-		return { text: parsed.text, ts: Number(parsed.ts) || Date.now() };
+		return {
+			text: parsed.text,
+			ts: Number(parsed.ts) || Date.now(),
+			name: typeof parsed.name === 'string' ? parsed.name : undefined
+		};
 	} catch {
 		return null;
 	}
@@ -93,12 +100,12 @@ export function randomId(): string {
 
 export { bytesToHex, hexToBytes };
 
-function toBase64(bytes: Uint8Array): string {
+export function toBase64(bytes: Uint8Array): string {
 	let binary = '';
 	for (const b of bytes) binary += String.fromCharCode(b);
 	return btoa(binary);
 }
 
-function fromBase64(text: string): Uint8Array {
+export function fromBase64(text: string): Uint8Array {
 	return Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
 }

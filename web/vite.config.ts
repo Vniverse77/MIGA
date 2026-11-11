@@ -1,8 +1,10 @@
 import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import { info } from './build-info.js';
 
 export default defineConfig({
+	define: { __MIGA_BUILD__: JSON.stringify(info) },
 	plugins: [
 		sveltekit({
 			compilerOptions: {
