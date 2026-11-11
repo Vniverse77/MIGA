@@ -1,0 +1,33 @@
+# DRAFT, not built or tested yet (flatpak-builder was not installed when this was written).
+# Local packaging from the .deb that `npx tauri build --bundles deb` produces. Flathub itself
+# requires a build from source with vendored dependencies; that is a later step.
+# Build:  flatpak-builder --user --install --force-clean build-dir packaging/flatpak/com.vniverse77.miga.yml
+app-id: com.vniverse77.miga
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+command: miga
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --share=network
+  - --device=dri
+modules:
+  - name: miga
+    buildsystem: simple
+    sources:
+      - type: file
+        path: ../../desktop/src-tauri/target/release/bundle/deb/MIGA_0.2.1_amd64.deb
+        dest-filename: miga.deb
+      - type: file
+        path: ../linux/com.vniverse77.miga.desktop
+      - type: file
+        path: ../../desktop/src-tauri/icons/128x128.png
+        dest-filename: icon-128.png
+    build-commands:
+      - ar x miga.deb
+      - tar -xf data.tar.gz
+      - install -Dm755 usr/bin/miga /app/bin/miga
+      - install -Dm644 com.vniverse77.miga.desktop /app/share/applications/com.vniverse77.miga.desktop
+      - install -Dm644 icon-128.png /app/share/icons/hicolor/128x128/apps/com.vniverse77.miga.png

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=MIGA
+GenericName=Encrypted messenger
+Comment=End-to-end encrypted messenger with no account
+Exec=miga
+Icon=com.vniverse77.miga
+Terminal=false
+Categories=Network;InstantMessaging;
+StartupWMClass=miga

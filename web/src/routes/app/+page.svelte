@@ -103,7 +103,34 @@
 	/** The name sent along with messages, or undefined when the user stays anonymous. */
 	const sharedName = $derived(profile.share && myName ? myName : undefined);
 
-	const relayUrl = () => (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+	// A page served by a relay talks to that relay. The packaged desktop and mobile apps are not served
+	// by one (their pages come from inside the package), so they use the public relay.
+	const PUBLIC_RELAY = 'wss://miga.vniverse77.com/ws';
+	const relayUrl = () => {
+		const web = /^https?:$/.test(location.protocol) && location.hostname !== 'tauri.localhost';
+		return web ? (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws' : PUBLIC_RELAY;
+	};
+
+	/**
+	 * A link like /app/#to=<address>&name=<label> opens a conversation with that address.
+	 * The part after # stays in the browser: neither the relay nor a proxy in between sees
+	 * whom the visitor wants to reach.
+	 */
+	let invite: { address: string; name: string } | null = null;
+	function readInvite(): void {
+		const params = new URLSearchParams(location.hash.slice(1));
+		const address = (params.get('to') ?? '').trim().toLowerCase();
+		if (!isAddress(address)) return;
+		invite = { address, name: (params.get('name') ?? '').trim().slice(0, 40) };
+		history.replaceState(null, '', location.pathname + location.search);
+	}
+	function applyInvite(): void {
+		if (!invite || !identity) return;
+		newAddress = invite.address;
+		newName = invite.name;
+		invite = null;
+		addContact();
+	}
 	const quiet: RelayEvents = {
 		onStatus() {},
 		onReady() {},
@@ -117,6 +144,7 @@
 		chats = loadChats();
 		profile = loadProfile();
 		deviceLabel = guessDeviceLabel();
+		readInvite();
 		const me = loadIdentity();
 		if (me) start(me);
 		ready = true;
@@ -172,6 +200,7 @@
 		deviceRelay = new RelayClient(relayUrl(), device, { ...quiet, onMessage: onSyncMessage });
 		deviceRelay.connect();
 		outboxTimer = setInterval(pumpOutbox, OUTBOX_MS);
+		applyInvite();
 
 		// A code left open by an earlier visit can no longer be shown; delete its bundle now.
 		const leftover = loadOpenLink();
@@ -494,8 +523,8 @@
 		relay?.send(active, id, encrypt(identity, active, text, sharedName));
 	}
 
-	function addContact(event: SubmitEvent): void {
-		event.preventDefault();
+	function addContact(event?: SubmitEvent): void {
+		event?.preventDefault();
 		const address = newAddress.trim().toLowerCase();
 		if (!isAddress(address)) {
 			notice = t('n_bad_address');

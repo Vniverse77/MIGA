@@ -1,0 +1,32 @@
+# Maintainer: Vniverse77
+# Builds MIGA desktop from source. Not published yet: it needs a git tag v$pkgver on GitHub,
+# and the licence field must be filled in once the project licence is chosen.
+pkgname=miga
+pkgver=0.2.1
+pkgrel=1
+pkgdesc="End-to-end encrypted messenger with no account"
+arch=('x86_64')
+url="https://miga.vniverse77.com"
+license=('LicenseRef-undecided')
+depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3')
+makedepends=('cargo' 'nodejs' 'npm' 'git')
+source=("$pkgname::git+https://github.com/Vniverse77/MIGA.git#tag=v$pkgver")
+sha256sums=('SKIP')
+
+build() {
+	cd "$srcdir/$pkgname/web"
+	npm install --no-audit --no-fund
+	npm run build
+	cd "$srcdir/$pkgname/desktop"
+	npm install --no-audit --no-fund
+	npx tauri build --no-bundle
+}
+
+package() {
+	cd "$srcdir/$pkgname"
+	install -Dm755 desktop/src-tauri/target/release/miga "$pkgdir/usr/bin/miga"
+	install -Dm644 packaging/linux/com.vniverse77.miga.desktop "$pkgdir/usr/share/applications/com.vniverse77.miga.desktop"
+	install -Dm644 desktop/src-tauri/icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/com.vniverse77.miga.png"
+	install -Dm644 desktop/src-tauri/icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/com.vniverse77.miga.png"
+	install -Dm644 desktop/src-tauri/icons/32x32.png "$pkgdir/usr/share/icons/hicolor/32x32/apps/com.vniverse77.miga.png"
+}
