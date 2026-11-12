@@ -12,6 +12,8 @@ export interface Platform {
 	openExternal(url: string): void;
 	/** True when the app's files come from inside a package, not from a server. */
 	readonly packaged: boolean;
+	/** Called once when the app mounts: lets a packaged build drop page behaviours (menus, zoom, drag). */
+	setupWindow(): void;
 }
 
 /** The public relay, used by builds that are not served by a relay themselves. */

@@ -7,5 +7,6 @@ export const platform: Platform = {
 	label: '',
 	packaged: false,
 	relayUrl: () => (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws',
-	openExternal: (url) => void window.open(url, '_blank', 'noopener,noreferrer')
+	openExternal: (url) => void window.open(url, '_blank', 'noopener,noreferrer'),
+	setupWindow: () => {}
 };

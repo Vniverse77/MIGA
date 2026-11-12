@@ -8,5 +8,6 @@ export const platform: Platform = {
 	label: 'mobile',
 	packaged: true,
 	relayUrl: () => PUBLIC_RELAY,
-	openExternal: (url) => void window.open(url, '_blank', 'noopener,noreferrer')
+	openExternal: (url) => void window.open(url, '_blank', 'noopener,noreferrer'),
+	setupWindow: () => {}
 };

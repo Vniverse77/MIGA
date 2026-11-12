@@ -44,7 +44,7 @@ const en = {
 	ph_address: 'Their MIGA address',
 	ph_name: 'Name (only you see it)',
 	start_chat: 'Start chat',
-	no_conversations: 'No conversations yet. Share your address with someone to begin.',
+	no_conversations: 'No conversations yet. Start a new conversation. Your address is in Settings.',
 	back: 'Back',
 	no_messages: 'No messages yet. Messages are encrypted before they leave this device.',
 	ph_message: 'Write a message',
@@ -95,6 +95,7 @@ const en = {
 	link_go: "Link",
 	link_wait: "Looking for your other device…",
 	link_fail: "No device answered this code. Check it, or make a new code.",
+	link_no_relay: "No connection to the relay, linking needs it. Check your connection and try again.",
 	name_contact: 'Contact',
 	n_relay_rejected: 'The relay rejected a message: {code}',
 	n_too_long: 'That message is too long (limit: {max} characters).',
@@ -107,7 +108,16 @@ const en = {
 	n_key_copy_failed: 'Could not copy the key.',
 	q_restore_prompt: 'Paste the secret key to restore (64 characters):',
 	n_bad_key: 'That is not a valid secret key.',
-	q_restore_confirm: 'This replaces the identity stored in this browser. Continue?'
+	q_restore_confirm: 'This replaces the identity stored in this browser. Continue?',
+	delete_chat: 'Delete conversation',
+	q_delete_chat: 'Delete the conversation with {name}? Messages are removed from this device only. {name} keeps their copy.',
+	chat_menu: 'Conversation options',
+	confirm_title: 'Are you sure?',
+	chats: 'Conversations',
+	set_about: 'About',
+	about_text: 'Encrypted messenger for restricted networks. Free software under AGPL-3.0.',
+	about_forum: 'Forum',
+	ph_key: 'Secret key'
 };
 
 export type MessageKey = keyof typeof en;
@@ -155,7 +165,7 @@ const tr: Dictionary = {
 	ph_address: 'Karşı tarafın MIGA adresi',
 	ph_name: 'İsim (yalnızca siz görürsünüz)',
 	start_chat: 'Sohbeti başlat',
-	no_conversations: 'Henüz sohbet yok. Başlamak için adresinizi biriyle paylaşın.',
+	no_conversations: 'Henüz sohbet yok. Yeni bir sohbet başlatın. Adresiniz Ayarlar bölümünde.',
 	back: 'Geri',
 	no_messages: 'Henüz mesaj yok. Mesajlar bu cihazdan çıkmadan önce şifrelenir.',
 	ph_message: 'Mesaj yazın',
@@ -206,6 +216,7 @@ const tr: Dictionary = {
 	link_go: "Bağla",
 	link_wait: "Diğer cihazınız aranıyor…",
 	link_fail: "Bu koda hiçbir cihaz yanıt vermedi. Kodu kontrol edin ya da yeni kod alın.",
+	link_no_relay: "Aktarıcı ile bağlantı yok, cihaz bağlamak için aktarıcı gerekir. Bağlantınızı kontrol edip tekrar deneyin.",
 	name_contact: 'Kişi',
 	n_relay_rejected: 'Aktarıcı bir mesajı reddetti: {code}',
 	n_too_long: 'Bu mesaj çok uzun (sınır: {max} karakter).',
@@ -218,7 +229,16 @@ const tr: Dictionary = {
 	n_key_copy_failed: 'Anahtar kopyalanamadı.',
 	q_restore_prompt: 'Geri yüklenecek gizli anahtarı yapıştırın (64 karakter):',
 	n_bad_key: 'Bu geçerli bir gizli anahtar değil.',
-	q_restore_confirm: 'Bu işlem, bu tarayıcıda kayıtlı kimliğin yerine geçer. Devam edilsin mi?'
+	q_restore_confirm: 'Bu işlem, bu tarayıcıda kayıtlı kimliğin yerine geçer. Devam edilsin mi?',
+	delete_chat: 'Sohbeti sil',
+	q_delete_chat: '{name} ile olan sohbet silinsin mi? Mesajlar yalnızca bu cihazdan silinir. {name} kendi kopyasını saklar.',
+	chat_menu: 'Sohbet seçenekleri',
+	confirm_title: 'Emin misiniz?',
+	chats: 'Sohbetler',
+	set_about: 'Hakkında',
+	about_text: 'Kısıtlı ağlar için şifreli mesajlaşma uygulaması. AGPL-3.0 ile özgür yazılım.',
+	about_forum: 'Forum',
+	ph_key: 'Gizli anahtar'
 };
 
 // Turkmen: first draft, to be reviewed by a native speaker.
@@ -265,7 +285,7 @@ const tk: Dictionary = {
 	ph_address: 'Garşy tarapyň MIGA salgysy',
 	ph_name: 'Ady (diňe siz görýärsiňiz)',
 	start_chat: 'Söhbedi başla',
-	no_conversations: 'Entek söhbetdeşlik ýok. Başlamak üçin salgyňyzy biri bilen paýlaşyň.',
+	no_conversations: 'Entek söhbetdeşlik ýok. Täze söhbetdeşlik başladyň. Salgyňyz Sazlamalarda.',
 	back: 'Yza',
 	no_messages: 'Entek hat ýok. Hatlar bu enjamdan çykmazdan öň şifrlenýär.',
 	ph_message: 'Hat ýazyň',
@@ -316,6 +336,7 @@ const tk: Dictionary = {
 	link_go: "Birikdir",
 	link_wait: "Beýleki enjamyňyz gözlenýär…",
 	link_fail: "Bu koda hiç bir enjam jogap bermedi. Kody barlaň ýa-da täze kod alyň.",
+	link_no_relay: "Relaý bilen birikme ýok, enjamy baglamak üçin relaý gerek. Birikmäni barlap, gaýtadan synanyşyň.",
 	name_contact: 'Kontakt',
 	n_relay_rejected: 'Relaý haty ret etdi: {code}',
 	n_too_long: 'Bu hat gaty uzyn (çäk: {max} nyşan).',
@@ -328,7 +349,16 @@ const tk: Dictionary = {
 	n_key_copy_failed: 'Açary göçürip bolmady.',
 	q_restore_prompt: 'Dikeltmek üçin gizlin açary goýuň (64 nyşan):',
 	n_bad_key: 'Bu dogry gizlin açar däl.',
-	q_restore_confirm: 'Bu amal şu brauzerde saklanan şahsyýeti çalyşýar. Dowam etmelimi?'
+	q_restore_confirm: 'Bu amal şu brauzerde saklanan şahsyýeti çalyşýar. Dowam etmelimi?',
+	delete_chat: 'Söhbetdeşligi poz',
+	q_delete_chat: '{name} bilen söhbetdeşligi pozmalymy? Hatlar diňe şu enjamdan pozulýar. {name} öz nusgasyny saklaýar.',
+	chat_menu: 'Söhbetdeşlik sazlamalary',
+	confirm_title: 'Anyk bilýärsiňizmi?',
+	chats: 'Söhbetdeşlikler',
+	set_about: 'Barada',
+	about_text: 'Çäklendirilen ulgamlar üçin şifrlenen habarlaşyk programmasy. AGPL-3.0 boýunça erkin programma.',
+	about_forum: 'Forum',
+	ph_key: 'Gizlin açar'
 };
 
 const ru: Dictionary = {
@@ -374,7 +404,7 @@ const ru: Dictionary = {
 	ph_address: 'MIGA-адрес собеседника',
 	ph_name: 'Имя (видно только вам)',
 	start_chat: 'Начать чат',
-	no_conversations: 'Разговоров пока нет. Поделитесь своим адресом, чтобы начать.',
+	no_conversations: 'Разговоров пока нет. Начните новый разговор. Ваш адрес в Настройках.',
 	back: 'Назад',
 	no_messages: 'Сообщений пока нет. Сообщения шифруются до того, как покинут это устройство.',
 	ph_message: 'Напишите сообщение',
@@ -425,6 +455,7 @@ const ru: Dictionary = {
 	link_go: "Привязать",
 	link_wait: "Ищем ваше другое устройство…",
 	link_fail: "На этот код не ответило ни одно устройство. Проверьте код или создайте новый.",
+	link_no_relay: "Нет соединения с ретранслятором, для привязки он нужен. Проверьте подключение и попробуйте снова.",
 	name_contact: 'Контакт',
 	n_relay_rejected: 'Ретранслятор отклонил сообщение: {code}',
 	n_too_long: 'Сообщение слишком длинное (предел: {max} символов).',
@@ -437,7 +468,16 @@ const ru: Dictionary = {
 	n_key_copy_failed: 'Не удалось скопировать ключ.',
 	q_restore_prompt: 'Вставьте секретный ключ для восстановления (64 символа):',
 	n_bad_key: 'Это не действительный секретный ключ.',
-	q_restore_confirm: 'Это заменит личность, сохранённую в этом браузере. Продолжить?'
+	q_restore_confirm: 'Это заменит личность, сохранённую в этом браузере. Продолжить?',
+	delete_chat: 'Удалить разговор',
+	q_delete_chat: 'Удалить разговор с {name}? Сообщения удаляются только с этого устройства. У {name} копия остаётся.',
+	chat_menu: 'Параметры разговора',
+	confirm_title: 'Вы уверены?',
+	chats: 'Разговоры',
+	set_about: 'О программе',
+	about_text: 'Зашифрованный мессенджер для ограниченных сетей. Свободное ПО под AGPL-3.0.',
+	about_forum: 'Форум',
+	ph_key: 'Секретный ключ'
 };
 
 const dictionaries = { en, tk, tr, ru } satisfies Record<string, Dictionary>;
@@ -489,7 +529,7 @@ export function setLanguage(lang: Lang): void {
 export function t(key: MessageKey, vars?: Record<string, string | number>): string {
 	let text: string = dictionaries[current][key];
 	if (vars) {
-		for (const [name, value] of Object.entries(vars)) text = text.replace(`{${name}}`, String(value));
+		for (const [name, value] of Object.entries(vars)) text = text.replaceAll(`{${name}}`, String(value));
 	}
 	return text;
 }

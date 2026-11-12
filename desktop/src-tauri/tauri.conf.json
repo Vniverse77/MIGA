@@ -2,19 +2,19 @@
 	"$schema": "https://schema.tauri.app/config/2",
 	"productName": "MIGA",
 	"mainBinaryName": "miga-messenger",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"identifier": "com.vniverse77.miga",
 	"build": { "frontendDist": "../../web/build-desktop" },
 	"app": {
 		"windows": [
-			{ "title": "MIGA", "width": 1100, "height": 760, "minWidth": 380, "minHeight": 560, "url": "app/" }
+			{ "title": "MIGA", "width": 1100, "height": 720, "minWidth": 800, "minHeight": 560, "center": true, "url": "index.html" }
 		],
 		"security": { "csp": null }
 	},
 	"bundle": {
 		"active": true,
 		"targets": ["deb"],
-		"icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png"],
+		"icon": ["icons/32x32.png", "icons/48x48.png", "icons/64x64.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png", "icons/icon.ico", "icons/icon.icns"],
 		"category": "SocialNetworking",
 		"shortDescription": "End-to-end encrypted messenger with no account",
 		"longDescription": "MIGA (Make Internet Great Again) is an end-to-end encrypted text messenger. No phone number, no e-mail: your identity is a key that stays on your device.",

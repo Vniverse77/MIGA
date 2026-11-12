@@ -3,6 +3,7 @@
 	import '@fontsource-variable/jetbrains-mono/wght.css';
 	import { onMount } from 'svelte';
 	import { initLanguage, t } from '../lib/i18n.svelte';
+	import { platform } from '../lib/platform';
 	import { newerBuildOnServer } from '../lib/version';
 	import type { LayoutProps } from './$types';
 
@@ -13,6 +14,7 @@
 	let updateReady = $state(false);
 
 	onMount(() => {
+		platform.setupWindow();
 		initLanguage();
 		newerBuildOnServer().then((yes) => (updateReady = yes));
 	});
@@ -117,6 +119,24 @@
 	:global(button, input, textarea) {
 		font: inherit;
 		color: inherit;
+	}
+	/* Desktop window: behaves like an app, not a page. Text that people copy opts back in. */
+	:global(html.desktop, html.desktop body) {
+		overflow: hidden;
+		height: 100%;
+		user-select: none;
+		-webkit-user-select: none;
+		cursor: default;
+	}
+	:global(html.desktop img) {
+		-webkit-user-drag: none;
+		user-select: none;
+		pointer-events: none;
+	}
+	:global(html.desktop input, html.desktop textarea, html.desktop code, html.desktop .selectable, html.desktop .selectable *) {
+		user-select: text;
+		-webkit-user-select: text;
+		cursor: text;
 	}
 	:global(:focus-visible) {
 		outline: 2px solid var(--accent-2);

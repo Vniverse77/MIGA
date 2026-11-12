@@ -7,6 +7,7 @@ import { sha256 } from '@noble/hashes/sha2';
 import { randomBytes, utf8ToBytes } from '@noble/hashes/utils';
 import { fromBase64, identityFromSecret, isAddress, toBase64, type Identity } from './crypto';
 import type { Chats, Contact, Device, Message, Profile } from './storage';
+import { platform } from './platform';
 
 /** How long a link code stays valid. */
 export const LINK_TTL_MS = 10 * 60_000;
@@ -205,6 +206,10 @@ export function guessDeviceLabel(): string {
 					: /Linux/.test(ua)
 						? 'Linux'
 						: 'Device';
+	// The packaged apps embed a system web view that reports a browser name (WebKitGTK says Safari),
+	// so the build target decides, not the user agent.
+	if (platform.target === 'desktop') return `${os} · MIGA Desktop`;
+	if (platform.target === 'mobile') return `${os} · MIGA Mobile`;
 	const browser = /Firefox\//.test(ua)
 		? 'Firefox'
 		: /Edg\//.test(ua)
