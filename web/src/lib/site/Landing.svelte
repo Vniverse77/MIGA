@@ -3,6 +3,18 @@
 	import logo from '#lib/assets/favicon.svg';
 	import LangSelect from '../LangSelect.svelte';
 	import { t } from '../i18n.svelte';
+
+	const YAY = 'yay -S miga-messenger';
+	let copied = $state(false);
+	async function copyYay() {
+		try {
+			await navigator.clipboard.writeText(YAY);
+			copied = true;
+			setTimeout(() => (copied = false), 1800);
+		} catch {
+			/* clipboard blocked: the command stays selectable */
+		}
+	}
 </script>
 
 <svelte:head>
@@ -21,6 +33,7 @@
 			<span class="ver" title={VERSION_TITLE}>{VERSION_LABEL}</span>
 		</a>
 		<nav aria-label="Main">
+			<a class="link" href="#downloads">{t('nav_downloads')}</a>
 			<a class="link" href="https://vniverse77.com/">Vniverse77</a>
 			<a class="link" href="https://forum.vniverse77.com/">Forum</a>
 			<a class="link" href="https://github.com/Vniverse77/MIGA">{t('nav_source')}</a>
@@ -71,6 +84,42 @@
 			<article class="card">
 				<h3>{t('f3_title')}</h3>
 				<p>{t('f3_text')}</p>
+			</article>
+		</div>
+	</section>
+
+	<section class="wrap" id="downloads">
+		<h2>{t('dl_title')} <span class="ver">{VERSION_LABEL}</span></h2>
+		<p class="section-lead">{t('dl_lead')}</p>
+		<div class="grid">
+			<article class="card dl">
+				<h3>{t('dl_web_title')}</h3>
+				<p>{t('dl_web_text')}</p>
+				<div class="dl-actions">
+					<a class="btn primary" href="/app/">{t('dl_web_btn')}</a>
+				</div>
+			</article>
+			<article class="card dl">
+				<h3>{t('dl_desktop_title')}</h3>
+				<p>{t('dl_arch')}</p>
+				<div class="cmd">
+					<code>{YAY}</code>
+					<button type="button" class="copy" onclick={copyYay}>
+						{copied ? t('dl_copied') : t('dl_copy')}
+					</button>
+				</div>
+				<a class="txt" href="https://aur.archlinux.org/packages/miga-messenger">{t('dl_aur_link')} →</a>
+				<p class="gap">{t('dl_deb')}</p>
+				<a class="txt" href="https://github.com/Vniverse77/MIGA/releases/latest">{t('dl_deb_link')} →</a>
+				<p class="note">{t('dl_desktop_note')}</p>
+			</article>
+			<article class="card dl disabled" aria-disabled="true">
+				<h3>{t('dl_android_title')}</h3>
+				<p>{t('dl_android_text')}</p>
+				<div class="dl-actions">
+					<span class="btn off">{t('dl_soon')}</span>
+				</div>
+				<p class="note">{t('dl_android_note')}</p>
 			</article>
 		</div>
 	</section>
@@ -321,6 +370,90 @@
 		color: var(--accent-2);
 	}
 
+	/* Downloads */
+	#downloads {
+		scroll-margin-top: 3.5rem;
+	}
+	h2 .ver {
+		vertical-align: middle;
+		font-size: 0.75rem;
+		font-weight: 500;
+	}
+	.dl {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		min-width: 0;
+	}
+	.dl .gap {
+		margin-top: 1.1rem;
+	}
+	.dl .note {
+		margin-top: auto;
+		padding-top: 1rem;
+		font-size: 0.8rem;
+	}
+	.dl-actions {
+		margin: 1rem 0 0;
+	}
+	.cmd {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		width: 100%;
+		margin: 0.6rem 0 0.4rem;
+		padding: 0 0 0 0.75rem;
+		border: 0.5px solid var(--line-strong);
+		border-radius: var(--radius);
+		background: var(--bg);
+	}
+	.cmd code {
+		flex: 1;
+		min-width: 0;
+		overflow-x: auto;
+		white-space: nowrap;
+		color: var(--text);
+		font-size: 0.85rem;
+	}
+	.copy {
+		min-width: 5.5rem;
+		min-height: 2.75rem;
+		padding: 0 0.8rem;
+		border: 0;
+		border-left: 0.5px solid var(--line-strong);
+		border-radius: 0 var(--radius) var(--radius) 0;
+		background: transparent;
+		color: var(--accent-2);
+		font: inherit;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+	.copy:hover {
+		background: var(--accent);
+		color: var(--accent-ink);
+	}
+	.txt {
+		display: inline-flex;
+		align-items: center;
+		min-height: 2.75rem;
+		color: var(--accent-2);
+		font-size: 0.9rem;
+		text-decoration: none;
+	}
+	.txt:hover {
+		text-decoration: underline;
+	}
+	.btn.off {
+		border-color: var(--line-strong);
+		background: transparent;
+		color: var(--muted);
+		cursor: not-allowed;
+		min-height: 2.75rem;
+	}
+	.dl.disabled {
+		opacity: 0.8;
+	}
+
 	/* Footer */
 	footer {
 		margin-top: 5rem;
@@ -376,6 +509,32 @@
 		}
 		.btn.small {
 			padding: 0.4rem 0.7rem;
+		}
+	}
+
+	/* Phones: the bar must never be wider than the screen, in any language. */
+	@media (max-width: 520px) {
+		.brand {
+			flex: 0 0 auto;
+		}
+		.brand span:not(.ver) {
+			display: none;
+		}
+		.brand .ver {
+			display: none;
+		}
+		nav > :global(*) {
+			min-width: 0;
+		}
+		.btn.small {
+			flex: 0 1 auto;
+			min-width: 0;
+			min-height: 2.75rem;
+			padding: 0.3rem 0.6rem;
+			font-size: 0.8rem;
+			line-height: 1.15;
+			text-align: center;
+			white-space: normal;
 		}
 	}
 </style>
