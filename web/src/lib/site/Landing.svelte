@@ -5,12 +5,16 @@
 	import { t } from '../i18n.svelte';
 
 	const YAY = 'yay -S miga-messenger';
-	let copied = $state(false);
-	async function copyYay() {
+	// Bundle file of the current release; update the version with every release.
+	const FLATPAK_FILE = 'MIGA_0.5.0_x86_64.flatpak';
+	const FLATPAK_URL = `https://github.com/Vniverse77/MIGA/releases/download/v0.5.0/${FLATPAK_FILE}`;
+	const FLATPAK_CMD = `flatpak install --user ./${FLATPAK_FILE}`;
+	let copied = $state('');
+	async function copy(text: string) {
 		try {
-			await navigator.clipboard.writeText(YAY);
-			copied = true;
-			setTimeout(() => (copied = false), 1800);
+			await navigator.clipboard.writeText(text);
+			copied = text;
+			setTimeout(() => (copied = ''), 1800);
 		} catch {
 			/* clipboard blocked: the command stays selectable */
 		}
@@ -104,11 +108,20 @@
 				<p>{t('dl_arch')}</p>
 				<div class="cmd">
 					<code>{YAY}</code>
-					<button type="button" class="copy" onclick={copyYay}>
-						{copied ? t('dl_copied') : t('dl_copy')}
+					<button type="button" class="copy" onclick={() => copy(YAY)}>
+						{copied === YAY ? t('dl_copied') : t('dl_copy')}
 					</button>
 				</div>
 				<a class="txt" href="https://aur.archlinux.org/packages/miga-messenger">{t('dl_aur_link')} →</a>
+				<p class="gap">{t('dl_flatpak')}</p>
+				<a class="txt" href={FLATPAK_URL}>{t('dl_flatpak_link')} →</a>
+				<p class="note">{t('dl_flatpak_then')}</p>
+				<div class="cmd">
+					<code>{FLATPAK_CMD}</code>
+					<button type="button" class="copy" onclick={() => copy(FLATPAK_CMD)}>
+						{copied === FLATPAK_CMD ? t('dl_copied') : t('dl_copy')}
+					</button>
+				</div>
 				<p class="gap">{t('dl_deb')}</p>
 				<a class="txt" href="https://github.com/Vniverse77/MIGA/releases/latest">{t('dl_deb_link')} →</a>
 				<p class="note">{t('dl_desktop_note')}</p>
