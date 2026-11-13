@@ -102,6 +102,23 @@ to the relay: one as the account address, one as its device address.
 4. The new device makes its own device key and sends `hello` (below) to every device in the
    bundle. The sponsor answers with the profile, contacts, device list and recent history.
 
+**QR code.** The old device also shows the code as a QR code containing
+`<web origin>/app/#link=<code>` (packaged desktop and mobile builds use
+`https://miga.vniverse77.com`). The QR code is only a carrier for the same code: nothing in the
+protocol or its security changes. The part after `#` is never sent to a server. A phone's camera
+app can open the link, or the in-app scanner reads it. A device that has no account opens
+"Link this device" with the code filled in and waits for one tap on "Link" (it does not start by
+itself, so a link received from someone else cannot silently move a new device into that
+person's account). A device that already has an account ignores the link, shows a notice and
+removes the fragment from the address bar. As with the typed code, whoever sees the QR code
+within its 10 minutes can link a device, so the app warns: scan it only on your own device and
+do not share a screenshot.
+
+**Contact QR code.** Settings shows a QR code of the invite link
+`<web origin>/app/#to=<address>` (plus `&name=<name>` only if the user shares a name). The
+in-app scanner accepts only these two formats (`#link=` with a valid code, `#to=` with a valid
+address) and rejects any other QR code.
+
 A code is valid for 10 minutes. When it is used, cancelled or expires, the old device
 connects as the mailbox and acknowledges whatever is there, so no copy of the bundle is
 left. If the tab was closed first, this happens the next time the app is opened on that

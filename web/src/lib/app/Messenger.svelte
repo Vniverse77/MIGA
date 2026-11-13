@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { platform } from '../platform';
 import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
+	import QrCode from './QrCode.svelte';
+	import Scanner from './Scanner.svelte';
+	import { appUrl, type Scanned } from '../qr';
 	import { VERSION_LABEL, VERSION_TITLE } from '../version';
 	import { onMount, tick } from 'svelte';
 	import {
@@ -108,6 +111,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	let onboard = $state<'create' | 'link'>('create');
 	let codeInput = $state('');
 	let linking = $state(false);
+	/** The QR scanner is open for this kind of code, or not open. */
+	let scanning = $state<'link' | 'to' | null>(null);
 
 	// "Add a device" on a device that already has the account
 	let link = $state<{ code: string } | null>(null);
@@ -140,10 +145,26 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	let invite: { address: string; name: string } | null = null;
 	function readInvite(): void {
 		const params = new URLSearchParams(location.hash.slice(1));
+		if (params.has('link')) return readLinkCode(params.get('link') ?? '');
 		const address = (params.get('to') ?? '').trim().toLowerCase();
 		if (!isAddress(address)) return;
 		invite = { address, name: (params.get('name') ?? '').trim().slice(0, 40) };
 		history.replaceState(null, '', location.pathname + location.search);
+	}
+	/**
+	 * A link like /app/#link=<code> (from the QR code of "Add a device") opens the "Link this
+	 * device" screen with the code filled in. It does not start linking by itself: a link
+	 * received from someone else would otherwise move a fresh device into that person's account.
+	 * One tap on "Link" confirms that the code comes from the user's own device.
+	 */
+	let startNotice = '';
+	function readLinkCode(raw: string): void {
+		history.replaceState(null, '', location.pathname + location.search);
+		const code = normalizeLinkCode(raw);
+		if (!code) return void (startNotice = t('link_fail'));
+		if (loadIdentity()) return void (startNotice = t('link_have_account'));
+		onboard = 'link';
+		codeInput = formatLinkCode(code);
 	}
 	function applyInvite(): void {
 		if (!invite || !identity) return;
@@ -169,6 +190,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		readInvite();
 		const me = loadIdentity();
 		if (me) start(me);
+		notice = startNotice;
 		ready = true;
 		return () => {
 			relay?.close();
@@ -620,6 +642,24 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		active = address;
 	}
 
+	function scanned(result: Scanned): void {
+		const kind = scanning;
+		scanning = null;
+		if (result.kind === 'link' && kind === 'link') {
+			codeInput = formatLinkCode(result.code);
+		} else if (result.kind === 'to' && kind === 'to') {
+			newAddress = result.address;
+			newName = result.name;
+		}
+	}
+
+	/** Link that opens the app and adds this account as a contact. The name goes along only if shared. */
+	const inviteUrl = $derived(
+		identity
+			? appUrl(platform.publicOrigin(), { to: identity.address, ...(sharedName ? { name: sharedName } : {}) })
+			: ''
+	);
+
 	function saveProfileForm(event: SubmitEvent): void {
 		event.preventDefault();
 		saveProfile($state.snapshot(profile));
@@ -914,6 +954,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					<button type="submit" class="primary" disabled={linking || !codeInput.trim()}>
 						{linking ? t('link_wait') : t('link_go')}
 					</button>
+					<button type="button" disabled={linking} onclick={() => (scanning = 'link')}>{t('scan_button')}</button>
 					<button type="button" disabled={linking} onclick={() => ((onboard = 'create'), (notice = ''))}>
 						← {t('back')}
 					</button>
@@ -1068,6 +1109,11 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						<h2>{t('your_address')}</h2>
 						<code class="selectable">{identity?.address ?? '…'}</code>
 						<button type="button" class={isDesktop ? '' : 'primary'} onclick={copyAddress}>{t('copy_address')}</button>
+						{#if inviteUrl}
+							<h3>{t('qr_contact_title')}</h3>
+							<QrCode text={inviteUrl} label={t('qr_contact_title')} />
+							<p class="hint">{t('qr_contact_help')}</p>
+						{/if}
 						{#if notice}<p class="notice" role="status">{notice}</p>{/if}
 					</section>
 
@@ -1104,7 +1150,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						{#if link}
 							<div class="link-box">
 								<h3>{t('dev_code_title')}</h3>
-<p class="code selectable">{formatLinkCode(link.code)}</p>
+<QrCode text={appUrl(platform.publicOrigin(), { link: link.code })} label={t('qr_link_title')} />
+								<p class="hint warn">{t('qr_link_warn')}</p>
+								<p class="code selectable">{formatLinkCode(link.code)}</p>
 								<p class="hint">{t('dev_code_help')}</p>
 								<button type="button" onclick={() => endLink('')}>{t('cancel')}</button>
 							</div>
@@ -1185,6 +1233,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						<input bind:value={newAddress} placeholder={t('ph_address')} autocomplete="off" spellcheck="false" />
 						<input bind:value={newName} placeholder={t('ph_name')} autocomplete="off" maxlength="40" />
 						<button type="submit" class="primary">{t('start_chat')}</button>
+						<button type="button" onclick={() => (scanning = 'to')}>{t('scan_button')}</button>
 						{#if notice}<p class="notice" role="status">{notice}</p>{/if}
 					</form>
 
@@ -1381,6 +1430,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 {/if}
 
 <ConfirmDialog />
+{#if scanning}
+	<Scanner accept={scanning} onresult={scanned} onclose={() => (scanning = null)} />
+{/if}
 
 <svelte:window
 	onkeydown={(e) => e.key === 'Escape' && ((menuOpen = false), (ctx = null), (msgMenu = null), (replyTo = null))}
@@ -1612,6 +1664,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		margin: 0;
 		color: var(--dim);
 		font-size: 0.78rem;
+	}
+	.hint.warn {
+		color: var(--accent-2);
 	}
 	.onboard {
 		grid-column: 1 / -1;
