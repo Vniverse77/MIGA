@@ -5,13 +5,15 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	import { onMount } from 'svelte';
 	import {
 		bytesToHex,
+		cleanReply,
 		decrypt,
 		encrypt,
 		hexToBytes,
 		identityFromSecret,
 		isAddress,
 		randomId,
-		type Identity
+		type Identity,
+		type Reply
 	} from '../crypto';
 	import {
 		LINK_TTL_MS,
@@ -82,6 +84,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	}
 	let ready = $state(false);
 	let draft = $state('');
+	/** The message the next one will quote. */
+	let replyTo = $state<Reply | null>(null);
+	let composerInput = $state<HTMLInputElement | null>(null);
+	let highlighted = $state('');
 	let newAddress = $state('');
 	let newName = $state('');
 	let notice = $state('');
@@ -181,7 +187,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					mine: false,
 					text: plain.text.slice(0, MAX_TEXT),
 					ts: m.ts,
-					state: 'received'
+					state: 'received',
+					...(plain.reply ? { reply: plain.reply } : {})
 				};
 				// Every online device gets the message from the relay; offline ones get this copy.
 				if (addMessages(m.from, [message])) {
@@ -515,7 +522,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		for (const [address, list] of Object.entries(chats)) {
 			for (const m of list) {
 				if (m.mine && m.state === 'pending') {
-					relay?.send(address, m.id, encrypt(me, address, m.text, sharedName));
+					relay?.send(address, m.id, encrypt(me, address, m.text, sharedName, m.reply));
 				}
 			}
 		}
@@ -531,11 +538,20 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		}
 		const id = randomId();
 		if (!chats[active]) chats[active] = [];
-		chats[active].push({ id, mine: true, text, ts: Date.now(), state: 'pending' });
+		const reply = replyTo ?? undefined;
+		chats[active].push({
+			id,
+			mine: true,
+			text,
+			ts: Date.now(),
+			state: 'pending',
+			...(reply ? { reply } : {})
+		});
 		persist();
 		draft = '';
+		replyTo = null;
 		// When offline it stays "pending" and is sent on the next connection.
-		relay?.send(active, id, encrypt(identity, active, text, sharedName));
+		relay?.send(active, id, encrypt(identity, active, text, sharedName, reply));
 	}
 
 	function addContact(event?: SubmitEvent): void {
@@ -616,6 +632,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	}
 
 	function openChat(address: string): void {
+		replyTo = null;
 		view = 'chat';
 		menuOpen = false;
 		active = address;
@@ -656,6 +673,45 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		persist();
 		if (active === address) active = null;
 	}
+
+	function startReply(message: Message): void {
+		if (!active || !identity) return;
+		const preview = cleanReply({
+			id: message.id,
+			from: message.mine ? identity.address : active,
+			text: message.text
+		});
+		if (!preview) return;
+		replyTo = preview;
+		composerInput?.focus();
+	}
+
+	/** Who wrote a quoted message: "You" for our own account, else the contact's name. */
+	function quoteName(from: string): string {
+		if (from === identity?.address) return t('you');
+		return contacts.find((c) => c.address === from)?.name ?? shortAddress(from);
+	}
+
+	/** Scrolls to the original and flashes it. Does nothing when it is no longer in this chat. */
+	function jumpTo(reply: Reply): void {
+		const key = (reply.from === identity?.address ? 'm' : 't') + reply.id;
+		const target = Array.from(scroller?.children ?? []).find(
+			(el) => (el as HTMLElement).dataset.key === key
+		);
+		if (!target) return;
+		target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+		highlighted = key;
+		setTimeout(() => highlighted === key && (highlighted = ''), 1500);
+	}
+
+	// Phones: holding a bubble starts a reply.
+	let pressTimer: ReturnType<typeof setTimeout> | undefined;
+	function pressStart(event: PointerEvent, message: Message): void {
+		if (event.pointerType !== 'touch') return;
+		clearTimeout(pressTimer);
+		pressTimer = setTimeout(() => startReply(message), 500);
+	}
+	const pressEnd = () => clearTimeout(pressTimer);
 
 	const initial = (name: string) => [...name.trim()][0] ?? '?';
 	const shortAddress = (a: string) => a.slice(0, 8) + '…' + a.slice(-6);
@@ -1045,19 +1101,57 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 				<div class="messages" bind:this={scroller}>
 					{#each activeMessages as message (message.mine + message.id)}
-						<div class="bubble" class:mine={message.mine} class:failed={message.state === 'failed'}>
-<p class="selectable">{message.text}</p>
+						<div
+							class="bubble"
+							class:mine={message.mine}
+							class:failed={message.state === 'failed'}
+							class:flash={highlighted === (message.mine ? 'm' : 't') + message.id}
+							data-key={(message.mine ? 'm' : 't') + message.id}
+							role="group"
+							onpointerdown={(e) => pressStart(e, message)}
+							onpointerup={pressEnd}
+							onpointercancel={pressEnd}
+							onpointermove={pressEnd}
+						>
+							{#if message.reply}
+								<button type="button" class="quote" onclick={() => message.reply && jumpTo(message.reply)}>
+									<strong>{quoteName(message.reply.from)}</strong>
+									<span>{message.reply.text}</span>
+								</button>
+							{/if}
+							<p class="selectable">{message.text}</p>
 							<small>
 								{timeOf(message.ts)}{#if message.mine}{' · ' + stateLabel(message.state)}{/if}
 							</small>
+							<button
+								type="button"
+								class="reply-btn"
+								aria-label={t('reply')}
+								title={t('reply')}
+								onclick={() => startReply(message)}
+							>
+								<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<path d="M9 14 4 9l5-5" />
+									<path d="M4 9h10a6 6 0 0 1 6 6v3" />
+								</svg>
+							</button>
 						</div>
 					{:else}
 						<p class="empty center">{t('no_messages')}</p>
 					{/each}
 				</div>
 
+				{#if replyTo}
+					<div class="replybar">
+						<div class="quote-text">
+							<strong>{t('replying_to', { name: quoteName(replyTo.from) })}</strong>
+							<span>{replyTo.text}</span>
+						</div>
+						<button type="button" aria-label={t('cancel_reply')} title={t('cancel_reply')} onclick={() => (replyTo = null)}>✕</button>
+					</div>
+				{/if}
 				<form class="composer" onsubmit={sendMessage}>
-					<input bind:value={draft} placeholder={t('ph_message')} autocomplete="off" maxlength={MAX_TEXT} />
+					<input bind:this={composerInput} bind:value={draft} placeholder={t('ph_message')} autocomplete="off" maxlength={MAX_TEXT} />
 					<button type="submit" class="primary" disabled={!draft.trim()}>{t('send')}</button>
 				</form>
 			{:else}
@@ -1086,7 +1180,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 <ConfirmDialog />
 
 <svelte:window
-	onkeydown={(e) => e.key === 'Escape' && ((menuOpen = false), (ctx = null))}
+	onkeydown={(e) => e.key === 'Escape' && ((menuOpen = false), (ctx = null), (replyTo = null))}
 	onclick={(e) => {
 		ctx = null;
 		if (!(e.target as Element | null)?.closest?.('.menu-wrap')) menuOpen = false;
@@ -1606,6 +1700,77 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		border-radius: var(--radius-lg);
 		border-bottom-right-radius: 3px;
 		background: var(--mine);
+	}
+	.bubble {
+		position: relative;
+		transition: background-color 0.3s;
+	}
+	.bubble.flash {
+		background: var(--panel-2);
+	}
+	.quote {
+		display: block;
+		width: 100%;
+		margin: 0 0 0.35rem;
+		padding: 0.25rem 0.5rem;
+		border: 0;
+		border-left: 3px solid var(--accent-2);
+		border-radius: 4px;
+		background: var(--bg);
+		color: var(--muted);
+		font: inherit;
+		font-size: 0.85em;
+		text-align: left;
+		cursor: pointer;
+	}
+	.quote strong,
+	.quote span,
+	.quote-text strong,
+	.quote-text span {
+		display: block;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.reply-btn {
+		position: absolute;
+		top: 0.2rem;
+		right: 0.3rem;
+		display: grid;
+		place-items: center;
+		min-height: 0;
+		padding: 0.25rem;
+		border: 0;
+		border-radius: 6px;
+		background: var(--panel);
+		color: var(--muted);
+		opacity: 0;
+		cursor: pointer;
+	}
+	.bubble:hover .reply-btn,
+	.reply-btn:focus-visible {
+		opacity: 1;
+	}
+	.replybar {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		padding: 0.5rem 1.25rem;
+		border-top: 0.5px solid var(--line);
+		border-left: 3px solid var(--accent-2);
+		background: var(--panel);
+		color: var(--muted);
+		font-size: 0.85em;
+	}
+	.quote-text {
+		flex: 1;
+		min-width: 0;
+	}
+	.replybar button {
+		border: 0;
+		background: none;
+		color: var(--muted);
+		cursor: pointer;
 	}
 	.bubble.failed {
 		border-color: var(--danger);

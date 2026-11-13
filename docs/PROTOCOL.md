@@ -24,8 +24,14 @@ Status: experimental. Not audited. Do not rely on it for safety-critical communi
 3. `key = HKDF-SHA256(ikm = shared, salt = "miga-v0", info = sort(addrA, addrB) joined, 32 bytes)`
 4. Plaintext is JSON `{"v":0,"text":"...","ts":<unix ms>}` with an optional `"name"` (the
    sender's display name, at most 40 characters, sent only if the sender chose to share it;
-   the relay never sees it), padded with spaces to a multiple
+   the relay never sees it) and an optional `"reply"` (below), padded with spaces to a multiple
    of 256 bytes (hides exact message length).
+   `"reply"` quotes an earlier message: `{"id":"<id of the original>","from":"<address of its
+   sender>","text":"<preview>"}`. `id` follows the relay's id rules, `from` is an address, and
+   `text` is the first line of the original, trimmed, at most 120 characters. It exists only
+   inside the ciphertext. Receivers drop a `reply` that fails these checks and treat the message
+   as a normal one; clients that do not know the field ignore it. The quote is a hint for display
+   and is not verified against the original.
 5. `body = base64(nonce(24 random bytes) || XChaCha20-Poly1305(key, nonce, plaintext))`
 
 Known limits of v0: no forward secrecy and no post-compromise security (a stolen secret key

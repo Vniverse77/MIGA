@@ -5,7 +5,7 @@ import { hkdf } from '@noble/hashes/hkdf';
 import { scryptAsync } from '@noble/hashes/scrypt';
 import { sha256 } from '@noble/hashes/sha2';
 import { randomBytes, utf8ToBytes } from '@noble/hashes/utils';
-import { fromBase64, identityFromSecret, isAddress, toBase64, type Identity } from './crypto';
+import { cleanReply, fromBase64, identityFromSecret, isAddress, toBase64, type Identity } from './crypto';
 import type { Chats, Contact, Device, Message, Profile } from './storage';
 import { platform } from './platform';
 
@@ -152,7 +152,15 @@ export function cleanMessage(value: unknown, maxText: number): Message | null {
 	if (!Number.isFinite(ts)) return null;
 	// A copy is never "pending" here: only the device that wrote a message sends it.
 	const state = message.mine ? (message.state === 'failed' ? 'failed' : 'sent') : 'received';
-	return { id: message.id, mine: message.mine, text: message.text.slice(0, maxText), ts, state };
+	const reply = message.reply === undefined ? null : cleanReply(message.reply);
+	return {
+		id: message.id,
+		mine: message.mine,
+		text: message.text.slice(0, maxText),
+		ts,
+		state,
+		...(reply ? { reply } : {})
+	};
 }
 
 /** Adds messages that are not there yet and keeps the list in time order. Returns true if it changed. */

@@ -1,5 +1,12 @@
 // Local persistence. Everything stays in this browser; nothing here is sent anywhere.
-import { bytesToHex, hexToBytes, identityFromSecret, newIdentity, type Identity } from './crypto';
+import {
+	bytesToHex,
+	hexToBytes,
+	identityFromSecret,
+	newIdentity,
+	type Identity,
+	type Reply
+} from './crypto';
 
 /** `custom` marks a name the user typed; a name the contact shares never replaces it. */
 export type Contact = { address: string; name: string; custom?: boolean };
@@ -13,6 +20,7 @@ export type Message = {
 	text: string;
 	ts: number;
 	state: 'pending' | 'sent' | 'failed' | 'received';
+	reply?: Reply;
 };
 export type Chats = Record<string, Message[]>;
 

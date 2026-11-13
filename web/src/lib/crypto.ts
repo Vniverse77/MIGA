@@ -12,7 +12,23 @@ import { sha256 } from '@noble/hashes/sha2';
 import { bytesToHex, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils';
 
 export type Identity = { secret: Uint8Array; address: string };
-export type Plain = { text: string; ts: number; name?: string };
+/** A quoted message. It travels inside the ciphertext only; `text` is a short preview. */
+export type Reply = { id: string; from: string; text: string };
+export type Plain = { text: string; ts: number; name?: string; reply?: Reply };
+
+export const REPLY_PREVIEW = 120;
+
+/** Validates a reply from the network, storage or another device. Returns null when malformed. */
+export function cleanReply(value: unknown): Reply | null {
+	const reply = (value ?? {}) as Partial<Reply>;
+	if (typeof reply.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(reply.id)) return null;
+	if (typeof reply.from !== 'string' || !isAddress(reply.from)) return null;
+	if (typeof reply.text !== 'string') return null;
+	const line = reply.text.slice(0, 2000).trim().split(/\r?\n/)[0].trim();
+	const text = [...line].slice(0, REPLY_PREVIEW).join('');
+	if (!text) return null;
+	return { id: reply.id, from: reply.from, text };
+}
 
 const PAD = 256;
 const NONCE = 24;
@@ -61,9 +77,21 @@ function sharedKey(id: Identity, peer: string): Uint8Array {
 }
 
 /** `name` is the sender's optional display name. It travels inside the ciphertext only. */
-export function encrypt(id: Identity, peer: string, text: string, name?: string): string {
+export function encrypt(
+	id: Identity,
+	peer: string,
+	text: string,
+	name?: string,
+	reply?: Reply
+): string {
 	const json = utf8ToBytes(
-		JSON.stringify({ v: 0, text, ts: Date.now(), ...(name ? { name } : {}) })
+		JSON.stringify({
+			v: 0,
+			text,
+			ts: Date.now(),
+			...(name ? { name } : {}),
+			...(reply ? { reply } : {})
+		})
 	);
 	const padded = new Uint8Array(Math.ceil(json.length / PAD) * PAD).fill(0x20);
 	padded.set(json);
@@ -87,7 +115,8 @@ export function decrypt(id: Identity, peer: string, body: string): Plain | null 
 		return {
 			text: parsed.text,
 			ts: Number(parsed.ts) || Date.now(),
-			name: typeof parsed.name === 'string' ? parsed.name : undefined
+			name: typeof parsed.name === 'string' ? parsed.name : undefined,
+			reply: cleanReply(parsed.reply) ?? undefined
 		};
 	} catch {
 		return null;
