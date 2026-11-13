@@ -2,12 +2,13 @@
 	import { platform } from '../platform';
 import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	import { VERSION_LABEL, VERSION_TITLE } from '../version';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import {
 		bytesToHex,
 		cleanReply,
 		decrypt,
 		encrypt,
+		encryptDelete,
 		hexToBytes,
 		identityFromSecret,
 		isAddress,
@@ -17,7 +18,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	} from '../crypto';
 	import {
 		LINK_TTL_MS,
+		cleanBlocked,
 		cleanContact,
+		cleanDeleteItems,
 		cleanDevices,
 		cleanMessage,
 		cleanProfile,
@@ -29,6 +32,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		newLinkCode,
 		normalizeLinkCode,
 		open,
+		removeMessages,
 		seal,
 		syncKey,
 		type LinkBundle,
@@ -39,8 +43,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	import LangSelect from '../LangSelect.svelte';
 	import { RelayClient, type Incoming, type RelayEvents, type Status } from '../relay';
 	import {
+		MAX_BLOCKED,
 		createIdentity,
 		eraseAll,
+		loadBlocked,
 		loadChats,
 		loadContacts,
 		loadDevice,
@@ -48,6 +54,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		loadIdentity,
 		loadOpenLink,
 		loadProfile,
+		saveBlocked,
 		saveChats,
 		saveContacts,
 		saveDevices,
@@ -73,9 +80,13 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	let chats = $state<Chats>({});
 	let profile = $state<Profile>({ name: '', share: true });
 	let devices = $state<Device[]>([]);
+	let blocked = $state<string[]>([]);
 	let active = $state<string | null>(null);
 	let view = $state<'chat' | 'settings' | 'new'>('chat');
 	let menuOpen = $state(false);
+	/** Action menu of one message (button, long-press). */
+	let msgMenu = $state<{ x: number; y: number; message: Message; at: number } | null>(null);
+	let msgMenuEl = $state<HTMLElement | null>(null);
 	/** Desktop right-click menu on a conversation row. */
 	let ctx = $state<{ x: number; y: number; address: string } | null>(null);
 	const isDesktop = platform.target === 'desktop';
@@ -153,6 +164,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		contacts = loadContacts();
 		chats = loadChats();
 		profile = loadProfile();
+		blocked = loadBlocked();
 		deviceLabel = guessDeviceLabel();
 		readInvite();
 		const me = loadIdentity();
@@ -177,9 +189,21 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			onStatus: (s) => (status = s),
 			onReady: () => resendPending(me),
 			onMessage: (m) => {
+				// Blocked: acknowledged (the relay deletes it) and dropped without a trace.
+				if (blocked.includes(m.from)) return true;
 				const plain = decrypt(me, m.from, m.body);
 				// Anything we cannot open is acknowledged too, so it does not clog the queue.
 				if (!plain) return true;
+				// A delete request: only messages that came from this very sender can go.
+				if (plain.del) {
+					const items = plain.del.map((id) => ({ id, mine: false }));
+					const list = chats[m.from];
+					if (list && removeMessages(list, items)) {
+						persist();
+						syncAll({ k: 'del', peer: m.from, items });
+					}
+					return true;
+				}
 				// A shared name is only a label chosen by the sender; the address stays the identity.
 				ensureContact(m.from, plain.name);
 				const message: Message = {
@@ -202,6 +226,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				if (found) syncAll({ k: 'msg', peer: found.peer, message: $state.snapshot(found.message) });
 			},
 			onError: (code, id) => {
+				// An older relay does not know the `unsend` frame and answers bad_frame without an id.
+				if (code === 'bad_frame' && !id) return;
 				if (id) setMessageState(id, 'failed');
 				notice = t('n_relay_rejected', { code });
 			}
@@ -268,6 +294,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					if (known) Object.assign(known, { name: contact.name, custom: contact.custom });
 					else contacts.push(contact);
 				}
+				if (message.blocked !== undefined) {
+					blocked = cleanBlocked(message.blocked, identity?.address);
+					saveBlocked($state.snapshot(blocked));
+				}
 				for (const other of cleanDevices(message.devices)) {
 					if (other.address !== device.address && !devices.some((d) => d.address === other.address)) {
 						devices.push(other);
@@ -293,6 +323,12 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				ensureContact(message.peer, clean.mine ? undefined : message.name);
 				addMessages(message.peer, [clean]);
 				persist();
+				break;
+			}
+			case 'del': {
+				if (!isAddress(message.peer)) break;
+				const list = chats[message.peer];
+				if (list && removeMessages(list, cleanDeleteItems(message.items))) persist();
 				break;
 			}
 			case 'bye': {
@@ -322,6 +358,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			...$state.snapshot(devices).filter((d) => d.address !== to)
 		];
 		syncSend(to, { k: 'state', profile: $state.snapshot(profile), devices: everyone });
+		syncSend(to, { k: 'state', blocked: $state.snapshot(blocked) });
 		for (let i = 0; i < all.length; i += 50) {
 			syncSend(to, { k: 'state', contacts: all.slice(i, i + 50) });
 		}
@@ -656,7 +693,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		notice = '';
 	}
 
-	/** Removes one conversation from this device only. Nothing is sent to the relay or the other devices. */
+	/** Clears the messages of one conversation on this device only; the contact stays. */
 	async function deleteConversation(address: string): Promise<void> {
 		menuOpen = false;
 		ctx = null;
@@ -668,10 +705,87 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			danger: true
 		});
 		if (!ok) return;
+		delete chats[address];
+		persist();
+	}
+
+	/** Blocks or unblocks an address, here and on the linked devices. A blocked address stays blocked after its contact is deleted. */
+	async function toggleBlock(address: string): Promise<void> {
+		menuOpen = false;
+		ctx = null;
+		const contact = contacts.find((c) => c.address === address);
+		const name = contact?.name ?? shortAddress(address);
+		if (!blocked.includes(address)) {
+			const ok = await ask({
+				body: t('q_block', { name }),
+				confirm: t('block'),
+				danger: true
+			});
+			if (!ok) return;
+			blocked = [...blocked, address].slice(0, MAX_BLOCKED);
+		} else {
+			blocked = blocked.filter((a) => a !== address);
+		}
+		saveBlocked($state.snapshot(blocked));
+		syncAll({ k: 'state', blocked: $state.snapshot(blocked) });
+	}
+
+	/** Removes the contact and its conversation from this device. */
+	async function deleteContact(address: string): Promise<void> {
+		menuOpen = false;
+		ctx = null;
+		const contact = contacts.find((c) => c.address === address);
+		if (!contact) return;
+		const ok = await ask({
+			body: t('q_delete_contact', { name: contact.name }),
+			confirm: t('delete_contact'),
+			danger: true
+		});
+		if (!ok) return;
 		contacts = contacts.filter((c) => c.address !== address);
 		delete chats[address];
 		persist();
 		if (active === address) active = null;
+	}
+
+	function openMsgMenu(x: number, y: number, message: Message): void {
+		// Keep the menu inside the window.
+		msgMenu = {
+			x: Math.max(8, Math.min(x, window.innerWidth - 220)),
+			y: Math.max(8, Math.min(y, window.innerHeight - 140)),
+			message,
+			at: Date.now()
+		};
+		tick().then(() => msgMenuEl?.querySelector<HTMLElement>('button')?.focus());
+	}
+
+	async function deleteForMe(message: Message): Promise<void> {
+		msgMenu = null;
+		if (!active) return;
+		const peer = active;
+		const ok = await ask({ body: t('q_delete_me'), confirm: t('delete_msg_me'), danger: true });
+		if (!ok) return;
+		const items = [{ id: message.id, mine: message.mine }];
+		if (chats[peer] && removeMessages(chats[peer], items)) persist();
+		syncAll({ k: 'del', peer, items });
+	}
+
+	async function deleteForEveryone(message: Message): Promise<void> {
+		msgMenu = null;
+		if (!active || !identity || !message.mine) return;
+		const peer = active;
+		const ok = await ask({ body: t('q_delete_all'), confirm: t('delete_msg_all'), danger: true });
+		if (!ok) return;
+		// The request goes first; without a relay connection nothing is deleted anywhere.
+		if (!relay?.send(peer, randomId(), encryptDelete(identity, peer, [message.id]))) {
+			notice = t('n_delete_offline');
+			return;
+		}
+		// Also pull the original back if it is still waiting on the relay (the peer is offline).
+		relay.unsend(peer, message.id);
+		const items = [{ id: message.id, mine: true }];
+		if (chats[peer] && removeMessages(chats[peer], items)) persist();
+		syncAll({ k: 'del', peer, items });
 	}
 
 	function startReply(message: Message): void {
@@ -704,12 +818,13 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		setTimeout(() => highlighted === key && (highlighted = ''), 1500);
 	}
 
-	// Phones: holding a bubble starts a reply.
+	// Phones: holding a bubble opens its action menu.
 	let pressTimer: ReturnType<typeof setTimeout> | undefined;
 	function pressStart(event: PointerEvent, message: Message): void {
 		if (event.pointerType !== 'touch') return;
 		clearTimeout(pressTimer);
-		pressTimer = setTimeout(() => startReply(message), 500);
+		const { clientX, clientY } = event;
+		pressTimer = setTimeout(() => openMsgMenu(clientX, clientY, message), 500);
 	}
 	const pressEnd = () => clearTimeout(pressTimer);
 
@@ -1001,6 +1116,25 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					</section>
 
 					<section class="card">
+						<h2>{t('set_blocked')}</h2>
+						<ul class="devices blocked-list">
+							{#each blocked as address (address)}
+								{@const known = contacts.find((c) => c.address === address)}
+								<li>
+									<span class="who">
+										<strong>{known?.name ?? shortAddress(address)}</strong>
+										{#if known}<small>{shortAddress(address)}</small>{/if}
+									</span>
+									<button type="button" onclick={() => toggleBlock(address)}>{t('unblock')}</button>
+								</li>
+							{:else}
+								<li class="empty">{t('blocked_none')}</li>
+							{/each}
+						</ul>
+						<p class="hint">{t('blocked_help')}</p>
+					</section>
+
+					<section class="card">
 						<h2>{t('set_key')}</h2>
 						<p class="hint">{t('set_key_help')}</p>
 						<div class="row">
@@ -1094,6 +1228,22 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 								>
 									{t('delete_chat')}
 								</button>
+								<button
+									type="button"
+									role="menuitem"
+									class="danger"
+									onclick={() => deleteContact(activeContact.address)}
+								>
+									{t('delete_contact')}
+								</button>
+								<button
+									type="button"
+									role="menuitem"
+									class={blocked.includes(activeContact.address) ? '' : 'danger'}
+									onclick={() => toggleBlock(activeContact.address)}
+								>
+									{t(blocked.includes(activeContact.address) ? 'unblock' : 'block')}
+								</button>
 							</div>
 						{/if}
 					</div>
@@ -1135,6 +1285,23 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 									<path d="M4 9h10a6 6 0 0 1 6 6v3" />
 								</svg>
 							</button>
+							<button
+								type="button"
+								class="reply-btn act-btn"
+								aria-label={t('msg_actions')}
+								aria-haspopup="menu"
+								title={t('msg_actions')}
+								onclick={(e) => {
+									const r = e.currentTarget.getBoundingClientRect();
+									openMsgMenu(r.left, r.bottom + 4, message);
+								}}
+							>
+								<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="currentColor">
+									<circle cx="5" cy="12" r="2" />
+									<circle cx="12" cy="12" r="2" />
+									<circle cx="19" cy="12" r="2" />
+								</svg>
+							</button>
 						</div>
 					{:else}
 						<p class="empty center">{t('no_messages')}</p>
@@ -1150,10 +1317,17 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						<button type="button" aria-label={t('cancel_reply')} title={t('cancel_reply')} onclick={() => (replyTo = null)}>✕</button>
 					</div>
 				{/if}
+				{#if blocked.includes(activeContact.address)}
+					<div class="replybar blocked-bar">
+						<div class="quote-text"><span>{t('blocked_banner')}</span></div>
+						<button type="button" onclick={() => toggleBlock(activeContact.address)}>{t('unblock')}</button>
+					</div>
+				{:else}
 				<form class="composer" onsubmit={sendMessage}>
 					<input bind:this={composerInput} bind:value={draft} placeholder={t('ph_message')} autocomplete="off" maxlength={MAX_TEXT} />
 					<button type="submit" class="primary" disabled={!draft.trim()}>{t('send')}</button>
 				</form>
+				{/if}
 			{:else}
 <div class="welcome">
 					{#if !isDesktop}
@@ -1174,19 +1348,50 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		<button type="button" role="menuitem" class="danger" onclick={() => ctx && deleteConversation(ctx.address)}>
 			{t('delete_chat')}
 		</button>
+		<button type="button" role="menuitem" class="danger" onclick={() => ctx && deleteContact(ctx.address)}>
+			{t('delete_contact')}
+		</button>
+		<button type="button" role="menuitem" onclick={() => ctx && toggleBlock(ctx.address)}>
+			{t(ctx && blocked.includes(ctx.address) ? 'unblock' : 'block')}
+		</button>
+	</div>
+{/if}
+
+{#if msgMenu}
+	{@const target = msgMenu.message}
+	<div
+		class="menu ctx msg-menu"
+		role="menu"
+		bind:this={msgMenuEl}
+		style:left="{msgMenu.x}px"
+		style:top="{msgMenu.y}px"
+	>
+		<button type="button" role="menuitem" onclick={() => ((msgMenu = null), startReply(target))}>
+			{t('reply')}
+		</button>
+		<button type="button" role="menuitem" class="danger" onclick={() => deleteForMe(target)}>
+			{t('delete_msg_me')}
+		</button>
+		{#if target.mine}
+			<button type="button" role="menuitem" class="danger" onclick={() => deleteForEveryone(target)}>
+				{t('delete_msg_all')}
+			</button>
+		{/if}
 	</div>
 {/if}
 
 <ConfirmDialog />
 
 <svelte:window
-	onkeydown={(e) => e.key === 'Escape' && ((menuOpen = false), (ctx = null), (replyTo = null))}
+	onkeydown={(e) => e.key === 'Escape' && ((menuOpen = false), (ctx = null), (msgMenu = null), (replyTo = null))}
 	onclick={(e) => {
 		ctx = null;
+		// A long-press may be followed by a click on touch screens; keep the menu it just opened.
+		if (msgMenu && Date.now() - msgMenu.at > 400 && !(e.target as Element | null)?.closest?.('.act-btn')) msgMenu = null;
 		if (!(e.target as Element | null)?.closest?.('.menu-wrap')) menuOpen = false;
 	}}
-	onblur={() => ((menuOpen = false), (ctx = null))}
-	onresize={() => ((menuOpen = false), (ctx = null))}
+	onblur={() => ((menuOpen = false), (ctx = null), (msgMenu = null))}
+	onresize={() => ((menuOpen = false), (ctx = null), (msgMenu = null))}
 />
 
 <style>
@@ -1747,9 +1952,19 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		opacity: 0;
 		cursor: pointer;
 	}
+	.act-btn {
+		right: 1.9rem;
+	}
 	.bubble:hover .reply-btn,
 	.reply-btn:focus-visible {
 		opacity: 1;
+	}
+	.msg-menu {
+		position: fixed;
+		min-width: 12rem;
+	}
+	.blocked-bar button {
+		flex: none;
 	}
 	.replybar {
 		display: flex;

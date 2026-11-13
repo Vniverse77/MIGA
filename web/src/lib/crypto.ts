@@ -14,14 +14,29 @@ import { bytesToHex, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/
 export type Identity = { secret: Uint8Array; address: string };
 /** A quoted message. It travels inside the ciphertext only; `text` is a short preview. */
 export type Reply = { id: string; from: string; text: string };
-export type Plain = { text: string; ts: number; name?: string; reply?: Reply };
+/**
+ * `del` makes the message a control message: it has no text and shows no bubble. Clients that
+ * do not know it fail to read it (no `text`) and drop it.
+ */
+export type Plain = { text: string; ts: number; name?: string; reply?: Reply; del?: string[] };
+
+/** The most message ids one delete request may carry. */
+export const MAX_DELETE = 50;
+const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Validates a list of message ids from the network. Drops what is malformed, caps the length. */
+export function cleanIds(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	const ids = value.filter((id): id is string => typeof id === 'string' && ID_PATTERN.test(id));
+	return [...new Set(ids)].slice(0, MAX_DELETE);
+}
 
 export const REPLY_PREVIEW = 120;
 
 /** Validates a reply from the network, storage or another device. Returns null when malformed. */
 export function cleanReply(value: unknown): Reply | null {
 	const reply = (value ?? {}) as Partial<Reply>;
-	if (typeof reply.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(reply.id)) return null;
+	if (typeof reply.id !== 'string' || !ID_PATTERN.test(reply.id)) return null;
 	if (typeof reply.from !== 'string' || !isAddress(reply.from)) return null;
 	if (typeof reply.text !== 'string') return null;
 	const line = reply.text.slice(0, 2000).trim().split(/\r?\n/)[0].trim();
@@ -84,7 +99,9 @@ export function encrypt(
 	name?: string,
 	reply?: Reply
 ): string {
-	const json = utf8ToBytes(
+	return seal(
+		id,
+		peer,
 		JSON.stringify({
 			v: 0,
 			text,
@@ -93,6 +110,15 @@ export function encrypt(
 			...(reply ? { reply } : {})
 		})
 	);
+}
+
+/** Control message: asks the peer to remove these messages that we sent. Shows no bubble. */
+export function encryptDelete(id: Identity, peer: string, ids: string[]): string {
+	return seal(id, peer, JSON.stringify({ v: 0, ts: Date.now(), del: cleanIds(ids) }));
+}
+
+function seal(id: Identity, peer: string, plaintext: string): string {
+	const json = utf8ToBytes(plaintext);
 	const padded = new Uint8Array(Math.ceil(json.length / PAD) * PAD).fill(0x20);
 	padded.set(json);
 	const nonce = randomBytes(NONCE);
@@ -111,7 +137,11 @@ export function decrypt(id: Identity, peer: string, body: string): Plain | null 
 			raw.subarray(NONCE)
 		);
 		const parsed = JSON.parse(new TextDecoder().decode(opened));
-		if (parsed?.v !== 0 || typeof parsed.text !== 'string') return null;
+		if (parsed?.v !== 0) return null;
+		if (typeof parsed.text !== 'string') {
+			const del = cleanIds(parsed.del);
+			return del.length ? { text: '', ts: Number(parsed.ts) || Date.now(), del } : null;
+		}
 		return {
 			text: parsed.text,
 			ts: Number(parsed.ts) || Date.now(),

@@ -3,6 +3,7 @@ import {
 	bytesToHex,
 	hexToBytes,
 	identityFromSecret,
+	isAddress,
 	newIdentity,
 	type Identity,
 	type Reply
@@ -31,6 +32,10 @@ const KEY_PROFILE = 'miga.profile';
 const KEY_DEVICE = 'miga.device';
 const KEY_DEVICES = 'miga.devices';
 const KEY_LINK = 'miga.link';
+const KEY_BLOCKED = 'miga.blocked';
+
+/** The most addresses one account may block. */
+export const MAX_BLOCKED = 500;
 
 /** Returns null on a first visit: the identity is created only when the user asks for it. */
 export function loadIdentity(): Identity | null {
@@ -101,7 +106,8 @@ export function eraseAll(): void {
 		KEY_PROFILE,
 		KEY_DEVICE,
 		KEY_DEVICES,
-		KEY_LINK
+		KEY_LINK,
+		KEY_BLOCKED
 	]) {
 		localStorage.removeItem(key);
 	}
@@ -113,6 +119,20 @@ export function loadContacts(): Contact[] {
 
 export function saveContacts(contacts: Contact[]): void {
 	localStorage.setItem(KEY_CONTACTS, JSON.stringify(contacts));
+}
+
+/** Addresses whose messages are dropped on arrival. A deleted contact stays blocked. */
+export function loadBlocked(): string[] {
+	const stored = readJson<unknown>(KEY_BLOCKED, []);
+	if (!Array.isArray(stored)) return [];
+	return [...new Set(stored.filter((a): a is string => typeof a === 'string' && isAddress(a)))].slice(
+		0,
+		MAX_BLOCKED
+	);
+}
+
+export function saveBlocked(blocked: string[]): void {
+	localStorage.setItem(KEY_BLOCKED, JSON.stringify(blocked));
 }
 
 export function loadChats(): Chats {

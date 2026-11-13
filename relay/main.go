@@ -46,6 +46,7 @@ type frame struct {
 	Body  string `json:"body,omitempty"`
 	TS    int64  `json:"ts,omitempty"`
 	Err   string `json:"err,omitempty"`
+	Found *bool  `json:"found,omitempty"`
 }
 
 type server struct {
@@ -176,6 +177,19 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if isAddr(f.From) && idPattern.MatchString(f.ID) {
 				s.db.Exec(`DELETE FROM messages WHERE rcpt=? AND sender=? AND id=?`, me, f.From, f.ID)
 			}
+		case "unsend":
+			if now := time.Now(); now.Sub(windowStart) > rateWindow {
+				windowStart, sent = now, 0
+			}
+			sent++
+			switch {
+			case sent > rateLimit:
+				send(c, frame{T: "error", Err: "rate_limited", ID: f.ID})
+			case !isAddr(f.To) || !idPattern.MatchString(f.ID):
+				send(c, frame{T: "error", Err: "bad_frame", ID: f.ID})
+			default:
+				s.unsend(c, me, f)
+			}
 		case "send":
 			if now := time.Now(); now.Sub(windowStart) > rateWindow {
 				windowStart, sent = now, 0
@@ -226,6 +240,19 @@ func (s *server) accept(c *websocket.Conn, from string, f frame) {
 		go send(rc, out)
 	}
 	s.mu.RUnlock()
+}
+
+// unsend deletes a message that is still queued. Only its original sender can do that:
+// the sender comes from the authenticated connection, never from the frame.
+func (s *server) unsend(c *websocket.Conn, from string, f frame) {
+	res, err := s.db.Exec(`DELETE FROM messages WHERE rcpt=? AND sender=? AND id=?`, f.To, from, f.ID)
+	if err != nil {
+		log.Printf("unsend: %v", err)
+		return
+	}
+	n, _ := res.RowsAffected()
+	found := n > 0
+	send(c, frame{T: "unsent", ID: f.ID, Found: &found})
 }
 
 func (s *server) pending(rcpt string) []frame {

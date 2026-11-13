@@ -73,6 +73,14 @@ export class RelayClient {
 		return true;
 	}
 
+	/**
+	 * Asks the relay to drop a message of ours that is still waiting for `to`. Fire and forget:
+	 * a relay that does not know the frame answers `bad_frame`, which the caller ignores.
+	 */
+	unsend(to: string, id: string): void {
+		if (this.ready && this.ws) this.ws.send(JSON.stringify({ t: 'unsend', to, id }));
+	}
+
 	private handle(ws: WebSocket, frame: Record<string, unknown>): void {
 		switch (frame.t) {
 			case 'challenge':

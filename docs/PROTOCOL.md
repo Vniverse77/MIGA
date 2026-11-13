@@ -32,6 +32,15 @@ Status: experimental. Not audited. Do not rely on it for safety-critical communi
    inside the ciphertext. Receivers drop a `reply` that fails these checks and treat the message
    as a normal one; clients that do not know the field ignore it. The quote is a hint for display
    and is not verified against the original.
+
+   **Delete request.** Instead of `"text"` the plaintext may carry `"del":["<id>",...]`
+   (`{"v":0,"ts":..,"del":[...]}`): a control message, shown as no bubble, asking the receiver to
+   remove those messages that came from the sender. At most 50 ids, each following the relay's id
+   rules; invalid ids are dropped. The receiver removes them only from the chat with the sender
+   and only among messages the sender wrote, never among its own, and ignores the request if
+   nothing matches. It never creates a contact. A message that has both `text` and `del` is an
+   ordinary message. Clients that predate this field require a string `text`, fail to read the
+   payload and acknowledge and discard it: no bubble, no error (checked against v0.4.0).
 5. `body = base64(nonce(24 random bytes) || XChaCha20-Poly1305(key, nonce, plaintext))`
 
 Known limits of v0: no forward secrecy and no post-compromise security (a stolen secret key
@@ -50,12 +59,17 @@ JSON text frames over one WebSocket at `/ws`. Field `t` is the frame type.
 | relay → client | `{"t":"sent","id":"<id>"}` | relay stored the message |
 | relay → client | `{"t":"msg","from":"<addr>","id":"<id>","body":"<base64>","ts":<unix ms>}` | delivery |
 | client → relay | `{"t":"ack","from":"<addr>","id":"<id>"}` | recipient has it; relay deletes its copy |
+| client → relay | `{"t":"unsend","to":"<addr>","id":"<id>"}` | sender takes back a message that is still queued |
+| relay → client | `{"t":"unsent","id":"<id>","found":true\|false}` | `found` is false if it was already delivered, acknowledged or never existed |
 | client → relay | `{"t":"ping"}` → `{"t":"pong"}` | keep-alive (send at least every 60 s) |
 | relay → client | `{"t":"error","err":"<code>","id":"<id>"}` | `bad_frame`, `too_large`, `rate_limited`, `queue_full` |
 
 Rules enforced by the relay:
 
 - `body` is at most 24 000 characters.
+- `unsend` deletes only a message whose sender is the authenticated connection; nobody can
+  unsend another address's messages. It counts against the `send` rate limit. A relay that
+  predates it answers `bad_frame` (without `id`); clients ignore that.
 - A message stays stored until the recipient acknowledges it or 30 days pass.
 - At most 1 000 undelivered messages are kept per recipient.
 - At most 30 `send` frames per 10 seconds per connection.
@@ -102,9 +116,10 @@ belongs to the account. JSON kinds:
 | `k` | Meaning |
 |---|---|
 | `hello` | A new device announces itself: `label`, `sponsor`. |
-| `state` | Any of `profile`, `contacts`, `devices` to merge. |
+| `state` | Any of `profile`, `contacts`, `devices` to merge, and `blocked`: the complete list of blocked addresses, which replaces the receiver's list (valid addresses only, at most 500). |
 | `history` | `chats`: a piece of recent message history. |
 | `msg` | A copy of one message just sent or received: `peer`, `message`, optional `name`. |
+| `del` | `peer`, `items`: `[{"id","mine"}]` (at most 100). The receiver removes those messages from the chat with `peer`; `mine` says whether we wrote it. Sent for "delete for me" and after a delete request was applied. |
 | `bye` | `address` of a device that left or was removed. The named device erases itself. |
 
 The relay pushes a message for the account address to every device online at that moment and
@@ -115,6 +130,28 @@ devices that were offline get it too. Clients de-duplicate by message id.
 connects, but it did hold the account key. If a device is lost, the only real fix is a new
 address. The relay can see that the account address and its device addresses connect from
 the same IP and exchange messages, so it can tell which devices belong together.
+
+## Deleting messages and blocking
+
+- **Delete for me** removes a message on this device and, through `del`, on the linked devices.
+  The other person keeps their copy.
+- **Delete for everyone** (own messages only) sends the delete request above, sends `unsend`
+  to the relay, and removes the message locally and on linked devices. It needs a relay
+  connection; offline, nothing is deleted. If the recipient is offline, `unsend` removes the
+  queued copy so it is never delivered; if the relay is an older one, the request still
+  arrives later and does the job.
+- **Block** is local state, synced between linked devices as `blocked`. Messages from a blocked
+  address are acknowledged (so the relay deletes them) and dropped unread. The sender is not
+  told. A deleted contact stays blocked until unblocked. Delete contact and "delete
+  conversation" act on this device only.
+
+Honest limits: deletion is a request, not a guarantee. The recipient may have read the message
+already, may have a copy or screenshot, and a modified client can ignore the request. Clients
+that predate the request silently ignore it, so the message stays on their side. A linked
+device that was offline and later receives an old `history` snapshot can bring a deleted
+message back. The relay's stored copy of an unsent message is deleted, but the relay can still
+have seen that it existed. Blocking cannot stop a blocked address from sending; the relay
+still carries and sees the messages until they are acknowledged.
 
 ## What the relay can see
 

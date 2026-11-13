@@ -5,8 +5,8 @@ import { hkdf } from '@noble/hashes/hkdf';
 import { scryptAsync } from '@noble/hashes/scrypt';
 import { sha256 } from '@noble/hashes/sha2';
 import { randomBytes, utf8ToBytes } from '@noble/hashes/utils';
-import { cleanReply, fromBase64, identityFromSecret, isAddress, toBase64, type Identity } from './crypto';
-import type { Chats, Contact, Device, Message, Profile } from './storage';
+import { cleanIds, cleanReply, fromBase64, identityFromSecret, isAddress, toBase64, type Identity } from './crypto';
+import { MAX_BLOCKED, type Chats, type Contact, type Device, type Message, type Profile } from './storage';
 import { platform } from './platform';
 
 /** How long a link code stays valid. */
@@ -35,9 +35,17 @@ export type LinkBundle = {
 /** Messages between devices of one account, sealed with the account's sync key. */
 export type SyncMessage =
 	| { k: 'hello'; label: string; sponsor: string }
-	| { k: 'state'; profile?: Profile; contacts?: Contact[]; devices?: Device[] }
+	| {
+			k: 'state';
+			profile?: Profile;
+			contacts?: Contact[];
+			devices?: Device[];
+			/** The complete block list; it replaces the one on the receiving device. */
+			blocked?: string[];
+	  }
 	| { k: 'history'; chats: Chats }
 	| { k: 'msg'; peer: string; message: Message; name?: string }
+	| { k: 'del'; peer: string; items: { id: string; mine: boolean }[] }
 	| { k: 'bye'; address: string };
 
 /** 12 characters, 60 bits. The slow key derivation below is what makes that enough. */
@@ -142,6 +150,38 @@ export function cleanDevices(value: unknown): Device[] {
 		});
 	}
 	return out;
+}
+
+/** A block list from another device: valid addresses only, no duplicates, length-capped. */
+export function cleanBlocked(value: unknown, own?: string): string[] {
+	if (!Array.isArray(value)) return [];
+	const list = value.filter((a): a is string => typeof a === 'string' && a !== own && isAddress(a));
+	return [...new Set(list)].slice(0, MAX_BLOCKED);
+}
+
+/** Validates the `items` of a `del` sync message. */
+export function cleanDeleteItems(value: unknown): { id: string; mine: boolean }[] {
+	if (!Array.isArray(value)) return [];
+	const out: { id: string; mine: boolean }[] = [];
+	for (const item of value.slice(0, 100)) {
+		const { id, mine } = (item ?? {}) as { id?: unknown; mine?: unknown };
+		const clean = cleanIds([id]);
+		if (clean.length && typeof mine === 'boolean') out.push({ id: clean[0], mine });
+	}
+	return out;
+}
+
+/** Removes the listed messages in place. Returns true if anything was removed. */
+export function removeMessages(list: Message[], items: { id: string; mine: boolean }[]): boolean {
+	const gone = new Set(items.map((i) => (i.mine ? 'm' : 't') + i.id));
+	let changed = false;
+	for (let i = list.length - 1; i >= 0; i--) {
+		if (gone.has((list[i].mine ? 'm' : 't') + list[i].id)) {
+			list.splice(i, 1);
+			changed = true;
+		}
+	}
+	return changed;
 }
 
 export function cleanMessage(value: unknown, maxText: number): Message | null {
