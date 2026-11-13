@@ -18,7 +18,7 @@ modules:
     buildsystem: simple
     sources:
       - type: file
-        path: ../../desktop/src-tauri/target/release/bundle/deb/MIGA_0.4.0_amd64.deb
+        path: ../../desktop/src-tauri/target/release/bundle/deb/MIGA_0.5.0_amd64.deb
         dest-filename: miga.deb
       - type: file
         path: ../linux/com.vniverse77.miga.desktop

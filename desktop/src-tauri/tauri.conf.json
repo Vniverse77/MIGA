@@ -2,7 +2,7 @@
 	"$schema": "https://schema.tauri.app/config/2",
 	"productName": "MIGA",
 	"mainBinaryName": "miga-messenger",
-	"version": "0.4.0",
+	"version": "0.5.0",
 	"identifier": "com.vniverse77.miga",
 	"build": { "frontendDist": "../../web/build-desktop" },
 	"app": {
