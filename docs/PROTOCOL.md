@@ -225,6 +225,76 @@ acknowledge it to the relay); they keep showing the old text. Receiving rules:
   sync message. Only messages in state `sent` can be edited, and only while connected to the
   relay (like deleting for everyone).
 
+## Attachments (photos, GIFs, video)
+
+Files never travel inside the relay's message queue. The sender encrypts the file, uploads the
+ciphertext to the relay's blob store over plain HTTPS, and sends the key inside a normal end-to-end
+encrypted message. The relay stores opaque bytes and a size; it cannot tell a photo from noise.
+
+### Blob API (same host and port as `/ws`)
+
+| Request | Answer |
+|---|---|
+| `PUT /blob` (body = ciphertext) | `201 {"id":"<32 hex>","del":"<32 hex>","size":n,"expires":<unix ms>}` |
+| `GET /blob/{id}` | `200` ciphertext (`Content-Type: application/octet-stream`, range requests work), `404` unknown or expired |
+| `DELETE /blob/{id}` with header `X-Delete-Token: <del>` | `204`; `403` for a wrong token; `404` unknown |
+
+- `id` and `del` are random 128-bit values. The relay keeps only `SHA-256(del)`.
+- Errors on upload: `413` over the size limit (cut off while streaming, nothing is buffered in memory),
+  `400` empty body, `429` more than 30 uploads per 10 minutes from one IP, `503` more than 4 uploads at once,
+  `507` the storage quota is used up.
+- Limits: 25 MiB of content plus the per-chunk tags (about 25.1 MiB on the wire), 30 days TTL (hourly
+  cleanup), total quota `MIGA_BLOB_QUOTA` (default 2 GiB). Files live in `MIGA_BLOBS` (default `blobs/`
+  next to `MIGA_DB`), metadata (id, size, created, expires, token hash) in SQLite.
+- CORS follows `MIGA_ORIGINS` (same patterns as the WebSocket); the page's own origin is always allowed.
+- The client IP is used only for the in-memory rate limit. Behind a proxy set `MIGA_TRUST_PROXY=1` to read
+  `CF-Connecting-IP` / `X-Forwarded-For`. Blob ids and IPs are never logged.
+
+Delete token: the sender gets `del` at upload and keeps it in its own copy of the message (it also reaches the
+sender's other devices through sync). It is **not** put into the message to the recipient: a recipient may have
+several devices, and one of them deleting the file after its own download would break the others. "Delete for
+everyone" makes the sender call `DELETE`; otherwise the blob expires after 30 days.
+
+### File encryption
+
+Per file: a random 32-byte key `K` and a random 24-byte base nonce `N`. The plaintext is cut into chunks of
+exactly 64 KiB (the last one is 0..64 KiB; an empty file is one empty chunk). Chunk `i` (counting from 0) is
+sealed with XChaCha20-Poly1305 using key `K`, nonce `N` with the 64-bit big-endian counter `i` XORed into its
+last 8 bytes, and AAD = one byte, `0x01` for the last chunk and `0x00` for every other chunk. The ciphertext is
+the concatenation of the sealed chunks (each plaintext length + 16 bytes). Because the final-chunk flag is
+authenticated, a truncated file cannot be opened. After decrypting, the receiver also checks
+`SHA-256(plaintext) == hash` and the exact size before showing anything.
+
+### Message payload
+
+Inside the normal encrypted JSON (the relay sees none of it):
+
+```json
+{ "v": 0, "ts": 1700000000000,
+  "text": "caption\n[photo \u2014 update MIGA to view]",
+  "cap": "caption",
+  "att": { "blob": "<32 hex>", "key": "<64 hex>", "nonce": "<48 hex>", "hash": "<64 hex>",
+           "mime": "image/webp", "size": 123456, "w": 1600, "h": 900, "thumb": "data:image/webp;base64,..." } }
+```
+
+- `mime` is one of `image/jpeg|png|webp|gif`, `video/mp4|webm`. `size` is the plaintext size, at most 25 MiB.
+  `thumb` is a blurred preview, 24 px wide, under 2 KB; it may be empty.
+- Old-client fallback: v0.5.0 drops a message without a string `text`. So `text` carries the caption plus the
+  line `[photo - update MIGA to view]` (or only the line when there is no caption). Clients that understand
+  `att` read the caption from `cap` and ignore `text`, so they never show the placeholder.
+- Own-device sync (`msg` and `history`) carries the same `att`, plus `del` for messages we sent. The other
+  device fetches the blob with the same key.
+- A message whose `att` is malformed is dropped.
+
+### What the client does
+
+Photos are decoded, scaled so the longest edge is at most 2048 px and re-encoded (WebP, else JPEG) through a
+canvas, which **removes EXIF, GPS and other metadata**. Animated GIF, animated WebP, animated PNG, MP4 and WebM
+are sent byte for byte so the animation survives. GIFs carry no EXIF; **MP4 and WebM can carry metadata
+(creation time, GPS, device) and it is not stripped.** Received files are stored decrypted in the IndexedDB
+`media` store, keyed by blob id, and removed when their message is deleted. There is no GIF search: it would
+send IP addresses and search words to a third party.
+
 ## Safety numbers
 
 Because an address is the account's Ed25519 public key, two people can check that nobody sits
@@ -253,4 +323,4 @@ until it is dismissed or the contact is verified again.
 ## What the relay can see
 
 Sender address, recipient address, time, approximate size, and the IP addresses of both
-sides. It cannot read message content. Hiding this metadata is future work.
+sides. For attachments: the size and upload time of an opaque blob, and the IP that fetched it. It cannot read message content. Hiding this metadata is future work.

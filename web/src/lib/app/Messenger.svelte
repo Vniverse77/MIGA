@@ -2,6 +2,10 @@
 	import { platform } from '../platform';
 import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	import QrCode from './QrCode.svelte';
+	import Attachment from './Attachment.svelte';
+	import Viewer from './Viewer.svelte';
+	import { MAX_ATTACHMENT, type Att } from '../attach';
+	import { AttachError, deleteMedia, deleteRemote, mediaIds, prepare, saveMedia, upload, type Prepared } from '../media';
 	import Scanner from './Scanner.svelte';
 	import { appUrl, type Scanned } from '../qr';
 	import { VERSION_LABEL, VERSION_TITLE } from '../version';
@@ -137,6 +141,27 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	/** Set while the composer edits one of my own messages. */
 	let editing = $state<{ peer: string; id: string; text: string } | null>(null);
 	let emojiOpen = $state(false);
+	// Attachments: uploads in progress (heavy bytes live in uploadData, not in reactive state).
+	type UploadItem = {
+		key: string;
+		peer: string;
+		caption: string;
+		reply?: Reply;
+		ts: number;
+		state: 'preparing' | 'sending' | 'failed';
+		progress: number;
+		error: string;
+		thumb: string;
+		w: number;
+		h: number;
+	};
+	let uploads = $state<UploadItem[]>([]);
+	const uploadData = new Map<string, { prepared?: Prepared; sealed?: ReturnType<typeof upload>['sealed']; cancel?: () => void }>();
+	let fileInput = $state<HTMLInputElement | null>(null);
+	let dragging = $state(false);
+	let attError = $state('');
+	let attErrorTimer: ReturnType<typeof setTimeout> | undefined;
+	let viewer = $state<{ url: string; mime: string } | null>(null);
 	/** The picker is a separate chunk, fetched the first time it is opened. */
 	let EmojiPicker = $state.raw<Component<{ onpick: (emoji: string) => void }> | null>(null);
 	let highlighted = $state('');
@@ -333,12 +358,13 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					text: plain.text.slice(0, MAX_TEXT),
 					ts: m.ts,
 					state: 'received',
-					...(plain.reply ? { reply: plain.reply } : {})
+					...(plain.reply ? { reply: plain.reply } : {}),
+					...(plain.att ? { att: plain.att } : {})
 				};
 				// Every online device gets the message from the relay; offline ones get this copy.
 				if (addMessages(m.from, [message])) {
 					syncAll({ k: 'msg', peer: m.from, message, name: plain.name });
-					noteIncoming(m.from, message.text, true);
+					noteIncoming(m.from, previewOf(message), true);
 				}
 				persist();
 				// Stored: tell the sender (also for a re-delivery, in case the first ack was lost).
@@ -458,7 +484,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				if (!clean || !isAddress(message.peer)) break;
 				ensureContact(message.peer, clean.mine ? undefined : message.name);
 				// A copy from another device (it was offline when this arrived): counted, never notified.
-				if (addMessages(message.peer, [clean]) && !clean.mine) noteIncoming(message.peer, clean.text, false);
+				if (addMessages(message.peer, [clean]) && !clean.mine) noteIncoming(message.peer, previewOf(clean), false);
 				persist();
 				break;
 			}
@@ -670,6 +696,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 	$effect(() => {
 		void activeMessages.length;
+		void uploads.length;
 		void active;
 		scroller?.scrollTo(0, scroller.scrollHeight);
 	});
@@ -751,6 +778,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	$effect(() => {
 		void active;
 		void activeMessages.length;
+		void uploads.length;
 		void visible;
 		void view;
 		void receipts;
@@ -843,7 +871,23 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	function persist(): void {
 		saveContacts($state.snapshot(contacts));
 		saveChats($state.snapshot(chats));
+		scheduleMediaGc();
 	}
+
+	/** Local media of messages that are gone (deleted, chat erased) is removed shortly after. */
+	let gcTimer: ReturnType<typeof setTimeout> | undefined;
+	function scheduleMediaGc(): void {
+		clearTimeout(gcTimer);
+		gcTimer = setTimeout(async () => {
+			const used = new Set<string>();
+			for (const list of Object.values(chats)) for (const m of list) if (m.att) used.add(m.att.blob);
+			const stale = (await mediaIds()).filter((id) => !used.has(id));
+			if (stale.length) await deleteMedia(stale);
+		}, 800);
+	}
+
+	/** What a chat list row, a reply quote or a notification shows for a message. */
+	const previewOf = (m: Message): string => m.text || (m.att ? t('att_photo') : '');
 
 	function ensureContact(address: string, name?: string): void {
 		const clean = name?.trim().replace(/\s+/g, ' ').slice(0, 40);
@@ -879,7 +923,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		for (const [address, list] of Object.entries(chats)) {
 			for (const m of list) {
 				if (m.mine && m.state === 'pending') {
-					relay?.send(address, m.id, encrypt(me, address, m.text, sharedName, m.reply));
+					relay?.send(address, m.id, encrypt(me, address, m.text, sharedName, m.reply, m.att));
 				}
 			}
 		}
@@ -991,6 +1035,116 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		replyTo = null;
 		// When offline it stays "pending" and is sent on the next connection.
 		relay?.send(active, id, encrypt(identity, active, text, sharedName, reply));
+	}
+
+	// ── Attachments ─────────────────────────────────────────────────────────────────────
+
+	function showAttError(code: string): void {
+		const known = ['too_big', 'unsupported', 'decode', 'quota', 'rate', 'network'];
+		attError = t(known.includes(code) ? (`att_${code}` as 'att_network') : 'att_failed');
+		clearTimeout(attErrorTimer);
+		attErrorTimer = setTimeout(() => (attError = ''), 9000);
+	}
+
+	function pickFiles(): void {
+		fileInput?.click();
+	}
+
+	/** Called for the file picker, a paste and a drop. The composer text becomes the caption. */
+	async function attachFiles(files: Iterable<File>): Promise<void> {
+		const peer = active;
+		if (!peer || !identity || blocked.includes(peer)) return;
+		for (const file of files) {
+			if (file.size > MAX_ATTACHMENT) {
+				showAttError('too_big');
+				continue;
+			}
+			const caption = draft.trim().slice(0, MAX_TEXT);
+			const reply = replyTo ?? undefined;
+			draft = '';
+			replyTo = null;
+			const item: UploadItem = { key: randomId(), peer, caption, ...(reply ? { reply } : {}), ts: Date.now(), state: 'preparing', progress: 0, error: '', thumb: '', w: 4, h: 3 };
+			uploads.push(item);
+			const mine = () => uploads.find((u) => u.key === item.key);
+			try {
+				const prepared = await prepare(file);
+				const live = mine();
+				if (!live) continue; // cancelled while preparing
+				live.thumb = prepared.thumb;
+				live.w = prepared.w;
+				live.h = prepared.h;
+				uploadData.set(item.key, { prepared });
+				await sendUpload(item.key);
+			} catch (e) {
+				const code = e instanceof AttachError ? e.code : 'decode';
+				uploads = uploads.filter((u) => u.key !== item.key);
+				uploadData.delete(item.key);
+				showAttError(code);
+			}
+		}
+	}
+
+	async function sendUpload(key: string): Promise<void> {
+		const item = uploads.find((u) => u.key === key);
+		const data = uploadData.get(key);
+		if (!item || !data?.prepared || !identity) return;
+		item.state = 'sending';
+		item.progress = 0;
+		item.error = '';
+		const up = upload(data.prepared, (f) => {
+			const live = uploads.find((u) => u.key === key);
+			if (live) live.progress = f;
+		}, data.sealed);
+		data.sealed = up.sealed;
+		data.cancel = up.cancel;
+		let att: Att;
+		try {
+			att = await up.promise;
+		} catch (e) {
+			const code = e instanceof AttachError ? e.code : 'upload';
+			const live = uploads.find((u) => u.key === key);
+			if (code === 'cancelled' || !live) return;
+			live.state = 'failed';
+			live.error = code;
+			showAttError(code);
+			return;
+		}
+		const peer = item.peer;
+		const id = randomId();
+		if (!chats[peer]) chats[peer] = [];
+		chats[peer].push({ id, mine: true, text: item.caption, ts: Date.now(), state: 'pending', att, ...(item.reply ? { reply: item.reply } : {}) });
+		persist();
+		// Our own copy of the file, so it shows at once and survives a reload.
+		void saveMedia(att.blob, new Blob([data.prepared.bytes as BlobPart], { type: att.mime }), att.mime);
+		uploads = uploads.filter((u) => u.key !== key);
+		uploadData.delete(key);
+		relay?.send(peer, id, encrypt(identity, peer, item.caption, sharedName, item.reply, att));
+	}
+
+	function cancelUpload(key: string): void {
+		uploadData.get(key)?.cancel?.();
+		uploads = uploads.filter((u) => u.key !== key);
+		uploadData.delete(key);
+	}
+
+	function onPaste(e: ClipboardEvent): void {
+		const files = [...(e.clipboardData?.files ?? [])];
+		if (!files.length) return;
+		e.preventDefault();
+		void attachFiles(files);
+	}
+
+	function onDragOver(e: DragEvent): void {
+		if (!e.dataTransfer?.types.includes('Files')) return;
+		e.preventDefault();
+		dragging = true;
+	}
+
+	function onDrop(e: DragEvent): void {
+		if (!e.dataTransfer?.files.length) return;
+		e.preventDefault();
+		dragging = false;
+		void attachFiles([...e.dataTransfer.files]);
 	}
 
 	function addContact(event?: SubmitEvent): void {
@@ -1271,6 +1425,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		}
 		// Also pull the original back if it is still waiting on the relay (the peer is offline).
 		relay.unsend(peer, message.id);
+		// The attachment itself too: only the sender holds the delete token.
+		if (message.att) void deleteRemote($state.snapshot(message.att));
 		const items = [{ id: message.id, mine: true }];
 		if (chats[peer] && removeMessages(chats[peer], items)) persist();
 		syncAll({ k: 'del', peer, items });
@@ -1281,7 +1437,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		const preview = cleanReply({
 			id: message.id,
 			from: message.mine ? identity.address : active,
-			text: message.text
+			text: previewOf(message)
 		});
 		if (!preview) return;
 		replyTo = preview;
@@ -1482,7 +1638,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							<span class="avatar" aria-hidden="true">{initial(contact.name)}</span>
 							<span class="who">
 								<strong>{contact.name}{#if contact.verified}{@render verifiedMark(12)}{/if}</strong>
-								<small>{last ? last.text : shortAddress(contact.address)}</small>
+								<small>{last ? previewOf(last) : shortAddress(contact.address)}</small>
 							</span>
 							{@render rowMeta(contact.address, last)}
 						</button>
@@ -1569,7 +1725,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							<span class="avatar" aria-hidden="true">{initial(contact.name)}</span>
 							<span class="who">
 								<strong>{contact.name}{#if contact.verified}{@render verifiedMark(12)}{/if}</strong>
-								<small>{last ? last.text : shortAddress(contact.address)}</small>
+								<small>{last ? previewOf(last) : shortAddress(contact.address)}</small>
 							</span>
 							{@render rowMeta(contact.address, last)}
 						</button>
@@ -1584,7 +1740,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		</aside>
 		{/if}
 
-		<main>
+		<main ondragover={onDragOver} ondragleave={() => (dragging = false)} ondrop={onDrop} class:dragging>
 			{#if view === 'settings'}
 				<header class="chat-head">
 					<button type="button" class="back" onclick={() => (view = 'chat')}>← {t('back')}</button>
@@ -1915,7 +2071,12 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 									<span>{message.reply.text}</span>
 								</button>
 							{/if}
-							<p class="selectable">{message.text}</p>
+							{#if message.att}
+								<Attachment att={message.att} onview={(url, a) => (viewer = { url, mime: a.mime })} />
+							{/if}
+							{#if message.text || !message.att}
+								<p class="selectable">{message.text}</p>
+							{/if}
 							<small>
 								{#if message.edited}<span class="edited">{t('edited')}</span>{' · '}{/if}{timeOf(message.ts)}{#if message.mine}{' · '}{#if message.state === 'sent'}{@const level = tickLevel(message)}<span
 										class="ticks {level}"
@@ -1961,7 +2122,28 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							</button>
 						</div>
 					{:else}
-						<p class="empty center">{t('no_messages')}</p>
+						{#if !uploads.some((u) => u.peer === active)}<p class="empty center">{t('no_messages')}</p>{/if}
+					{/each}
+					{#each uploads.filter((u) => u.peer === active) as u (u.key)}
+						<div class="bubble mine uploading" class:failed={u.state === 'failed'} data-upload={u.state}>
+							<div class="up-box" style:aspect-ratio={u.w / u.h} style:--ratio={u.w / u.h}>
+								{#if u.thumb}<img src={u.thumb} alt="" aria-hidden="true" />{/if}
+								<div class="up-over">
+									{#if u.state === 'failed'}
+										<p role="alert">{t(u.error === 'quota' || u.error === 'rate' || u.error === 'network' ? (`att_${u.error}` as 'att_network') : 'att_failed')}</p>
+										<div class="row">
+											<button type="button" onclick={() => sendUpload(u.key)}>{t('att_retry')}</button>
+											<button type="button" onclick={() => cancelUpload(u.key)}>{t('att_remove')}</button>
+										</div>
+									{:else}
+										<p>{u.state === 'preparing' ? t('att_preparing') : t('att_sending', { pct: Math.round(u.progress * 100) })}</p>
+										<progress max="1" value={u.state === 'preparing' ? undefined : u.progress}></progress>
+										<button type="button" onclick={() => cancelUpload(u.key)}>{t('att_cancel')}</button>
+									{/if}
+								</div>
+							</div>
+							{#if u.caption}<p class="selectable">{u.caption}</p>{/if}
+						</div>
 					{/each}
 				</div>
 
@@ -1992,7 +2174,13 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						<button type="button" onclick={() => toggleBlock(activeContact.address)}>{t('unblock')}</button>
 					</div>
 				{:else}
+				{#if attError}<p class="att-error" role="alert">{attError}</p>{/if}
 				<form class="composer" onsubmit={sendMessage}>
+					<button type="button" class="attach-btn" aria-label={t('att_btn')} title={t('att_btn')} disabled={!!editing} onclick={pickFiles}>
+						<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M21 12.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l9-9a3.7 3.7 0 0 1 5.2 5.2l-9 9a1.8 1.8 0 0 1-2.6-2.6l8.2-8.2" />
+						</svg>
+					</button>
 					<button
 						type="button"
 						class="emoji-btn"
@@ -2008,9 +2196,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							<path d="M9 9.5h.01M15 9.5h.01" />
 						</svg>
 					</button>
-					<input bind:this={composerInput} bind:value={draft} placeholder={t('ph_message')} autocomplete="off" maxlength={MAX_TEXT} />
+					<input bind:this={composerInput} bind:value={draft} onpaste={onPaste} placeholder={t('ph_message')} autocomplete="off" maxlength={MAX_TEXT} />
 					<button type="submit" class="primary" disabled={!draft.trim() && !editing}>{editing ? t('save_edit') : t('send')}</button>
 				</form>
+				<input bind:this={fileInput} class="file-input" type="file" multiple accept="image/*,video/mp4,video/webm" tabindex="-1" aria-hidden="true" onchange={(e) => { void attachFiles([...(e.currentTarget.files ?? [])]); e.currentTarget.value = ''; }} />
 				{/if}
 			{:else}
 <div class="welcome">
@@ -2073,6 +2262,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			</button>
 		{/if}
 	</div>
+{/if}
+
+{#if viewer}
+	<Viewer url={viewer.url} mime={viewer.mime} onclose={() => (viewer = null)} />
 {/if}
 
 <ConfirmDialog />
@@ -2820,7 +3013,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	.composer button {
 		padding-inline: 1.4rem;
 	}
-	.composer .emoji-btn {
+	.composer .emoji-btn,
+	.composer .attach-btn {
 		flex: none;
 		display: grid;
 		place-items: center;
@@ -2830,7 +3024,71 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		color: var(--muted);
 		cursor: pointer;
 	}
+	.file-input {
+		display: none;
+	}
+	.att-error {
+		margin: 0;
+		padding: 0.4rem 1.25rem;
+		border-top: 0.5px solid var(--danger);
+		background: var(--panel);
+		color: var(--danger);
+		font-size: 0.85em;
+	}
+	main.dragging {
+		outline: 2px dashed var(--accent-2);
+		outline-offset: -6px;
+	}
+	.bubble :global(.att) {
+		margin-bottom: 0.3rem;
+	}
+	.up-box {
+		position: relative;
+		width: min(18rem, calc(20rem * var(--ratio)), 70vw);
+		max-height: 20rem;
+		overflow: hidden;
+		border-radius: calc(var(--radius-lg) - 4px);
+		background: var(--panel-2);
+	}
+	.up-box img {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		filter: blur(10px);
+		transform: scale(1.15);
+	}
+	.up-over {
+		position: absolute;
+		inset: 0;
+		display: grid;
+		place-content: center;
+		justify-items: center;
+		gap: 0.4rem;
+		padding: 0.6rem;
+		background: color-mix(in srgb, var(--panel) 55%, transparent);
+		color: var(--heading);
+		font-size: 0.85em;
+		text-align: center;
+	}
+	.up-over p {
+		margin: 0;
+	}
+	.up-over progress {
+		width: 8rem;
+	}
+	.up-over button {
+		min-height: 0;
+		padding: 0.25rem 0.8rem;
+		cursor: pointer;
+	}
+	.up-over .row {
+		display: flex;
+		gap: 0.4rem;
+	}
 	.composer .emoji-btn:hover:not(:disabled),
+	.composer .attach-btn:hover:not(:disabled),
 	.composer .emoji-btn[aria-expanded='true'] {
 		border: 0;
 		background: none;

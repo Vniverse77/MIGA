@@ -8,6 +8,7 @@ import {
 	type Identity,
 	type Reply
 } from './crypto';
+import type { Att } from './attach';
 import { RECENT_EMOJI_KEY } from './emoji';
 import { deleteDb, openDb, req, tx, type MessageRecord } from './db';
 
@@ -32,6 +33,8 @@ export type Message = {
 	ts: number;
 	state: 'pending' | 'sent' | 'failed' | 'received';
 	reply?: Reply;
+	/** Photo, GIF or video. `text` is then the caption (may be empty). Own messages also keep the blob delete token. */
+	att?: Att;
 	/** Time (ms) of the last edit; set means the bubble shows "edited". Only the latest text is kept. */
 	edited?: number;
 	/** Own messages: the peer's device stored it ('delivered') or its user looked at it ('read'). */

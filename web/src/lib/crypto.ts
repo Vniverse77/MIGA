@@ -10,6 +10,7 @@ import {
 import { hkdf } from '@noble/hashes/hkdf';
 import { sha256, sha512 } from '@noble/hashes/sha2';
 import { bytesToHex, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils';
+import { cleanAtt, type Att } from './attach.ts';
 import type { Message } from './storage';
 
 export type Identity = { secret: Uint8Array; address: string };
@@ -30,7 +31,14 @@ export type Plain = {
 	seen?: string[];
 	/** Edit control message (no top-level text, no bubble): replaces the text of one of the SENDER's messages. */
 	edit?: Edit;
+	/** Attachment (photo, GIF, video). `text` is then the caption, possibly empty. */
+	att?: Att;
 };
+/**
+ * Shown by clients that predate attachments (v0.5.0 needs a string `text` or it drops the message).
+ * New clients never show it: they read the real caption from `cap` and ignore `text`.
+ */
+export const ATT_PLACEHOLDER = '[photo \u2014 update MIGA to view]';
 /** The longest text of a message (also the longest an edit may carry). */
 export const MAX_TEXT = 4000;
 export type Edit = { id: string; text: string };
@@ -121,14 +129,19 @@ export function encrypt(
 	peer: string,
 	text: string,
 	name?: string,
-	reply?: Reply
+	reply?: Reply,
+	att?: Att
 ): string {
+	// With an attachment, `text` is the old-client fallback and `cap` the real caption.
+	const wire = att
+		? { text: text ? `${text}\n${ATT_PLACEHOLDER}` : ATT_PLACEHOLDER, cap: text, att: { ...att, del: undefined } }
+		: { text };
 	return seal(
 		id,
 		peer,
 		JSON.stringify({
 			v: 0,
-			text,
+			...wire,
 			ts: Date.now(),
 			...(name ? { name } : {}),
 			...(reply ? { reply } : {})
@@ -229,8 +242,11 @@ export function decrypt(id: Identity, peer: string, body: string): Plain | null 
 				? { text: '', ts, ...(ack.length ? { ack } : {}), ...(seen.length ? { seen } : {}) }
 				: null;
 		}
+		const att = parsed.att === undefined ? null : cleanAtt(parsed.att);
+		if (parsed.att !== undefined && !att) return null;
 		return {
-			text: parsed.text,
+			text: att ? (typeof parsed.cap === 'string' ? parsed.cap.slice(0, MAX_TEXT) : '') : parsed.text,
+			...(att ? { att } : {}),
 			ts: Number(parsed.ts) || Date.now(),
 			name: typeof parsed.name === 'string' ? parsed.name : undefined,
 			reply: cleanReply(parsed.reply) ?? undefined

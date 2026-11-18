@@ -5,6 +5,7 @@ import { hkdf } from '@noble/hashes/hkdf';
 import { scryptAsync } from '@noble/hashes/scrypt';
 import { sha256 } from '@noble/hashes/sha2';
 import { randomBytes, utf8ToBytes } from '@noble/hashes/utils';
+import { cleanAtt } from './attach';
 import { cleanIds, cleanReply, editTime, fromBase64, identityFromSecret, isAddress, isSafetyNumber, toBase64, type Identity } from './crypto';
 import { MAX_BLOCKED, type Chats, type Contact, type Device, type Message, type Profile } from './storage';
 import { platform } from './platform';
@@ -203,6 +204,8 @@ export function cleanMessage(value: unknown, maxText: number): Message | null {
 	// A copy is never "pending" here: only the device that wrote a message sends it.
 	const state = message.mine ? (message.state === 'failed' ? 'failed' : 'sent') : 'received';
 	const reply = message.reply === undefined ? null : cleanReply(message.reply);
+	const att = message.att === undefined ? null : cleanAtt(message.att, message.mine);
+	if (message.att !== undefined && !att) return null;
 	return {
 		id: message.id,
 		mine: message.mine,
@@ -210,6 +213,7 @@ export function cleanMessage(value: unknown, maxText: number): Message | null {
 		ts,
 		state,
 		...(reply ? { reply } : {}),
+		...(att ? { att } : {}),
 		...(Number.isFinite(Number(message.edited)) && Number(message.edited) > 0 ? { edited: editTime(message.edited) } : {}),
 		...(message.mine && (message.delivery === 'delivered' || message.delivery === 'read')
 			? { delivery: message.delivery }

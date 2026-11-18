@@ -11,7 +11,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -84,8 +86,24 @@ func main() {
 	}
 	go s.purgeLoop()
 
+	blobDir := env("MIGA_BLOBS", filepath.Join(filepath.Dir(dbPath), "blobs"))
+	quota := int64(defaultBlobQuota)
+	if v := os.Getenv("MIGA_BLOB_QUOTA"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			log.Fatalf("MIGA_BLOB_QUOTA must be a number of bytes: %q", v)
+		}
+		quota = n
+	}
+	blobs, err := newBlobStore(db, blobDir, quota, s.origins)
+	if err != nil {
+		log.Fatalf("blob store: %v", err)
+	}
+	go blobs.cleanupLoop()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWS)
+	blobs.register(mux)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
 	if static != "" {
 		mux.Handle("/", securityHeaders(http.FileServer(http.Dir(static))))
