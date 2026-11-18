@@ -39,6 +39,14 @@ const KEY_DEVICES = 'miga.devices';
 const KEY_LINK = 'miga.link';
 const KEY_BLOCKED = 'miga.blocked';
 const KEY_RECEIPTS = 'miga.receipts';
+const KEY_UNREAD = 'miga.unread';
+const KEY_MUTED = 'miga.muted';
+const KEY_NOTIFY = 'miga.notify';
+const KEY_NOTIFY_BANNER = 'miga.notify-banner';
+
+/** What a notification shows: sender and text, sender only (default), or nothing but "New message". */
+export type NotifyMode = 'full' | 'name' | 'generic';
+const NOTIFY_MODES: NotifyMode[] = ['full', 'name', 'generic'];
 
 /** The most addresses one account may block. */
 export const MAX_BLOCKED = 500;
@@ -70,6 +78,41 @@ export function loadReceipts(): boolean {
 		return localStorage.getItem(KEY_RECEIPTS) === '1';
 	} catch {
 		return false;
+	}
+}
+
+/** Notification content (per device, not synced: it depends on this device's screen and system). */
+export function loadNotifyMode(): NotifyMode {
+	try {
+		const v = localStorage.getItem(KEY_NOTIFY);
+		return NOTIFY_MODES.includes(v as NotifyMode) ? (v as NotifyMode) : 'name';
+	} catch {
+		return 'name';
+	}
+}
+
+export function saveNotifyMode(mode: NotifyMode): void {
+	try {
+		localStorage.setItem(KEY_NOTIFY, mode);
+	} catch {
+		// Storage can be blocked; the default applies next time.
+	}
+}
+
+/** The user dismissed the "turn on notifications" banner. */
+export function loadNotifyBannerDismissed(): boolean {
+	try {
+		return localStorage.getItem(KEY_NOTIFY_BANNER) === '1';
+	} catch {
+		return false;
+	}
+}
+
+export function saveNotifyBannerDismissed(): void {
+	try {
+		localStorage.setItem(KEY_NOTIFY_BANNER, '1');
+	} catch {
+		// Ignored: the banner may come back.
 	}
 }
 
@@ -132,7 +175,11 @@ export async function eraseAll(): Promise<void> {
 		KEY_DEVICES,
 		KEY_LINK,
 		KEY_BLOCKED,
-		KEY_RECEIPTS
+		KEY_RECEIPTS,
+		KEY_UNREAD,
+		KEY_MUTED,
+		KEY_NOTIFY,
+		KEY_NOTIFY_BANNER
 	]) {
 		localStorage.removeItem(key);
 	}
@@ -140,7 +187,16 @@ export async function eraseAll(): Promise<void> {
 
 // ── Contacts, blocked list and chats (IndexedDB, with a localStorage fallback) ────────────
 
-export type AppData = { contacts: Contact[]; chats: Chats; blocked: string[] };
+export type Unread = Record<string, number>;
+export type AppData = {
+	contacts: Contact[];
+	chats: Chats;
+	blocked: string[];
+	/** Unread incoming messages per chat. Kept next to the chats so it survives a reload. */
+	unread: Unread;
+	/** Chats that count unread messages but never notify. */
+	muted: string[];
+};
 
 let db: IDBDatabase | null = null;
 let erased = false;
@@ -150,6 +206,8 @@ let writeQueue: Promise<unknown> = Promise.resolve();
 let storedMessages = new Map<string, string>();
 let storedContacts = new Map<string, string>();
 let storedBlocked = '';
+let storedUnread = '';
+let storedMuted = '';
 
 function queue(job: () => Promise<unknown>): void {
 	writeQueue = writeQueue.then(job).catch(() => {});
@@ -163,8 +221,20 @@ function cleanBlocked(stored: unknown): string[] {
 	);
 }
 
+function cleanUnread(stored: unknown): Unread {
+	const out: Unread = {};
+	if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+		for (const [peer, n] of Object.entries(stored)) {
+			if (isAddress(peer) && typeof n === 'number' && n > 0) out[peer] = Math.min(Math.floor(n), 99999);
+		}
+	}
+	return out;
+}
+
 function legacyData(): AppData {
 	return {
+		unread: cleanUnread(readJson<unknown>(KEY_UNREAD, {})),
+		muted: cleanBlocked(readJson<unknown>(KEY_MUTED, [])),
 		contacts: readJson<Contact[]>(KEY_CONTACTS, []),
 		chats: readJson<Chats>(KEY_CHATS, {}),
 		blocked: cleanBlocked(readJson<unknown>(KEY_BLOCKED, []))
@@ -210,6 +280,8 @@ export async function loadData(): Promise<AppData> {
 			const msgs = await req(t.objectStore('messages').index('chat_i').getAll());
 			const contactRows = (await req(t.objectStore('contacts').getAll())) as (Contact & { i: number })[];
 			const blocked = cleanBlocked(await req(t.objectStore('meta').get('blocked')));
+			const unread = cleanUnread(await req(t.objectStore('meta').get('unread')));
+			const muted = cleanBlocked(await req(t.objectStore('meta').get('muted')));
 			const chats: Chats = {};
 			storedMessages = new Map();
 			for (const { chat, i, ...m } of msgs as MessageRecord[]) {
@@ -223,8 +295,10 @@ export async function loadData(): Promise<AppData> {
 				return c;
 			});
 			storedBlocked = JSON.stringify(blocked);
+			storedUnread = JSON.stringify(unread);
+			storedMuted = JSON.stringify(muted);
 			void navigator.storage?.persist?.();
-			return { contacts, chats, blocked };
+			return { contacts, chats, blocked, unread, muted };
 		});
 	} catch {
 		// No usable IndexedDB (some private modes): keep working from localStorage as before.
@@ -275,6 +349,30 @@ export function saveBlocked(blocked: string[]): void {
 		if (json === storedBlocked) return;
 		await tx(db!, ['meta'], 'readwrite', (t) => void t.objectStore('meta').put(blocked, 'blocked'));
 		storedBlocked = json;
+	});
+}
+
+/** Unread counters per chat (small, rewritten whole). */
+export function saveUnread(unread: Unread): void {
+	if (erased) return;
+	if (!db) return void localStorage.setItem(KEY_UNREAD, JSON.stringify(unread));
+	const json = JSON.stringify(unread);
+	queue(async () => {
+		if (json === storedUnread) return;
+		await tx(db!, ['meta'], 'readwrite', (t) => void t.objectStore('meta').put(unread, 'unread'));
+		storedUnread = json;
+	});
+}
+
+/** Muted chats (addresses). */
+export function saveMuted(muted: string[]): void {
+	if (erased) return;
+	if (!db) return void localStorage.setItem(KEY_MUTED, JSON.stringify(muted));
+	const json = JSON.stringify(muted);
+	queue(async () => {
+		if (json === storedMuted) return;
+		await tx(db!, ['meta'], 'readwrite', (t) => void t.objectStore('meta').put(muted, 'muted'));
+		storedMuted = json;
 	});
 }
 

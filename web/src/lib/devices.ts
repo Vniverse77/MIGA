@@ -42,6 +42,8 @@ export type SyncMessage =
 			devices?: Device[];
 			/** The complete block list; it replaces the one on the receiving device. */
 			blocked?: string[];
+			/** The complete list of muted chats; it replaces the one on the receiving device. */
+			muted?: string[];
 	  }
 	| { k: 'history'; chats: Chats }
 	| { k: 'msg'; peer: string; message: Message; name?: string }

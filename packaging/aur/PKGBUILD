@@ -8,7 +8,7 @@ pkgdesc="End-to-end encrypted messenger with no account"
 arch=('x86_64')
 url="https://miga.vniverse77.com"
 license=('AGPL-3.0-or-later')
-depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3')
+depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3' 'libayatana-appindicator')
 makedepends=('cargo' 'nodejs' 'npm' 'git')
 source=("miga::git+https://github.com/Vniverse77/MIGA.git#tag=v$pkgver")
 sha256sums=('SKIP')

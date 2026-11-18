@@ -47,6 +47,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	import Logo from '../Logo.svelte';
 	import { getTheme, setTheme, type Theme } from '../theme.svelte';
 	import { t } from '../i18n.svelte';
+	import type { NotifyPermission } from '../platform/types';
 	import LangSelect from '../LangSelect.svelte';
 	import { RelayClient, type Incoming, type RelayEvents, type Status } from '../relay';
 	import {
@@ -59,6 +60,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		loadIdentity,
 		loadOpenLink,
 		loadProfile,
+		loadNotifyBannerDismissed,
+		loadNotifyMode,
 		loadReceipts,
 		saveBlocked,
 		saveChats,
@@ -67,12 +70,18 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		saveIdentity,
 		saveOpenLink,
 		saveProfile,
+		saveMuted,
+		saveNotifyBannerDismissed,
+		saveNotifyMode,
 		saveReceipts,
+		saveUnread,
 		type Chats,
 		type Contact,
 		type Device,
 		type Message,
-		type Profile
+		type NotifyMode,
+		type Profile,
+		type Unread
 	} from '../storage';
 
 	const MAX_TEXT = 4000;
@@ -90,6 +99,13 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	let blocked = $state<string[]>([]);
 	/** Read receipts: send mine and show theirs. Off by default (anonymity first). */
 	let receipts = $state(false);
+	/** Unread incoming messages per chat; persisted with the chats. Control messages never count. */
+	let unread = $state<Unread>({});
+	/** Muted chats still count unread messages but never notify. Synced to linked devices. */
+	let muted = $state<string[]>([]);
+	let notifyMode = $state<NotifyMode>('name');
+	let notifyPerm = $state<NotifyPermission>('unsupported');
+	let bannerDismissed = $state(true);
 	/** document.visibilityState === 'visible'; read receipts are only sent while the chat can be seen. */
 	let visible = $state(true);
 	let active = $state<string | null>(null);
@@ -202,10 +218,17 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			chats = data.chats;
 			blocked = data.blocked;
 			receipts = loadReceipts();
+			unread = data.unread;
+			muted = data.muted;
+			notifyMode = loadNotifyMode();
+			bannerDismissed = loadNotifyBannerDismissed();
+			void refreshPermission();
 			begin();
 		});
+		baseTitle = document.title || 'MIGA';
 		const onVisible = () => {
 			visible = document.visibilityState === 'visible';
+			if (visible) void refreshPermission();
 		};
 		onVisible();
 		document.addEventListener('visibilitychange', onVisible);
@@ -213,6 +236,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		const onHide = () => flushAcks();
 		window.addEventListener('pagehide', onHide);
 		return () => {
+			document.title = baseTitle;
 			document.removeEventListener('visibilitychange', onVisible);
 			window.removeEventListener('pagehide', onHide);
 			clearTimeout(ackTimer);
@@ -284,6 +308,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				// Every online device gets the message from the relay; offline ones get this copy.
 				if (addMessages(m.from, [message])) {
 					syncAll({ k: 'msg', peer: m.from, message, name: plain.name });
+					noteIncoming(m.from, message.text, true);
 				}
 				persist();
 				// Stored: tell the sender (also for a re-delivery, in case the first ack was lost).
@@ -367,6 +392,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					blocked = cleanBlocked(message.blocked, identity?.address);
 					saveBlocked($state.snapshot(blocked));
 				}
+				if (message.muted !== undefined) {
+					muted = cleanBlocked(message.muted, identity?.address);
+					saveMuted($state.snapshot(muted));
+				}
 				for (const other of cleanDevices(message.devices)) {
 					if (other.address !== device.address && !devices.some((d) => d.address === other.address)) {
 						devices.push(other);
@@ -390,7 +419,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				const clean = cleanMessage(message.message, MAX_TEXT);
 				if (!clean || !isAddress(message.peer)) break;
 				ensureContact(message.peer, clean.mine ? undefined : message.name);
-				addMessages(message.peer, [clean]);
+				// A copy from another device (it was offline when this arrived): counted, never notified.
+				if (addMessages(message.peer, [clean]) && !clean.mine) noteIncoming(message.peer, clean.text, false);
 				persist();
 				break;
 			}
@@ -439,6 +469,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		];
 		syncSend(to, { k: 'state', profile: $state.snapshot(profile), devices: everyone });
 		syncSend(to, { k: 'state', blocked: $state.snapshot(blocked) });
+		syncSend(to, { k: 'state', muted: $state.snapshot(muted) });
 		syncSend(to, { k: 'receipts', on: receipts });
 		for (let i = 0; i < all.length; i += 50) {
 			syncSend(to, { k: 'state', contacts: all.slice(i, i + 50) });
@@ -689,6 +720,82 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		if (on) checkSeen();
 	}
 
+	// ── Unread counters and notifications ───────────────────────────────────────────────
+
+	let baseTitle = 'MIGA';
+	/** Muted chats are left out of the title: they count in the list but must not nag. */
+	const unreadTotal = $derived(
+		Object.entries(unread).reduce((sum, [peer, n]) => (muted.includes(peer) ? sum : sum + n), 0)
+	);
+
+	$effect(() => {
+		document.title = unreadTotal > 0 ? `(${unreadTotal > 99 ? '99+' : unreadTotal}) ${baseTitle}` : baseTitle;
+	});
+
+	/** The open chat is on screen: its incoming messages are read as they arrive. */
+	function chatInView(peer: string): boolean {
+		return view === 'chat' && active === peer && visible;
+	}
+
+	/** A new incoming text message: count it unless the chat is being read, and notify unless muted. */
+	function noteIncoming(peer: string, text: string, notify: boolean): void {
+		const reading = chatInView(peer);
+		if (!reading) {
+			unread[peer] = (unread[peer] ?? 0) + 1;
+			saveUnread($state.snapshot(unread));
+		}
+		if (!notify || muted.includes(peer) || blocked.includes(peer)) return;
+		// Reading with the window in front of the user: no alert.
+		if (reading && document.hasFocus()) return;
+		const name = contacts.find((c) => c.address === peer)?.name ?? shortAddress(peer);
+		const generic = t('notif_new_message');
+		platform.notifier.show({
+			tag: 'chat-' + peer,
+			title: notifyMode === 'generic' ? 'MIGA' : name,
+			body: notifyMode === 'full' ? text.slice(0, 140) : generic,
+			onClick: () => {
+				window.focus();
+				openChat(peer);
+			}
+		});
+	}
+
+	// Opening a chat that is on screen clears its counter and removes its notification.
+	$effect(() => {
+		if (!active || view !== 'chat' || !visible || !unread[active]) return;
+		const peer = active;
+		delete unread[peer];
+		saveUnread($state.snapshot(unread));
+		platform.notifier.close('chat-' + peer);
+	});
+
+	async function refreshPermission(): Promise<void> {
+		notifyPerm = await platform.notifier.permission();
+	}
+
+	/** Called from a click only: the browser may refuse a prompt that was not asked for by the user. */
+	async function enableNotifications(): Promise<void> {
+		notifyPerm = await platform.notifier.request();
+	}
+
+	function dismissBanner(): void {
+		bannerDismissed = true;
+		saveNotifyBannerDismissed();
+	}
+
+	function setNotifyMode(mode: NotifyMode): void {
+		notifyMode = mode;
+		saveNotifyMode(mode);
+	}
+
+	function toggleMute(address: string): void {
+		menuOpen = false;
+		ctx = null;
+		muted = muted.includes(address) ? muted.filter((a) => a !== address) : [...muted, address].slice(0, MAX_BLOCKED);
+		saveMuted($state.snapshot(muted));
+		syncAll({ k: 'state', muted: $state.snapshot(muted) });
+	}
+
 	function persist(): void {
 		saveContacts($state.snapshot(contacts));
 		saveChats($state.snapshot(chats));
@@ -893,7 +1000,14 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		});
 		if (!ok) return;
 		delete chats[address];
+		clearUnread(address);
 		persist();
+	}
+
+	function clearUnread(address: string): void {
+		if (!unread[address]) return;
+		delete unread[address];
+		saveUnread($state.snapshot(unread));
 	}
 
 	/** Blocks or unblocks an address, here and on the linked devices. A blocked address stays blocked after its contact is deleted. */
@@ -931,6 +1045,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		if (!ok) return;
 		contacts = contacts.filter((c) => c.address !== address);
 		delete chats[address];
+		clearUnread(address);
 		persist();
 		if (active === address) active = null;
 	}
@@ -1031,6 +1146,37 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	<title>MIGA</title>
 </svelte:head>
 
+{#snippet rowMeta(address: string, last: Message | undefined)}
+	<span class="meta">
+		{#if last}<small class="when">{timeOf(last.ts)}</small>{/if}
+		<span class="marks">
+			{#if muted.includes(address)}
+				<svg class="mute-icon" viewBox="0 0 24 24" width="13" height="13" role="img" aria-label={t('muted_label')} fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<title>{t('muted_label')}</title>
+					<path d="M6 8a6 6 0 0 1 9.3-5M18 8c0 3 .7 5 2 7H5M10 21a2 2 0 0 0 4 0M3 3l18 18" />
+				</svg>
+			{/if}
+			{#if unread[address]}
+				<span class="badge" class:quiet={muted.includes(address)} data-unread={unread[address]} aria-label={t('unread_count', { n: unread[address] })}>
+					{unread[address] > 99 ? '99+' : unread[address]}
+				</span>
+			{/if}
+		</span>
+	</span>
+{/snippet}
+
+{#snippet notifyBanner()}
+	{#if notifyPerm === 'default' && !bannerDismissed && identity}
+		<div class="notify-banner" role="region" aria-label={t('notif_title')}>
+			<p>{t('notif_banner')}</p>
+			<div class="row">
+				<button type="button" class="primary" onclick={enableNotifications}>{t('notif_enable')}</button>
+				<button type="button" onclick={dismissBanner}>{t('notif_not_now')}</button>
+			</div>
+		</div>
+	{/if}
+{/snippet}
+
 {#snippet profileFields()}
 	<label class="field">
 		<span>{t('profile_name')}</span>
@@ -1126,6 +1272,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				</button>
 			</div>
 
+			{@render notifyBanner()}
 			<ul class="contacts side-list">
 				{#each contacts as contact (contact.address)}
 					{@const last = chats[contact.address]?.at(-1)}
@@ -1142,7 +1289,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 								<strong>{contact.name}</strong>
 								<small>{last ? last.text : shortAddress(contact.address)}</small>
 							</span>
-							{#if last}<small class="when">{timeOf(last.ts)}</small>{/if}
+							{@render rowMeta(contact.address, last)}
 						</button>
 					</li>
 				{:else}
@@ -1213,6 +1360,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				<p class="notice" role="status">{notice}</p>
 			{/if}
 
+			{@render notifyBanner()}
 			<ul class="contacts">
 				{#each contacts as contact (contact.address)}
 					{@const last = chats[contact.address]?.at(-1)}
@@ -1228,7 +1376,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 								<strong>{contact.name}</strong>
 								<small>{last ? last.text : shortAddress(contact.address)}</small>
 							</span>
-							{#if last}<small class="when">{timeOf(last.ts)}</small>{/if}
+							{@render rowMeta(contact.address, last)}
 						</button>
 					</li>
 				{:else}
@@ -1283,6 +1431,24 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							<span>{t('receipts_label')}</span>
 						</label>
 						<p class="hint">{t('receipts_note')}</p>
+					</section>
+
+					<section class="card" id="notifications">
+						<h2>{t('notif_title')}</h2>
+						<p class="hint" data-notif-state={notifyPerm}>{t(`notif_state_${notifyPerm === 'granted' ? 'on' : notifyPerm}`)}</p>
+						{#if notifyPerm === 'default'}
+							<button type="button" class="primary" onclick={enableNotifications}>{t('notif_enable')}</button>
+						{/if}
+						<h3>{t('notif_content')}</h3>
+						<div class="seg seg-wide" role="group" aria-label={t('notif_content')}>
+							{#each ['full', 'name', 'generic'] as const as mode (mode)}
+								<button type="button" aria-pressed={notifyMode === mode} onclick={() => setNotifyMode(mode)}>
+									{t(`notif_${mode}`)}
+								</button>
+							{/each}
+						</div>
+						<p class="hint">{t('notif_privacy')}</p>
+						<p class="hint">{t('notif_note')}</p>
 					</section>
 
 					<section class="card">
@@ -1442,6 +1608,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						</button>
 						{#if menuOpen}
 							<div class="menu" role="menu">
+								<button type="button" role="menuitem" onclick={() => toggleMute(activeContact.address)}>
+									{t(muted.includes(activeContact.address) ? 'unmute_chat' : 'mute_chat')}
+								</button>
 								<button
 									type="button"
 									role="menuitem"
@@ -1578,6 +1747,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 {#if ctx}
 	<div class="menu ctx" role="menu" style:left="{ctx.x}px" style:top="{ctx.y}px">
+		<button type="button" role="menuitem" onclick={() => ctx && toggleMute(ctx.address)}>
+			{t(ctx && muted.includes(ctx.address) ? 'unmute_chat' : 'mute_chat')}
+		</button>
 		<button type="button" role="menuitem" class="danger" onclick={() => ctx && deleteConversation(ctx.address)}>
 			{t('delete_chat')}
 		</button>
@@ -2093,6 +2265,57 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		flex: none;
 		color: var(--dim);
 	}
+	.meta {
+		display: grid;
+		flex: none;
+		justify-items: end;
+		gap: 0.25rem;
+	}
+	.marks {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		min-height: 1.1rem;
+	}
+	.mute-icon {
+		color: var(--dim);
+	}
+	.badge {
+		min-width: 1.2rem;
+		padding: 0 0.4rem;
+		border-radius: 999px;
+		background: var(--accent);
+		color: var(--accent-ink);
+		font-size: 0.7rem;
+		font-weight: 700;
+		line-height: 1.2rem;
+		text-align: center;
+	}
+	.badge.quiet {
+		background: var(--panel-2);
+		border: 0.5px solid var(--line-strong);
+		color: var(--muted);
+		line-height: calc(1.2rem - 1px);
+	}
+	.notify-banner {
+		display: grid;
+		gap: 0.6rem;
+		margin: 0 0 0.6rem;
+		padding: 0.75rem;
+		border: 0.5px solid var(--line-strong);
+		border-radius: var(--radius-lg);
+		background: var(--panel);
+	}
+	.notify-banner p {
+		margin: 0;
+		color: var(--text);
+		font-size: 0.82rem;
+	}
+	.notify-banner .row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+	}
 	.empty {
 		color: var(--muted);
 		font-size: 0.9rem;
@@ -2562,6 +2785,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);
 		gap: 0.4rem;
+	}
+	.seg.seg-wide {
+		grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
 	}
 	.seg button[aria-pressed='true'] {
 		background: var(--accent);

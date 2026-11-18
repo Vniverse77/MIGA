@@ -2,10 +2,12 @@
 // Mobile-only features go here: push wake-ups, share sheet, QR scanning for addresses and link codes,
 // and the native transports from the censorship-resistance plan (DNS and low-volume UDP).
 import { PUBLIC_ORIGIN, PUBLIC_RELAY, type Platform } from './types';
+import { webNotifier } from './webnotify';
 
 export const platform: Platform = {
 	target: 'mobile',
 	label: 'mobile',
+	notifier: webNotifier,
 	packaged: true,
 	relayUrl: () => PUBLIC_RELAY,
 	publicOrigin: () => PUBLIC_ORIGIN,

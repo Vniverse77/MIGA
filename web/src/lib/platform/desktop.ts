@@ -1,10 +1,56 @@
 // Desktop (Tauri window on Linux, later Windows and macOS). Files come from inside the package.
 // Desktop-only features go here: tray icon, start at login, native notifications, global shortcuts.
-import { PUBLIC_ORIGIN, PUBLIC_RELAY, type Platform } from './types';
+import {
+	isPermissionGranted,
+	requestPermission,
+	sendNotification
+} from '@tauri-apps/plugin-notification';
+import { PUBLIC_ORIGIN, PUBLIC_RELAY, type Notifier, type NotifyPermission, type Platform } from './types';
+import { webNotifier } from './webnotify';
+
+/** True inside the Tauri shell; false when this build is opened in an ordinary browser. */
+const inTauri = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+/**
+ * Native notifications through the official Tauri plugin (libnotify on Linux). The desktop plugin
+ * cannot report clicks or replace a shown notification, so `onClick` and `tag` are not used here;
+ * the app only notifies while its window is hidden or unfocused, so a stale entry is rare.
+ */
+const nativeNotifier: Notifier = {
+	async permission(): Promise<NotifyPermission> {
+		try {
+			return (await isPermissionGranted()) ? 'granted' : 'default';
+		} catch {
+			return 'unsupported';
+		}
+	},
+	async request(): Promise<NotifyPermission> {
+		try {
+			return await requestPermission();
+		} catch {
+			return 'unsupported';
+		}
+	},
+	show({ title, body }) {
+		try {
+			sendNotification({ title, body });
+		} catch {
+			// A failed notification must never break message handling.
+		}
+	},
+	close() {}
+};
+
 
 export const platform: Platform = {
 	target: 'desktop',
 	label: 'desktop',
+	notifier: {
+		permission: () => (inTauri() ? nativeNotifier : webNotifier).permission(),
+		request: () => (inTauri() ? nativeNotifier : webNotifier).request(),
+		show: (n) => (inTauri() ? nativeNotifier : webNotifier).show(n),
+		close: (tag) => (inTauri() ? nativeNotifier : webNotifier).close(tag)
+	},
 	packaged: true,
 	relayUrl: () => PUBLIC_RELAY,
 	publicOrigin: () => PUBLIC_ORIGIN,
