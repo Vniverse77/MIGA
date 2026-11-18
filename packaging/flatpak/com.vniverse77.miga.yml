@@ -1,4 +1,3 @@
-# DRAFT, not built or tested yet (flatpak-builder was not installed when this was written).
 # Local packaging from the .deb that `npx tauri build --bundles deb` produces. Flathub itself
 # requires a build from source with vendored dependencies; that is a later step.
 # Build:  flatpak-builder --user --install --force-clean build-dir packaging/flatpak/com.vniverse77.miga.yml
@@ -13,12 +12,17 @@ finish-args:
   - --share=ipc
   - --share=network
   - --device=dri
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --talk-name=org.freedesktop.Notifications
+  - --env=WEBKIT_DISABLE_DMABUF_RENDERER=1
 modules:
+  # tray icon library (not in the GNOME runtime); from github.com/flathub/shared-modules
+  - /home/vniverse77/.cache/miga-flatpak/shared-modules/libayatana-appindicator/libayatana-appindicator-gtk3.json
   - name: miga
     buildsystem: simple
     sources:
       - type: file
-        path: ../../desktop/src-tauri/target/release/bundle/deb/MIGA_0.5.0_amd64.deb
+        path: ../../desktop/src-tauri/target/release/bundle/deb/MIGA_0.6.0-beta.1_amd64.deb
         dest-filename: miga.deb
       - type: file
         path: ../linux/com.vniverse77.miga.desktop

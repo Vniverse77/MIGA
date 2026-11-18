@@ -6,8 +6,8 @@
 
 	const YAY = 'yay -S miga-messenger';
 	// Bundle file of the current release; update the version with every release.
-	const FLATPAK_FILE = 'MIGA_0.5.0_x86_64.flatpak';
-	const FLATPAK_URL = `https://github.com/Vniverse77/MIGA/releases/download/v0.5.0/${FLATPAK_FILE}`;
+	const FLATPAK_FILE = 'MIGA_0.6.0-beta.1_x86_64.flatpak';
+	const FLATPAK_URL = `https://github.com/Vniverse77/MIGA/releases/download/v0.6.0-beta.1/${FLATPAK_FILE}`;
 	const FLATPAK_CMD = `flatpak install --user ./${FLATPAK_FILE}`;
 	let copied = $state('');
 	async function copy(text: string) {
