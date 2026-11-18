@@ -46,6 +46,8 @@ export type SyncMessage =
 	| { k: 'history'; chats: Chats }
 	| { k: 'msg'; peer: string; message: Message; name?: string }
 	| { k: 'del'; peer: string; items: { id: string; mine: boolean }[] }
+	| { k: 'st'; peer: string; ids: string[]; d: 'delivered' | 'read' }
+	| { k: 'receipts'; on: boolean }
 	| { k: 'bye'; address: string };
 
 /** 12 characters, 60 bits. The slow key derivation below is what makes that enough. */
@@ -199,7 +201,10 @@ export function cleanMessage(value: unknown, maxText: number): Message | null {
 		text: message.text.slice(0, maxText),
 		ts,
 		state,
-		...(reply ? { reply } : {})
+		...(reply ? { reply } : {}),
+		...(message.mine && (message.delivery === 'delivered' || message.delivery === 'read')
+			? { delivery: message.delivery }
+			: {})
 	};
 }
 

@@ -12,6 +12,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		decrypt,
 		encrypt,
 		encryptDelete,
+		encryptReceipt,
+		MAX_DELETE,
+		cleanIds,
 		hexToBytes,
 		identityFromSecret,
 		isAddress,
@@ -56,6 +59,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		loadIdentity,
 		loadOpenLink,
 		loadProfile,
+		loadReceipts,
 		saveBlocked,
 		saveChats,
 		saveContacts,
@@ -63,6 +67,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		saveIdentity,
 		saveOpenLink,
 		saveProfile,
+		saveReceipts,
 		type Chats,
 		type Contact,
 		type Device,
@@ -83,6 +88,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	let profile = $state<Profile>({ name: '', share: true });
 	let devices = $state<Device[]>([]);
 	let blocked = $state<string[]>([]);
+	/** Read receipts: send mine and show theirs. Off by default (anonymity first). */
+	let receipts = $state(false);
+	/** document.visibilityState === 'visible'; read receipts are only sent while the chat can be seen. */
+	let visible = $state(true);
 	let active = $state<string | null>(null);
 	let view = $state<'chat' | 'settings' | 'new'>('chat');
 	let menuOpen = $state(false);
@@ -127,6 +136,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	let linkTimer: ReturnType<typeof setTimeout> | undefined;
 	let outboxTimer: ReturnType<typeof setInterval> | undefined;
 	const outbox: { to: string; id: string; body: string }[] = [];
+	/** Delivery acks waiting to be sent (batched ~1 s): peer -> message ids. */
+	const ackQueue = new Map<string, Set<string>>();
+	let ackTimer: ReturnType<typeof setTimeout> | undefined;
+	const ACK_MS = 1000;
 
 	const activeContact = $derived(contacts.find((c) => c.address === active) ?? null);
 	const activeMessages = $derived(active ? (chats[active] ?? []) : []);
@@ -188,9 +201,21 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			contacts = data.contacts;
 			chats = data.chats;
 			blocked = data.blocked;
+			receipts = loadReceipts();
 			begin();
 		});
+		const onVisible = () => {
+			visible = document.visibilityState === 'visible';
+		};
+		onVisible();
+		document.addEventListener('visibilitychange', onVisible);
+		// Do not lose batched acks when the tab goes away.
+		const onHide = () => flushAcks();
+		window.addEventListener('pagehide', onHide);
 		return () => {
+			document.removeEventListener('visibilitychange', onVisible);
+			window.removeEventListener('pagehide', onHide);
+			clearTimeout(ackTimer);
 			closed = true;
 			relay?.close();
 			deviceRelay?.close();
@@ -218,7 +243,11 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 		relay = new RelayClient(relayUrl(), me, {
 			onStatus: (s) => (status = s),
-			onReady: () => resendPending(me),
+			onReady: () => {
+				resendPending(me);
+				flushAcks();
+				checkSeen();
+			},
 			onMessage: (m) => {
 				// Blocked: acknowledged (the relay deletes it) and dropped without a trace.
 				if (blocked.includes(m.from)) return true;
@@ -233,6 +262,13 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						persist();
 						syncAll({ k: 'del', peer: m.from, items });
 					}
+					return true;
+				}
+				// Receipts: control messages, never a bubble, never acknowledged themselves.
+				if (plain.ack || plain.seen) {
+					if (plain.ack) applyStatus(m.from, plain.ack, 'delivered', true);
+					// Like Signal: with read receipts off I do not show anyone else's either.
+					if (plain.seen && receipts) applyStatus(m.from, plain.seen, 'read', true);
 					return true;
 				}
 				// A shared name is only a label chosen by the sender; the address stays the identity.
@@ -250,6 +286,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					syncAll({ k: 'msg', peer: m.from, message, name: plain.name });
 				}
 				persist();
+				// Stored: tell the sender (also for a re-delivery, in case the first ack was lost).
+				queueAck(m.from, m.id);
 				return true;
 			},
 			onSent: (id) => {
@@ -362,6 +400,18 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				if (list && removeMessages(list, cleanDeleteItems(message.items))) persist();
 				break;
 			}
+			case 'st': {
+				if (!isAddress(message.peer) || (message.d !== 'delivered' && message.d !== 'read')) break;
+				if (message.d === 'read' && !receipts) break;
+				applyStatus(message.peer, cleanIds(message.ids), message.d, false);
+				break;
+			}
+			case 'receipts': {
+				receipts = message.on === true;
+				saveReceipts(receipts);
+				if (receipts) checkSeen();
+				break;
+			}
 			case 'bye': {
 				if (message.address === device.address) {
 					// Another device removed this one: leave no trace here. The short delay lets the
@@ -389,6 +439,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		];
 		syncSend(to, { k: 'state', profile: $state.snapshot(profile), devices: everyone });
 		syncSend(to, { k: 'state', blocked: $state.snapshot(blocked) });
+		syncSend(to, { k: 'receipts', on: receipts });
 		for (let i = 0; i < all.length; i += 50) {
 			syncSend(to, { k: 'state', contacts: all.slice(i, i + 50) });
 		}
@@ -544,8 +595,99 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 	$effect(() => {
 		void activeMessages.length;
+		void active;
 		scroller?.scrollTo(0, scroller.scrollHeight);
 	});
+
+	// ── Receipts ────────────────────────────────────────────────────────────────────────
+
+	const RANK = { delivered: 1, read: 2 } as const;
+
+	/** Marks my messages as delivered/read. Never goes backwards. Forwards changes to my other devices. */
+	function applyStatus(peer: string, ids: string[], d: 'delivered' | 'read', forward: boolean): void {
+		const list = chats[peer];
+		if (!list) return;
+		const wanted = new Set(ids);
+		const changed: string[] = [];
+		for (const m of list) {
+			if (!m.mine || !wanted.has(m.id)) continue;
+			if ((m.delivery ? RANK[m.delivery] : 0) >= RANK[d]) continue;
+			m.delivery = d;
+			if (m.state === 'pending') m.state = 'sent';
+			changed.push(m.id);
+		}
+		if (!changed.length) return;
+		persist();
+		if (forward) syncAll({ k: 'st', peer, ids: changed, d });
+	}
+
+	function queueAck(peer: string, id: string): void {
+		let set = ackQueue.get(peer);
+		if (!set) ackQueue.set(peer, (set = new Set()));
+		set.add(id);
+		clearTimeout(ackTimer);
+		ackTimer = setTimeout(flushAcks, ACK_MS);
+	}
+
+	/** Sends the batched delivery acks. What cannot be sent now (offline) stays queued for onReady. */
+	function flushAcks(): void {
+		clearTimeout(ackTimer);
+		if (!identity || !relay) return;
+		for (const [peer, set] of ackQueue) {
+			const all = [...set];
+			for (let i = 0; i < all.length; i += MAX_DELETE) {
+				const chunk = all.slice(i, i + MAX_DELETE);
+				if (!relay.send(peer, randomId(), encryptReceipt(identity, peer, 'ack', chunk))) return;
+				for (const id of chunk) set.delete(id);
+			}
+			if (!set.size) ackQueue.delete(peer);
+		}
+	}
+
+	function nearBottom(): boolean {
+		return !!scroller && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 48;
+	}
+
+	/**
+	 * The open chat is visible and scrolled to the end: its incoming messages count as read. With
+	 * read receipts off they are only marked locally; nothing is sent.
+	 */
+	function checkSeen(): void {
+		if (!active || view !== 'chat' || !visible || !ready || !nearBottom()) return;
+		const peer = active;
+		const list = chats[peer];
+		if (!list) return;
+		const todo = list.filter((m) => !m.mine && !m.seen);
+		if (!todo.length) return;
+		if (!receipts || blocked.includes(peer)) {
+			for (const m of todo) m.seen = true;
+			persist();
+			return;
+		}
+		if (!identity || !relay) return;
+		for (let i = 0; i < todo.length; i += MAX_DELETE) {
+			const chunk = todo.slice(i, i + MAX_DELETE);
+			if (!relay.send(peer, randomId(), encryptReceipt(identity, peer, 'seen', chunk.map((m) => m.id)))) return;
+			for (const m of chunk) m.seen = true;
+			persist();
+		}
+	}
+
+	$effect(() => {
+		void active;
+		void activeMessages.length;
+		void visible;
+		void view;
+		void receipts;
+		void tick().then(checkSeen);
+	});
+
+	function setReceipts(on: boolean): void {
+		receipts = on;
+		saveReceipts(on);
+		syncAll({ k: 'receipts', on });
+		if (on) checkSeen();
+	}
 
 	function persist(): void {
 		saveContacts($state.snapshot(contacts));
@@ -880,6 +1022,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	const dateOf = (ts: number) => new Date(ts).toLocaleDateString();
 	const stateLabel = (state: Message['state']) =>
 		state === 'received' ? '' : t(`state_${state}`);
+	/** Tick level of an own, sent message. Read is only shown while read receipts are on. */
+	const tickLevel = (m: Message): 'sent' | 'delivered' | 'read' =>
+		m.delivery === 'read' && receipts ? 'read' : m.delivery ? 'delivered' : 'sent';
 </script>
 
 <svelte:head>
@@ -1128,6 +1273,19 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					</form>
 
 					<section class="card">
+						<h2>{t('receipts_title')}</h2>
+						<label class="check">
+							<input
+								type="checkbox"
+								checked={receipts}
+								onchange={(e) => setReceipts(e.currentTarget.checked)}
+							/>
+							<span>{t('receipts_label')}</span>
+						</label>
+						<p class="hint">{t('receipts_note')}</p>
+					</section>
+
+					<section class="card">
 						<h2>{t('set_devices')}</h2>
 						<ul class="devices">
 							<li>
@@ -1313,7 +1471,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					</div>
 				</header>
 
-				<div class="messages" bind:this={scroller}>
+				<div class="messages" bind:this={scroller} onscroll={checkSeen}>
 					{#each activeMessages as message (message.mine + message.id)}
 						<div
 							class="bubble"
@@ -1335,7 +1493,18 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							{/if}
 							<p class="selectable">{message.text}</p>
 							<small>
-								{timeOf(message.ts)}{#if message.mine}{' · ' + stateLabel(message.state)}{/if}
+								{timeOf(message.ts)}{#if message.mine}{' · '}{#if message.state === 'sent'}{@const level = tickLevel(message)}<span
+										class="ticks {level}"
+										data-level={level}
+										role="img"
+										aria-label={t(`state_${level}`)}
+										title={t(`state_${level}`)}
+									>
+										<svg viewBox="0 0 32 24" width="22" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M3 13l4.5 4.5L16.5 8" />
+											{#if level !== 'sent'}<path d="M13 13l4.5 4.5L27 8" />{/if}
+										</svg>
+									</span>{:else}{stateLabel(message.state)}{/if}{/if}
 							</small>
 							<button
 								type="button"
@@ -1911,6 +2080,14 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	small {
 		color: var(--muted);
 		font-size: 0.75rem;
+	}
+	.ticks {
+		display: inline-flex;
+		vertical-align: -2px;
+		color: var(--muted);
+	}
+	.ticks.read {
+		color: var(--link);
 	}
 	.when {
 		flex: none;

@@ -23,6 +23,10 @@ export type Message = {
 	ts: number;
 	state: 'pending' | 'sent' | 'failed' | 'received';
 	reply?: Reply;
+	/** Own messages: the peer's device stored it ('delivered') or its user looked at it ('read'). */
+	delivery?: 'delivered' | 'read';
+	/** Received messages: this device already handled the read receipt (sent it, or receipts are off). */
+	seen?: boolean;
 };
 export type Chats = Record<string, Message[]>;
 
@@ -34,6 +38,7 @@ const KEY_DEVICE = 'miga.device';
 const KEY_DEVICES = 'miga.devices';
 const KEY_LINK = 'miga.link';
 const KEY_BLOCKED = 'miga.blocked';
+const KEY_RECEIPTS = 'miga.receipts';
 
 /** The most addresses one account may block. */
 export const MAX_BLOCKED = 500;
@@ -57,6 +62,19 @@ export function loadProfile(): Profile {
 		name: typeof stored.name === 'string' ? stored.name.slice(0, 40) : '',
 		share: stored.share !== false
 	};
+}
+
+/** Read receipts (send and show). Off by default: anonymity first. */
+export function loadReceipts(): boolean {
+	try {
+		return localStorage.getItem(KEY_RECEIPTS) === '1';
+	} catch {
+		return false;
+	}
+}
+
+export function saveReceipts(on: boolean): void {
+	localStorage.setItem(KEY_RECEIPTS, on ? '1' : '0');
 }
 
 export function saveProfile(profile: Profile): void {
@@ -113,7 +131,8 @@ export async function eraseAll(): Promise<void> {
 		KEY_DEVICE,
 		KEY_DEVICES,
 		KEY_LINK,
-		KEY_BLOCKED
+		KEY_BLOCKED,
+		KEY_RECEIPTS
 	]) {
 		localStorage.removeItem(key);
 	}

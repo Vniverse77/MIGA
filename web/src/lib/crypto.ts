@@ -18,7 +18,16 @@ export type Reply = { id: string; from: string; text: string };
  * `del` makes the message a control message: it has no text and shows no bubble. Clients that
  * do not know it fail to read it (no `text`) and drop it.
  */
-export type Plain = { text: string; ts: number; name?: string; reply?: Reply; del?: string[] };
+export type Plain = {
+	text: string;
+	ts: number;
+	name?: string;
+	reply?: Reply;
+	del?: string[];
+	/** Receipt control messages (no text, no bubble): ids of OUR messages the peer stored / read. */
+	ack?: string[];
+	seen?: string[];
+};
 
 /** The most message ids one delete request may carry. */
 export const MAX_DELETE = 50;
@@ -117,6 +126,19 @@ export function encryptDelete(id: Identity, peer: string, ids: string[]): string
 	return seal(id, peer, JSON.stringify({ v: 0, ts: Date.now(), del: cleanIds(ids) }));
 }
 
+/**
+ * Receipt control message: `ack` = the peer's device stored these messages of ours, `seen` = the
+ * user looked at them (only sent when read receipts are on). No `text`, so v0.5.0 clients drop it.
+ */
+export function encryptReceipt(
+	id: Identity,
+	peer: string,
+	kind: 'ack' | 'seen',
+	ids: string[]
+): string {
+	return seal(id, peer, JSON.stringify({ v: 0, ts: Date.now(), [kind]: cleanIds(ids) }));
+}
+
 function seal(id: Identity, peer: string, plaintext: string): string {
 	const json = utf8ToBytes(plaintext);
 	const padded = new Uint8Array(Math.ceil(json.length / PAD) * PAD).fill(0x20);
@@ -139,8 +161,14 @@ export function decrypt(id: Identity, peer: string, body: string): Plain | null 
 		const parsed = JSON.parse(new TextDecoder().decode(opened));
 		if (parsed?.v !== 0) return null;
 		if (typeof parsed.text !== 'string') {
+			const ts = Number(parsed.ts) || Date.now();
 			const del = cleanIds(parsed.del);
-			return del.length ? { text: '', ts: Number(parsed.ts) || Date.now(), del } : null;
+			if (del.length) return { text: '', ts, del };
+			const ack = cleanIds(parsed.ack);
+			const seen = cleanIds(parsed.seen);
+			return ack.length || seen.length
+				? { text: '', ts, ...(ack.length ? { ack } : {}), ...(seen.length ? { seen } : {}) }
+				: null;
 		}
 		return {
 			text: parsed.text,

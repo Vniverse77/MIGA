@@ -137,6 +137,8 @@ belongs to the account. JSON kinds:
 | `history` | `chats`: a piece of recent message history. |
 | `msg` | A copy of one message just sent or received: `peer`, `message`, optional `name`. |
 | `del` | `peer`, `items`: `[{"id","mine"}]` (at most 100). The receiver removes those messages from the chat with `peer`; `mine` says whether we wrote it. Sent for "delete for me" and after a delete request was applied. |
+| `st` | `peer`, `ids`, `d` (`delivered` or `read`): a receipt one device already applied, so the others show the same ticks. `read` is applied only if read receipts are on. |
+| `receipts` | `on`: the account-wide read receipts setting. |
 | `bye` | `address` of a device that left or was removed. The named device erases itself. |
 
 The relay pushes a message for the account address to every device online at that moment and
@@ -169,6 +171,32 @@ device that was offline and later receives an old `history` snapshot can bring a
 message back. The relay's stored copy of an unsent message is deleted, but the relay can still
 have seen that it existed. Blocking cannot stop a blocked address from sending; the relay
 still carries and sees the messages until they are acknowledged.
+
+## Delivery and read receipts
+
+Receipts are control messages inside the normal end-to-end encrypted payload (same envelope as
+messages; the relay sees an ordinary message). A control message has **no `text`**:
+
+- `{"v":0,"ts":<ms>,"ack":["<id>", ...]}`: this device decrypted and stored these messages of
+  yours. Sent in batches about 1 second after storing (also for a re-delivery, in case the first
+  ack was lost). At most 50 ids per message. Always sent, except to blocked addresses.
+- `{"v":0,"ts":<ms>,"seen":["<id>", ...]}`: the user looked at them. Sent only if the "read
+  receipts" setting is on, while the chat is open, the page is visible
+  (`document.visibilityState`) and scrolled to the end. With the setting off a client sends no
+  `seen` and ignores incoming ones (like Signal, it works both ways). The setting is synced
+  between linked devices (`receipts`).
+
+Receivers apply them to their own messages with those ids: `sent` (relay accepted it) ->
+`delivered` (`ack`) -> `read` (`seen`, only if the setting is on). A status never goes
+backwards, `seen` implies delivered. The relay's own `ack` frame and its "queued" state do not
+mean delivered. Control messages show no bubble, are not stored as messages, change no unread
+state or chat order, and are never acknowledged with a receipt themselves (no loops). If the
+recipient has several devices, each acks; the first one counts, repeats change nothing. A device
+that applies a receipt forwards it to the sender's other devices as `st`.
+
+Old clients: a payload without `text` and without `del` fails the old `text` check, so they drop
+it silently (and acknowledge it to the relay). They never show a bubble, and they never send
+receipts, so messages to them stay at one tick (sent).
 
 ## What the relay can see
 
