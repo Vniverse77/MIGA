@@ -7,7 +7,7 @@
 		accept,
 		onresult,
 		onclose
-	}: { accept: 'link' | 'to'; onresult: (scanned: Scanned) => void; onclose: () => void } = $props();
+	}: { accept: 'link' | 'to' | 'verify'; onresult: (scanned: Scanned) => void; onclose: () => void } = $props();
 
 	let video = $state<HTMLVideoElement | null>(null);
 	let closeButton = $state<HTMLButtonElement | null>(null);
@@ -30,7 +30,7 @@
 			return false;
 		}
 		if (scanned.kind !== accept) {
-			notice = t(scanned.kind === 'link' ? 'scan_is_link' : 'scan_is_contact');
+			notice = t(scanned.kind === 'link' ? 'scan_is_link' : scanned.kind === 'verify' ? 'scan_is_verify' : 'scan_is_contact');
 			return false;
 		}
 		stop();
@@ -137,7 +137,7 @@
 <div class="backdrop" onclick={(e) => e.target === e.currentTarget && close()}>
 	<div class="panel" role="dialog" aria-modal="true" aria-labelledby="scan-title">
 		<h2 id="scan-title">{t('scan_title')}</h2>
-		<p class="hint">{t(accept === 'link' ? 'scan_help_link' : 'scan_help_to')}</p>
+		<p class="hint">{t(accept === 'link' ? 'scan_help_link' : accept === 'verify' ? 'scan_help_verify' : 'scan_help_to')}</p>
 		{#if camera}
 			<!-- svelte-ignore a11y_media_has_caption -->
 			<video bind:this={video} playsinline muted></video>

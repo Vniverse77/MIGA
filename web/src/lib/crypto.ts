@@ -8,7 +8,7 @@ import {
 	x25519
 } from '@noble/curves/ed25519';
 import { hkdf } from '@noble/hashes/hkdf';
-import { sha256 } from '@noble/hashes/sha2';
+import { sha256, sha512 } from '@noble/hashes/sha2';
 import { bytesToHex, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils';
 
 export type Identity = { secret: Uint8Array; address: string };
@@ -196,3 +196,29 @@ export function toBase64(bytes: Uint8Array): string {
 export function fromBase64(text: string): Uint8Array {
 	return Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
 }
+
+/**
+ * Safety number of a pair of accounts: 60 digits, identical on both sides. SHA-512 over
+ * "MIGA-safety-v1" 0x00 lo hi, where lo and hi are the two 32-byte identity public keys
+ * (account addresses) sorted bytewise. Digits 5i..5i+4 are the 5-byte big-endian integer
+ * at hash offset 5i, modulo 100000. See docs/PROTOCOL.md.
+ */
+export function safetyNumber(mine: string, theirs: string): string {
+	const [lo, hi] = [mine.toLowerCase(), theirs.toLowerCase()].sort();
+	const hash = sha512(Uint8Array.from([...utf8ToBytes('MIGA-safety-v1'), 0, ...hexToBytes(lo), ...hexToBytes(hi)]));
+	let out = '';
+	for (let i = 0; i < 12; i++) {
+		let n = 0;
+		for (let j = 0; j < 5; j++) n = n * 256 + hash[i * 5 + j];
+		out += String(n % 100000).padStart(5, '0');
+	}
+	return out;
+}
+
+/** "12345 67890 ..." for display; the stored form has no spaces. */
+export function groupSafety(number: string): string {
+	return number.match(/.{5}/g)?.join(' ') ?? number;
+}
+
+export const isSafetyNumber = (value: unknown): value is string =>
+	typeof value === 'string' && /^\d{60}$/.test(value);

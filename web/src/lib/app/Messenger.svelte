@@ -17,8 +17,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		cleanIds,
 		hexToBytes,
 		identityFromSecret,
+		groupSafety,
 		isAddress,
 		randomId,
+		safetyNumber,
 		type Identity,
 		type Reply
 	} from '../crypto';
@@ -109,7 +111,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	/** document.visibilityState === 'visible'; read receipts are only sent while the chat can be seen. */
 	let visible = $state(true);
 	let active = $state<string | null>(null);
-	let view = $state<'chat' | 'settings' | 'new'>('chat');
+	let view = $state<'chat' | 'settings' | 'new' | 'verify'>('chat');
+	/** Result of the last scan on the safety number screen. */
+	let verifyResult = $state<'match' | 'mismatch' | null>(null);
 	let menuOpen = $state(false);
 	/** Action menu of one message (button, long-press). */
 	let msgMenu = $state<{ x: number; y: number; message: Message; at: number } | null>(null);
@@ -136,7 +140,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	let codeInput = $state('');
 	let linking = $state(false);
 	/** The QR scanner is open for this kind of code, or not open. */
-	let scanning = $state<'link' | 'to' | null>(null);
+	let scanning = $state<'link' | 'to' | 'verify' | null>(null);
 
 	// "Add a device" on a device that already has the account
 	let link = $state<{ code: string } | null>(null);
@@ -158,6 +162,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	const ACK_MS = 1000;
 
 	const activeContact = $derived(contacts.find((c) => c.address === active) ?? null);
+	/** Safety number with the open contact; the same digits show on the contact's device. */
+	const activeSafety = $derived(
+		identity && activeContact ? safetyNumber(identity.address, activeContact.address) : ''
+	);
 	const activeMessages = $derived(active ? (chats[active] ?? []) : []);
 	const myName = $derived(profile.name.trim().replace(/\s+/g, ' ').slice(0, 40));
 	/** The name sent along with messages, or undefined when the user stays anonymous. */
@@ -261,6 +269,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	/** Opens two connections: one as the account, one as this device (for sync between devices). */
 	function start(me: Identity): void {
 		identity = me;
+		revalidate(me.address);
 		device = loadDevice();
 		devices = loadDevices();
 		sync = syncKey(me);
@@ -385,8 +394,16 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					const contact = cleanContact(raw);
 					if (!contact || contact.address === identity?.address) continue;
 					const known = contacts.find((c) => c.address === contact.address);
-					if (known) Object.assign(known, { name: contact.name, custom: contact.custom });
-					else contacts.push(contact);
+					// A synced verification counts only if it matches the number this device computes.
+					const verified =
+						identity && contact.verified === safetyNumber(identity.address, contact.address)
+							? contact.verified
+							: undefined;
+					if (known) {
+						Object.assign(known, { name: contact.name, custom: contact.custom });
+						if (verified) Object.assign(known, { verified, keyChanged: undefined });
+						else delete known.verified;
+					} else contacts.push({ ...contact, verified });
 				}
 				if (message.blocked !== undefined) {
 					blocked = cleanBlocked(message.blocked, identity?.address);
@@ -904,6 +921,13 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		} else if (result.kind === 'to' && kind === 'to') {
 			newAddress = result.address;
 			newName = result.name;
+		} else if (result.kind === 'verify' && kind === 'verify' && active) {
+			if (result.number === activeSafety) {
+				verifyResult = 'match';
+				setVerified(active, true);
+			} else {
+				verifyResult = 'mismatch';
+			}
 		}
 	}
 
@@ -960,6 +984,57 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		// The device list belongs to the account that is being replaced.
 		saveDevices([]);
 		location.reload();
+	}
+
+	/**
+	 * A verified contact whose stored number no longer matches the current keys (this account's key
+	 * was replaced) loses the verification and gets a warning. A contact address never changes by
+	 * itself, so this is the only way the keys behind a number can change.
+	 */
+	function revalidate(me: string): void {
+		let changed = false;
+		for (const c of contacts) {
+			if (c.verified && c.verified !== safetyNumber(me, c.address)) {
+				delete c.verified;
+				c.keyChanged = true;
+				changed = true;
+			}
+		}
+		if (changed) saveContacts($state.snapshot(contacts));
+	}
+
+	function openVerify(address: string): void {
+		ctx = null;
+		openChat(address);
+		view = 'verify';
+		verifyResult = null;
+		notice = '';
+	}
+
+	function setVerified(address: string, on: boolean): void {
+		const contact = contacts.find((c) => c.address === address);
+		if (!contact || !identity) return;
+		if (on) contact.verified = safetyNumber(identity.address, address);
+		else delete contact.verified;
+		delete contact.keyChanged;
+		saveContacts($state.snapshot(contacts));
+		syncAll({ k: 'state', contacts: [$state.snapshot(contact)] });
+	}
+
+	function dismissChanged(address: string): void {
+		const contact = contacts.find((c) => c.address === address);
+		if (!contact) return;
+		delete contact.keyChanged;
+		saveContacts($state.snapshot(contacts));
+	}
+
+	async function copySafety(): Promise<void> {
+		try {
+			await navigator.clipboard.writeText(groupSafety(activeSafety));
+			notice = t('safety_copied');
+		} catch {
+			notice = t('n_copy_failed');
+		}
 	}
 
 	function openChat(address: string): void {
@@ -1146,6 +1221,15 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	<title>MIGA</title>
 </svelte:head>
 
+{#snippet verifiedMark(size: number)}
+	<span class="verified-mark" title={t('safety_verified')}>
+		<svg viewBox="0 0 24 24" width={size} height={size} role="img" aria-label={t('safety_verified')} fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+			<path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z" />
+			<path d="M8.5 12l2.5 2.5 4.5-5" />
+		</svg>
+	</span>
+{/snippet}
+
 {#snippet rowMeta(address: string, last: Message | undefined)}
 	<span class="meta">
 		{#if last}<small class="when">{timeOf(last.ts)}</small>{/if}
@@ -1286,7 +1370,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						>
 							<span class="avatar" aria-hidden="true">{initial(contact.name)}</span>
 							<span class="who">
-								<strong>{contact.name}</strong>
+								<strong>{contact.name}{#if contact.verified}{@render verifiedMark(12)}{/if}</strong>
 								<small>{last ? last.text : shortAddress(contact.address)}</small>
 							</span>
 							{@render rowMeta(contact.address, last)}
@@ -1373,7 +1457,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						>
 							<span class="avatar" aria-hidden="true">{initial(contact.name)}</span>
 							<span class="who">
-								<strong>{contact.name}</strong>
+								<strong>{contact.name}{#if contact.verified}{@render verifiedMark(12)}{/if}</strong>
 								<small>{last ? last.text : shortAddress(contact.address)}</small>
 							</span>
 							{@render rowMeta(contact.address, last)}
@@ -1582,12 +1666,52 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						<button type="button" onclick={copyAddress}>{t('copy_address')}</button>
 					</section>
 				</div>
+			{:else if view === 'verify' && activeContact}
+				<header class="chat-head">
+					<button type="button" class="back" onclick={() => (view = 'chat')}>← {t('back')}</button>
+					<div class="who"><strong>{t('safety_title')}</strong></div>
+					<button type="button" class="close" aria-label={t('close')} title={t('close')} onclick={() => (view = 'chat')}>
+						{#if isDesktop}
+							<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+						{:else}{t('close')}{/if}
+					</button>
+				</header>
+
+				<div class="settings">
+					<section class="card safety">
+						<h2>{t('safety_with', { name: activeContact.name })}</h2>
+						<p class="hint">{t('safety_help', { name: activeContact.name })}</p>
+						<div class="safety-number selectable" data-safety={activeSafety} aria-label={groupSafety(activeSafety)}>
+							{#each groupSafety(activeSafety).split(' ') as group, i (i)}<span>{group}</span>{/each}
+						</div>
+						<QrCode text={appUrl(platform.publicOrigin(), { verify: activeSafety })} label={t('safety_qr')} />
+						<p class="safety-state" class:ok={!!activeContact.verified} data-verified={activeContact.verified ? '1' : '0'}>
+							{#if activeContact.verified}{@render verifiedMark(16)}{/if}
+							{t(activeContact.verified ? 'safety_verified' : 'safety_not_verified')}
+						</p>
+						{#if verifyResult === 'match'}
+							<p class="notice" role="status" data-result="match">{t('safety_match', { name: activeContact.name })}</p>
+						{:else if verifyResult === 'mismatch'}
+							<p class="notice warn-box" role="alert" data-result="mismatch">{t('safety_mismatch')}</p>
+						{/if}
+						<div class="row">
+							<button type="button" class="primary" onclick={() => ((verifyResult = null), (scanning = 'verify'))}>{t('safety_scan')}</button>
+							<button type="button" onclick={copySafety}>{t('safety_copy')}</button>
+							{#if activeContact.verified}
+								<button type="button" onclick={() => ((verifyResult = null), setVerified(activeContact.address, false))}>{t('safety_clear')}</button>
+							{:else}
+								<button type="button" onclick={() => setVerified(activeContact.address, true)}>{t('safety_mark')}</button>
+							{/if}
+						</div>
+						{#if notice}<p class="notice" role="status">{notice}</p>{/if}
+					</section>
+				</div>
 			{:else if activeContact}
 				<header class="chat-head">
 					<button type="button" class="back" onclick={() => (active = null)}>← {t('back')}</button>
 					<span class="avatar" aria-hidden="true">{initial(activeContact.name)}</span>
 					<div class="who">
-						<strong>{activeContact.name}</strong>
+						<strong>{activeContact.name}{#if activeContact.verified}{@render verifiedMark(14)}{/if}</strong>
 <small class="selectable">{shortAddress(activeContact.address)}</small>
 					</div>
 					<span class="lock">{t('f1_title')}</span>
@@ -1608,6 +1732,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						</button>
 						{#if menuOpen}
 							<div class="menu" role="menu">
+								<button type="button" role="menuitem" onclick={() => openVerify(activeContact.address)}>
+									{t('verify_safety')}
+								</button>
 								<button type="button" role="menuitem" onclick={() => toggleMute(activeContact.address)}>
 									{t(muted.includes(activeContact.address) ? 'unmute_chat' : 'mute_chat')}
 								</button>
@@ -1639,6 +1766,16 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						{/if}
 					</div>
 				</header>
+
+				{#if activeContact.keyChanged}
+					<div class="safety-banner" role="alert">
+						<p>{t('safety_changed', { name: activeContact.name })}</p>
+						<div class="row">
+							<button type="button" class="primary" onclick={() => openVerify(activeContact.address)}>{t('verify_safety')}</button>
+							<button type="button" onclick={() => dismissChanged(activeContact.address)}>{t('safety_dismiss')}</button>
+						</div>
+					</div>
+				{/if}
 
 				<div class="messages" bind:this={scroller} onscroll={checkSeen}>
 					{#each activeMessages as message (message.mine + message.id)}
@@ -1747,6 +1884,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 {#if ctx}
 	<div class="menu ctx" role="menu" style:left="{ctx.x}px" style:top="{ctx.y}px">
+		<button type="button" role="menuitem" onclick={() => ctx && openVerify(ctx.address)}>
+			{t('verify_safety')}
+		</button>
 		<button type="button" role="menuitem" onclick={() => ctx && toggleMute(ctx.address)}>
 			{t(ctx && muted.includes(ctx.address) ? 'unmute_chat' : 'mute_chat')}
 		</button>
@@ -2315,6 +2455,62 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.4rem;
+	}
+	.verified-mark {
+		display: inline-flex;
+		margin-left: 0.3rem;
+		vertical-align: -0.12em;
+		color: var(--accent-2, var(--accent));
+	}
+	.safety-banner {
+		display: grid;
+		gap: 0.5rem;
+		margin: 0.5rem;
+		padding: 0.7rem 0.8rem;
+		border: 0.5px solid var(--danger);
+		border-radius: var(--radius-lg);
+		background: var(--panel);
+	}
+	.safety-banner p {
+		margin: 0;
+		font-size: 0.85rem;
+	}
+	.safety-banner .row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+	}
+	.safety-number {
+		display: grid;
+		grid-template-columns: repeat(4, auto);
+		justify-content: center;
+		gap: 0.5rem 1.1rem;
+		font-family: var(--mono, ui-monospace, monospace);
+		font-size: 1.25rem;
+		letter-spacing: 0.06em;
+		color: var(--heading);
+	}
+	.safety-state {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin: 0;
+		justify-content: center;
+		color: var(--dim);
+		font-size: 0.85rem;
+	}
+	.safety-state.ok {
+		color: var(--accent-2, var(--accent));
+	}
+	.safety .row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		justify-content: center;
+	}
+	.warn-box {
+		color: var(--danger);
+		font-weight: 600;
 	}
 	.empty {
 		color: var(--muted);

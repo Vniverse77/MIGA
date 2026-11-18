@@ -198,6 +198,31 @@ Old clients: a payload without `text` and without `del` fails the old `text` che
 it silently (and acknowledge it to the relay). They never show a bubble, and they never send
 receipts, so messages to them stay at one tick (sent).
 
+## Safety numbers
+
+Because an address is the account's Ed25519 public key, two people can check that nobody sits
+between them by comparing one number derived from both keys. Nothing is sent for this.
+
+**Derivation.** `lo` and `hi` are the two 32-byte account public keys (the addresses), sorted
+bytewise (so both sides use the same order). `h = SHA-512("MIGA-safety-v1" || 0x00 || lo || hi)`.
+For `i = 0..11`, group `i` is the 5-byte big-endian integer `h[5i..5i+4]` modulo 100000, written
+with 5 digits (leading zeros kept). The 12 groups are the 60-digit number, shown as 12 groups of
+5 digits (about 199 bits). Both sides get the same number.
+
+**QR code.** `<origin>/app/#verify=<60 digits>`. Scanning compares it with the locally computed
+number: equal marks the contact verified, different shows a warning and changes nothing.
+
+**Verified state.** A contact record keeps `verified` = the 60 digits that were confirmed. It is
+synced to linked devices inside the contact (`state.contacts`); a receiving device accepts it only
+if it equals the number it computes itself. Linked devices share the account key, and a contact's
+messages always come from its account key (device keys are used only between a user's own
+devices), so one number per contact covers every device on both sides.
+
+**Key changed.** A contact's address cannot change (a new key is a new contact). What can change
+is the number: when this account's key is replaced (restore from a backup) a stored `verified`
+no longer matches. The app then removes it, sets `keyChanged`, and shows a warning in that chat
+until it is dismissed or the contact is verified again.
+
 ## What the relay can see
 
 Sender address, recipient address, time, approximate size, and the IP addresses of both

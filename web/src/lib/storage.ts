@@ -11,7 +11,15 @@ import {
 import { deleteDb, openDb, req, tx, type MessageRecord } from './db';
 
 /** `custom` marks a name the user typed; a name the contact shares never replaces it. */
-export type Contact = { address: string; name: string; custom?: boolean };
+export type Contact = {
+	address: string;
+	name: string;
+	custom?: boolean;
+	/** The safety number (60 digits) the user confirmed. Cleared if it stops matching the current keys. */
+	verified?: string;
+	/** A verified contact's safety number changed; a warning shows until the user dismisses it. */
+	keyChanged?: boolean;
+};
 /** Empty name means anonymous. `share` decides whether the name is sent to the people you write to. */
 export type Profile = { name: string; share: boolean };
 /** Another device of the same account. `address` is that device's own key, not the account's. */

@@ -5,7 +5,7 @@ import { hkdf } from '@noble/hashes/hkdf';
 import { scryptAsync } from '@noble/hashes/scrypt';
 import { sha256 } from '@noble/hashes/sha2';
 import { randomBytes, utf8ToBytes } from '@noble/hashes/utils';
-import { cleanIds, cleanReply, fromBase64, identityFromSecret, isAddress, toBase64, type Identity } from './crypto';
+import { cleanIds, cleanReply, fromBase64, identityFromSecret, isAddress, isSafetyNumber, toBase64, type Identity } from './crypto';
 import { MAX_BLOCKED, type Chats, type Contact, type Device, type Message, type Profile } from './storage';
 import { platform } from './platform';
 
@@ -135,7 +135,12 @@ export function cleanContact(value: unknown): Contact | null {
 	if (typeof contact.address !== 'string' || !isAddress(contact.address)) return null;
 	const name = cleanName(contact.name);
 	if (!name) return null;
-	return { address: contact.address, name, ...(contact.custom === true ? { custom: true } : {}) };
+	return {
+		address: contact.address,
+		name,
+		...(contact.custom === true ? { custom: true } : {}),
+		...(isSafetyNumber(contact.verified) ? { verified: contact.verified } : {})
+	};
 }
 
 export function cleanDevices(value: unknown): Device[] {
