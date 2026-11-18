@@ -8,6 +8,7 @@ import {
 	type Identity,
 	type Reply
 } from './crypto';
+import { RECENT_EMOJI_KEY } from './emoji';
 import { deleteDb, openDb, req, tx, type MessageRecord } from './db';
 
 /** `custom` marks a name the user typed; a name the contact shares never replaces it. */
@@ -31,6 +32,8 @@ export type Message = {
 	ts: number;
 	state: 'pending' | 'sent' | 'failed' | 'received';
 	reply?: Reply;
+	/** Time (ms) of the last edit; set means the bubble shows "edited". Only the latest text is kept. */
+	edited?: number;
 	/** Own messages: the peer's device stored it ('delivered') or its user looked at it ('read'). */
 	delivery?: 'delivered' | 'read';
 	/** Received messages: this device already handled the read receipt (sent it, or receipts are off). */
@@ -187,7 +190,8 @@ export async function eraseAll(): Promise<void> {
 		KEY_UNREAD,
 		KEY_MUTED,
 		KEY_NOTIFY,
-		KEY_NOTIFY_BANNER
+		KEY_NOTIFY_BANNER,
+		RECENT_EMOJI_KEY
 	]) {
 		localStorage.removeItem(key);
 	}

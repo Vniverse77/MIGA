@@ -137,6 +137,7 @@ belongs to the account. JSON kinds:
 | `history` | `chats`: a piece of recent message history. |
 | `msg` | A copy of one message just sent or received: `peer`, `message`, optional `name`. |
 | `del` | `peer`, `items`: `[{"id","mine"}]` (at most 100). The receiver removes those messages from the chat with `peer`; `mine` says whether we wrote it. Sent for "delete for me" and after a delete request was applied. |
+| `edit` | `peer`, `id`, `mine`, `text`, `ts`: an edit one device already applied (own edit, or one received from the peer), so the others show the same text. |
 | `st` | `peer`, `ids`, `d` (`delivered` or `read`): a receipt one device already applied, so the others show the same ticks. `read` is applied only if read receipts are on. |
 | `receipts` | `on`: the account-wide read receipts setting. |
 | `bye` | `address` of a device that left or was removed. The named device erases itself. |
@@ -197,6 +198,32 @@ that applies a receipt forwards it to the sender's other devices as `st`.
 Old clients: a payload without `text` and without `del` fails the old `text` check, so they drop
 it silently (and acknowledge it to the relay). They never show a bubble, and they never send
 receipts, so messages to them stay at one tick (sent).
+
+## Editing messages
+
+An edit is a control message, sealed like any other:
+
+- `{"v":0,"ts":<ms>,"edit":{"id":"<message id>","text":"<new text>"}}`
+
+There is no top-level `text`, so v0.5.0 clients fail their `text` check and drop it silently (and
+acknowledge it to the relay); they keep showing the old text. Receiving rules:
+
+- **Only the author edits.** The edit is looked up only among the messages that came from the
+  sender of this very envelope (the sender is authenticated by the pairwise key), so nobody can
+  change a message of another person, or one of the receiver's own messages.
+- The target must still exist. After "delete for everyone" (or "delete for me") the message is
+  gone and the edit is ignored; an edit that arrives for an unknown id is ignored too.
+- `text` is trimmed, must not be empty (use delete instead) and at most 4000 characters, the
+  same limit as a normal message. Anything else is dropped.
+- Last writer wins by `ts`: an edit with a `ts` not newer than the one already applied is ignored.
+  `ts` is clamped to one day ahead of the receiver's clock so a wrong clock cannot block later edits.
+- Only the newest text is kept (no edit history); the bubble shows an "edited" label.
+- An edit never creates a bubble, never counts as unread, never notifies and is never
+  acknowledged with a delivery receipt. A quoted preview (`reply.text`) inside other messages is a
+  snapshot and is not changed by a later edit.
+- Both the sender and the receiver forward an applied edit to their other devices as a `edit`
+  sync message. Only messages in state `sent` can be edited, and only while connected to the
+  relay (like deleting for everyone).
 
 ## Safety numbers
 

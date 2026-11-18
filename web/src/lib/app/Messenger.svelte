@@ -8,11 +8,15 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	import { onMount, tick } from 'svelte';
 	import {
 		bytesToHex,
+		applyEdit,
 		cleanReply,
 		decrypt,
+		editTime,
 		encrypt,
 		encryptDelete,
+		encryptEdit,
 		encryptReceipt,
+		MAX_TEXT,
 		MAX_DELETE,
 		cleanIds,
 		hexToBytes,
@@ -49,6 +53,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	import Logo from '../Logo.svelte';
 	import { getTheme, setTheme, type Theme } from '../theme.svelte';
 	import { t } from '../i18n.svelte';
+	import { isEmojiOnly } from '../emoji';
+	import type { Component } from 'svelte';
 	import type { NotifyPermission } from '../platform/types';
 	import LangSelect from '../LangSelect.svelte';
 	import { RelayClient, type Incoming, type RelayEvents, type Status } from '../relay';
@@ -86,7 +92,6 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		type Unread
 	} from '../storage';
 
-	const MAX_TEXT = 4000;
 	/** Sync traffic is paced to stay well under the relay's limit of 30 sends per 10 seconds. */
 	const OUTBOX_MS = 400;
 	const LINK_WAIT_MS = 30_000;
@@ -129,6 +134,11 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	/** The message the next one will quote. */
 	let replyTo = $state<Reply | null>(null);
 	let composerInput = $state<HTMLInputElement | null>(null);
+	/** Set while the composer edits one of my own messages. */
+	let editing = $state<{ peer: string; id: string; text: string } | null>(null);
+	let emojiOpen = $state(false);
+	/** The picker is a separate chunk, fetched the first time it is opened. */
+	let EmojiPicker = $state.raw<Component<{ onpick: (emoji: string) => void }> | null>(null);
 	let highlighted = $state('');
 	let newAddress = $state('');
 	let newName = $state('');
@@ -297,6 +307,17 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					}
 					return true;
 				}
+				// An edit: only applied to a message THIS sender wrote (their own chat list, mine: false).
+				// Never a bubble, never unread, never a notification, never acknowledged as a message.
+				if (plain.edit) {
+					const list = chats[m.from];
+					const ts = editTime(plain.ts);
+					if (list && applyEdit(list, { ...plain.edit, mine: false, ts })) {
+						persist();
+						syncAll({ k: 'edit', peer: m.from, id: plain.edit.id, mine: false, text: plain.edit.text, ts });
+					}
+					return true;
+				}
 				// Receipts: control messages, never a bubble, never acknowledged themselves.
 				if (plain.ack || plain.seen) {
 					if (plain.ack) applyStatus(m.from, plain.ack, 'delivered', true);
@@ -445,6 +466,12 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				if (!isAddress(message.peer)) break;
 				const list = chats[message.peer];
 				if (list && removeMessages(list, cleanDeleteItems(message.items))) persist();
+				break;
+			}
+			case 'edit': {
+				if (!isAddress(message.peer) || typeof message.mine !== 'boolean') break;
+				const list = chats[message.peer];
+				if (list && applyEdit(list, { id: message.id, mine: message.mine, text: message.text, ts: message.ts })) persist();
 				break;
 			}
 			case 'st': {
@@ -858,9 +885,91 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		}
 	}
 
+	function startEdit(message: Message): void {
+		msgMenu = null;
+		if (!active || !message.mine || message.state !== 'sent') return;
+		replyTo = null;
+		emojiOpen = false;
+		editing = { peer: active, id: message.id, text: message.text };
+		draft = message.text;
+		tick().then(() => composerInput?.focus());
+	}
+
+	function cancelEdit(): void {
+		if (!editing) return;
+		editing = null;
+		draft = '';
+	}
+
+	function saveEdit(text: string): void {
+		const edit = editing;
+		if (!edit || !identity) return;
+		const message = chats[edit.peer]?.find((m) => m.mine && m.id === edit.id);
+		if (!message) return cancelEdit(); // deleted meanwhile
+		if (!text) {
+			notice = t('n_edit_empty');
+			return;
+		}
+		if (text.length > MAX_TEXT) {
+			notice = t('n_too_long', { max: MAX_TEXT });
+			return;
+		}
+		if (text === message.text) return cancelEdit();
+		const ts = Math.max(Date.now(), (message.edited ?? 0) + 1);
+		// Like "delete for everyone": nothing changes anywhere unless the request could be sent.
+		if (!relay?.send(edit.peer, randomId(), encryptEdit(identity, edit.peer, edit.id, text, ts))) {
+			notice = t('n_edit_offline');
+			return;
+		}
+		if (applyEdit(chats[edit.peer], { id: edit.id, mine: true, text, ts })) persist();
+		syncAll({ k: 'edit', peer: edit.peer, id: edit.id, mine: true, text, ts });
+		editing = null;
+		draft = '';
+	}
+
+	async function toggleEmoji(): Promise<void> {
+		if (emojiOpen) return closeEmoji();
+		if (!EmojiPicker) {
+			try {
+				EmojiPicker = (await import('./EmojiPicker.svelte')).default;
+			} catch {
+				return;
+			}
+		}
+		emojiOpen = true;
+	}
+
+	function closeEmoji(): void {
+		if (!emojiOpen) return;
+		emojiOpen = false;
+		composerInput?.focus();
+	}
+
+	/** Inserts at the caret (or replaces the selection) of the composer. */
+	function insertEmoji(emoji: string): void {
+		const input = composerInput;
+		const from = input?.selectionStart ?? draft.length;
+		const to = input?.selectionEnd ?? draft.length;
+		if (draft.length - (to - from) + emoji.length > MAX_TEXT) return;
+		draft = draft.slice(0, from) + emoji + draft.slice(to);
+		const caret = from + emoji.length;
+		tick().then(() => input?.setSelectionRange(caret, caret));
+	}
+
+	/** Escape closes the innermost thing first: picker, then edit or reply, menus always. */
+	function onEscape(): void {
+		menuOpen = false;
+		ctx = null;
+		msgMenu = null;
+		if (emojiOpen) return closeEmoji();
+		if (editing) return cancelEdit();
+		replyTo = null;
+	}
+
 	function sendMessage(event: SubmitEvent): void {
 		event.preventDefault();
 		const text = draft.trim();
+		if (editing) return saveEdit(text);
 		if (!text || !active || !identity) return;
 		if (text.length > MAX_TEXT) {
 			notice = t('n_too_long', { max: MAX_TEXT });
@@ -1039,6 +1148,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 	function openChat(address: string): void {
 		replyTo = null;
+		editing = null;
+		emojiOpen = false;
 		view = 'chat';
 		menuOpen = false;
 		active = address;
@@ -1129,7 +1240,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		// Keep the menu inside the window.
 		msgMenu = {
 			x: Math.max(8, Math.min(x, window.innerWidth - 220)),
-			y: Math.max(8, Math.min(y, window.innerHeight - 140)),
+			y: Math.max(8, Math.min(y, window.innerHeight - 190)),
 			message,
 			at: Date.now()
 		};
@@ -1783,9 +1894,16 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							class="bubble"
 							class:mine={message.mine}
 							class:failed={message.state === 'failed'}
+							class:emoji-only={isEmojiOnly(message.text)}
 							class:flash={highlighted === (message.mine ? 'm' : 't') + message.id}
 							data-key={(message.mine ? 'm' : 't') + message.id}
 							role="group"
+							oncontextmenu={(e) => {
+								// Mouse right-click opens the action menu (but keeps the browser's copy menu on a selection).
+								if ((e as unknown as PointerEvent).pointerType === 'touch' || getSelection()?.toString()) return;
+								e.preventDefault();
+								openMsgMenu(e.clientX, e.clientY, message);
+							}}
 							onpointerdown={(e) => pressStart(e, message)}
 							onpointerup={pressEnd}
 							onpointercancel={pressEnd}
@@ -1799,7 +1917,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							{/if}
 							<p class="selectable">{message.text}</p>
 							<small>
-								{timeOf(message.ts)}{#if message.mine}{' · '}{#if message.state === 'sent'}{@const level = tickLevel(message)}<span
+								{#if message.edited}<span class="edited">{t('edited')}</span>{' · '}{/if}{timeOf(message.ts)}{#if message.mine}{' · '}{#if message.state === 'sent'}{@const level = tickLevel(message)}<span
 										class="ticks {level}"
 										data-level={level}
 										role="img"
@@ -1856,6 +1974,18 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						<button type="button" aria-label={t('cancel_reply')} title={t('cancel_reply')} onclick={() => (replyTo = null)}>✕</button>
 					</div>
 				{/if}
+				{#if editing}
+					<div class="replybar editbar">
+						<div class="quote-text">
+							<strong>{t('editing_msg')}</strong>
+							<span>{editing.text}</span>
+						</div>
+						<button type="button" aria-label={t('cancel_edit')} title={t('cancel_edit')} onclick={cancelEdit}>✕</button>
+					</div>
+				{/if}
+				{#if emojiOpen && EmojiPicker && !blocked.includes(activeContact.address)}
+					<EmojiPicker onpick={insertEmoji} />
+				{/if}
 				{#if blocked.includes(activeContact.address)}
 					<div class="replybar blocked-bar">
 						<div class="quote-text"><span>{t('blocked_banner')}</span></div>
@@ -1863,8 +1993,23 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					</div>
 				{:else}
 				<form class="composer" onsubmit={sendMessage}>
+					<button
+						type="button"
+						class="emoji-btn"
+						aria-label={t('emoji_btn')}
+						title={t('emoji_btn')}
+						aria-haspopup="dialog"
+						aria-expanded={emojiOpen}
+						onclick={toggleEmoji}
+					>
+						<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<circle cx="12" cy="12" r="9" />
+							<path d="M8.5 14a4 4 0 0 0 7 0" />
+							<path d="M9 9.5h.01M15 9.5h.01" />
+						</svg>
+					</button>
 					<input bind:this={composerInput} bind:value={draft} placeholder={t('ph_message')} autocomplete="off" maxlength={MAX_TEXT} />
-					<button type="submit" class="primary" disabled={!draft.trim()}>{t('send')}</button>
+					<button type="submit" class="primary" disabled={!draft.trim() && !editing}>{editing ? t('save_edit') : t('send')}</button>
 				</form>
 				{/if}
 			{:else}
@@ -1914,6 +2059,11 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		<button type="button" role="menuitem" onclick={() => ((msgMenu = null), startReply(target))}>
 			{t('reply')}
 		</button>
+		{#if target.mine && target.state === 'sent'}
+			<button type="button" role="menuitem" onclick={() => startEdit(target)}>
+				{t('edit_msg')}
+			</button>
+		{/if}
 		<button type="button" role="menuitem" class="danger" onclick={() => deleteForMe(target)}>
 			{t('delete_msg_me')}
 		</button>
@@ -1931,9 +2081,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 {/if}
 
 <svelte:window
-	onkeydown={(e) => e.key === 'Escape' && ((menuOpen = false), (ctx = null), (msgMenu = null), (replyTo = null))}
+	onkeydown={(e) => e.key === 'Escape' && onEscape()}
 	onclick={(e) => {
 		ctx = null;
+		if (emojiOpen && !(e.target as Element | null)?.closest?.('.emoji-panel, .emoji-btn')) emojiOpen = false;
 		// A long-press may be followed by a click on touch screens; keep the menu it just opened.
 		if (msgMenu && Date.now() - msgMenu.at > 400 && !(e.target as Element | null)?.closest?.('.act-btn')) msgMenu = null;
 		if (!(e.target as Element | null)?.closest?.('.menu-wrap')) menuOpen = false;
@@ -2668,6 +2819,29 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	}
 	.composer button {
 		padding-inline: 1.4rem;
+	}
+	.composer .emoji-btn {
+		flex: none;
+		display: grid;
+		place-items: center;
+		padding: 0 0.6rem;
+		border: 0;
+		background: none;
+		color: var(--muted);
+		cursor: pointer;
+	}
+	.composer .emoji-btn:hover:not(:disabled),
+	.composer .emoji-btn[aria-expanded='true'] {
+		border: 0;
+		background: none;
+		color: var(--accent-2);
+	}
+	.bubble .edited {
+		font-style: italic;
+	}
+	.bubble.emoji-only p {
+		font-size: 2.6rem;
+		line-height: 1.2;
 	}
 	.center {
 		margin: auto;

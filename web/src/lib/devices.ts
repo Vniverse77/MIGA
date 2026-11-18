@@ -5,7 +5,7 @@ import { hkdf } from '@noble/hashes/hkdf';
 import { scryptAsync } from '@noble/hashes/scrypt';
 import { sha256 } from '@noble/hashes/sha2';
 import { randomBytes, utf8ToBytes } from '@noble/hashes/utils';
-import { cleanIds, cleanReply, fromBase64, identityFromSecret, isAddress, isSafetyNumber, toBase64, type Identity } from './crypto';
+import { cleanIds, cleanReply, editTime, fromBase64, identityFromSecret, isAddress, isSafetyNumber, toBase64, type Identity } from './crypto';
 import { MAX_BLOCKED, type Chats, type Contact, type Device, type Message, type Profile } from './storage';
 import { platform } from './platform';
 
@@ -48,6 +48,7 @@ export type SyncMessage =
 	| { k: 'history'; chats: Chats }
 	| { k: 'msg'; peer: string; message: Message; name?: string }
 	| { k: 'del'; peer: string; items: { id: string; mine: boolean }[] }
+	| { k: 'edit'; peer: string; id: string; mine: boolean; text: string; ts: number }
 	| { k: 'st'; peer: string; ids: string[]; d: 'delivered' | 'read' }
 	| { k: 'receipts'; on: boolean }
 	| { k: 'bye'; address: string };
@@ -209,6 +210,7 @@ export function cleanMessage(value: unknown, maxText: number): Message | null {
 		ts,
 		state,
 		...(reply ? { reply } : {}),
+		...(Number.isFinite(Number(message.edited)) && Number(message.edited) > 0 ? { edited: editTime(message.edited) } : {}),
 		...(message.mine && (message.delivery === 'delivered' || message.delivery === 'read')
 			? { delivery: message.delivery }
 			: {})

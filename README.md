@@ -64,6 +64,13 @@ Relay settings (environment variables):
    where the network allows, obfuscated transports in the native apps.
 4. Forward secrecy (ratchet), then voice calls.
 
+## Third-party data
+
+The emoji picker bundles emoji names and groups from
+[unicode-emoji-json](https://github.com/muan/unicode-emoji-json) 0.9.0 (MIT, Copyright (c) 2019
+Mu-An Chiou), compacted into `web/src/lib/app/emoji-data.json` by `web/scripts/gen-emoji.mjs`.
+It is read from the app bundle; the picker makes no network requests.
+
 ## License
 
 AGPL-3.0-or-later. See [LICENSE](LICENSE).

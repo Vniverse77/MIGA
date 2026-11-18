@@ -10,6 +10,7 @@ import {
 import { hkdf } from '@noble/hashes/hkdf';
 import { sha256, sha512 } from '@noble/hashes/sha2';
 import { bytesToHex, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils';
+import type { Message } from './storage';
 
 export type Identity = { secret: Uint8Array; address: string };
 /** A quoted message. It travels inside the ciphertext only; `text` is a short preview. */
@@ -27,7 +28,21 @@ export type Plain = {
 	/** Receipt control messages (no text, no bubble): ids of OUR messages the peer stored / read. */
 	ack?: string[];
 	seen?: string[];
+	/** Edit control message (no top-level text, no bubble): replaces the text of one of the SENDER's messages. */
+	edit?: Edit;
 };
+/** The longest text of a message (also the longest an edit may carry). */
+export const MAX_TEXT = 4000;
+export type Edit = { id: string; text: string };
+
+/** Validates an edit from the network. Null when malformed, empty or too long. */
+export function cleanEdit(value: unknown): Edit | null {
+	const edit = (value ?? {}) as Partial<Edit>;
+	if (typeof edit.id !== 'string' || !ID_PATTERN.test(edit.id)) return null;
+	if (typeof edit.text !== 'string' || edit.text.length > MAX_TEXT) return null;
+	const text = edit.text.trim();
+	return text ? { id: edit.id, text } : null;
+}
 
 /** The most message ids one delete request may carry. */
 export const MAX_DELETE = 50;
@@ -126,6 +141,48 @@ export function encryptDelete(id: Identity, peer: string, ids: string[]): string
 	return seal(id, peer, JSON.stringify({ v: 0, ts: Date.now(), del: cleanIds(ids) }));
 }
 
+/** Clamp for an edit timestamp: a clock far in the future must not block later edits. */
+export function editTime(ts: unknown, now = Date.now()): number {
+	const n = Number(ts);
+	return Number.isFinite(n) && n > 0 ? Math.min(n, now + 86_400_000) : now;
+}
+
+/**
+ * Applies an edit to the message `id` of `list`. `mine` says whose message it is: a network edit
+ * from a peer passes `mine: false` with that peer's own chat list, so it can only ever reach a
+ * message that peer sent. The last edit wins by `ts`. Returns true if the text changed.
+ */
+export function applyEdit(
+	list: Message[],
+	edit: { id: string; mine: boolean; text: string; ts: number }
+): boolean {
+	const clean = cleanEdit({ id: edit.id, text: edit.text });
+	if (!clean) return false;
+	const ts = editTime(edit.ts);
+	const target = list.find((m) => m.mine === edit.mine && m.id === clean.id);
+	// A deleted message is simply gone from the list, so an edit after delete finds nothing.
+	if (!target || ts <= (target.edited ?? 0)) return false;
+	target.edited = ts;
+	if (target.text === clean.text) return true;
+	target.text = clean.text;
+	return true;
+}
+
+/**
+ * Edit control message: replaces the text of one of our own messages. It has no top-level
+ * `text`, so v0.5.0 clients cannot read it and drop it. The receiver only applies it to a message
+ * that came from this very sender.
+ */
+export function encryptEdit(
+	id: Identity,
+	peer: string,
+	messageId: string,
+	text: string,
+	ts = Date.now()
+): string {
+	return seal(id, peer, JSON.stringify({ v: 0, ts, edit: { id: messageId, text } }));
+}
+
 /**
  * Receipt control message: `ack` = the peer's device stored these messages of ours, `seen` = the
  * user looked at them (only sent when read receipts are on). No `text`, so v0.5.0 clients drop it.
@@ -164,6 +221,8 @@ export function decrypt(id: Identity, peer: string, body: string): Plain | null 
 			const ts = Number(parsed.ts) || Date.now();
 			const del = cleanIds(parsed.del);
 			if (del.length) return { text: '', ts, del };
+			const edit = cleanEdit(parsed.edit);
+			if (edit) return { text: '', ts, edit };
 			const ack = cleanIds(parsed.ack);
 			const seen = cleanIds(parsed.seen);
 			return ack.length || seen.length
