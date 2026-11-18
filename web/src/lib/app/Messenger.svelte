@@ -49,9 +49,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		MAX_BLOCKED,
 		createIdentity,
 		eraseAll,
-		loadBlocked,
-		loadChats,
-		loadContacts,
+		loadData,
 		loadDevice,
 		loadDevices,
 		loadIdentity,
@@ -182,23 +180,33 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	};
 
 	onMount(() => {
-		contacts = loadContacts();
-		chats = loadChats();
-		profile = loadProfile();
-		blocked = loadBlocked();
-		deviceLabel = guessDeviceLabel();
-		readInvite();
-		const me = loadIdentity();
-		if (me) start(me);
-		notice = startNotice;
-		ready = true;
+		let closed = false;
+		// Contacts and chats come from IndexedDB; the UI stays hidden (ready = false) until they are in.
+		void loadData().then((data) => {
+			if (closed) return;
+			contacts = data.contacts;
+			chats = data.chats;
+			blocked = data.blocked;
+			begin();
+		});
 		return () => {
+			closed = true;
 			relay?.close();
 			deviceRelay?.close();
 			clearInterval(outboxTimer);
 			clearTimeout(linkTimer);
 		};
 	});
+
+	function begin(): void {
+		profile = loadProfile();
+		deviceLabel = guessDeviceLabel();
+		readInvite();
+		const me = loadIdentity();
+		if (me) start(me);
+		notice = startNotice;
+		ready = true;
+	}
 
 	/** Opens two connections: one as the account, one as this device (for sync between devices). */
 	function start(me: Identity): void {
@@ -358,8 +366,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					// Another device removed this one: leave no trace here. The short delay lets the
 					// acknowledgement reach the relay, so the notice is not kept there.
 					setTimeout(() => {
-						eraseAll();
-						location.reload();
+						void eraseAll().then(() => location.reload());
 					}, 300);
 					return true;
 				}
@@ -455,10 +462,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			}
 		}
 		// Give the goodbye a moment to leave before the keys are gone.
-		setTimeout(() => {
-			eraseAll();
-			location.reload();
-		}, 400);
+		setTimeout(() => void eraseAll().then(() => location.reload()), 400);
 	}
 
 	// ── First run ───────────────────────────────────────────────────────────────────────
