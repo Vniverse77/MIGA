@@ -41,7 +41,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		type LinkBundle,
 		type SyncMessage
 	} from '../devices';
-	import logo from '../assets/favicon.svg';
+	import Logo from '../Logo.svelte';
+	import { getTheme, setTheme, type Theme } from '../theme.svelte';
 	import { t } from '../i18n.svelte';
 	import LangSelect from '../LangSelect.svelte';
 	import { RelayClient, type Incoming, type RelayEvents, type Status } from '../relay';
@@ -902,13 +903,13 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	<header class="top">
 		{#if platform.target === 'web'}
 			<a class="brand" href="/">
-				<img src={logo} alt="" width="30" height="30" />
+				<Logo size={30} />
 				<span>MIGA</span>
 				<span class="ver" title={VERSION_TITLE}>{VERSION_LABEL}</span>
 			</a>
 		{:else}
 			<span class="brand">
-				<img src={logo} alt="" width="30" height="30" />
+				<Logo size={30} />
 				<span>MIGA</span>
 				<span class="ver" title={VERSION_TITLE}>{VERSION_LABEL}</span>
 			</span>
@@ -927,7 +928,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			{#if isDesktop}<div class="onboard-lang"><LangSelect /></div>{/if}
 			{#if onboard === 'create'}
 				<form class="card" onsubmit={createAddress}>
-					<img src={logo} alt="" width="56" height="56" />
+					<Logo size={56} />
 					<h1>{t('ob_title')}</h1>
 					<p class="lead">{t('ob_text')}</p>
 					{@render profileFields()}
@@ -942,7 +943,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				</form>
 			{:else}
 				<form class="card" onsubmit={linkThisDevice}>
-					<img src={logo} alt="" width="56" height="56" />
+					<Logo size={56} />
 					<h1>{t('ob_link')}</h1>
 					<p class="lead">{t('ob_link_help')}</p>
 					<input
@@ -970,7 +971,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		{#if isDesktop}
 		<aside class="side">
 			<div class="side-top">
-				<img src={logo} alt="" width="24" height="24" />
+				<Logo size={24} />
 				<span class="wordmark">MIGA</span>
 				<span class="status {status}">{t(`status_${status}`)}</span>
 				<button type="button" class="icon-btn" title={t('new_conversation')} aria-label={t('new_conversation')} onclick={openNew}>
@@ -1035,11 +1036,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					aria-label={t('settings')}
 					onclick={(e) => (e.stopPropagation(), toggleSettings())}
 				>
-					<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
-						<g transform="translate(12 12) scale(1.15) translate(-12 -12)" stroke-width="1.5">
-							<path d="M10.3 2.8h3.4l.5 2.4a7.4 7.4 0 0 1 1.7 1l2.3-.8 1.7 2.9-1.8 1.6a7.6 7.6 0 0 1 0 2l1.8 1.6-1.7 2.9-2.3-.8a7.4 7.4 0 0 1-1.7 1l-.5 2.4h-3.4l-.5-2.4a7.4 7.4 0 0 1-1.7-1l-2.3.8-1.7-2.9 1.8-1.6a7.6 7.6 0 0 1 0-2L4.1 8.3l1.7-2.9 2.3.8a7.4 7.4 0 0 1 1.7-1z" />
-							<circle cx="12" cy="12" r="3" />
-						</g>
+					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
+						<circle cx="15" cy="7" r="2" />
+						<circle cx="9" cy="17" r="2" />
 					</svg>
 				</button>
 			</div>
@@ -1192,6 +1192,17 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						<div class="row">
 							<button type="button" onclick={backupKey}>{t('backup_key')}</button>
 							<button type="button" onclick={restoreKey}>{t('restore')}</button>
+						</div>
+					</section>
+
+					<section class="card">
+						<h2>{t('set_theme')}</h2>
+						<div class="seg" role="group" aria-label={t('set_theme')}>
+							{#each ['dark', 'light', 'system'] as const as choice (choice)}
+								<button type="button" aria-pressed={getTheme() === choice} onclick={() => setTheme(choice as Theme)}>
+									{t(`theme_${choice}`)}
+								</button>
+							{/each}
 						</div>
 					</section>
 
@@ -1384,7 +1395,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			{:else}
 <div class="welcome">
 					{#if !isDesktop}
-						<img src={logo} alt="" width="72" height="72" />
+						<Logo size={72} />
 						<h1>MIGA</h1>
 						<p class="tagline">Make Internet Great Again</p>
 					{/if}
@@ -1487,9 +1498,6 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		border-radius: var(--radius);
 		padding: 0.05rem 0.4rem;
 	}
-	.brand img {
-		display: block;
-	}
 	nav {
 		display: flex;
 		align-items: center;
@@ -1502,7 +1510,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		transition: color 0.15s ease;
 	}
 	.link:hover {
-		color: var(--accent-2);
+		color: var(--link);
 	}
 	.status {
 		display: inline-flex;
@@ -1523,7 +1531,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		background: var(--dim);
 	}
 	.status.online {
-		color: var(--accent-2);
+		color: var(--link);
 	}
 	.status.online::before {
 		background: var(--accent-2);
@@ -1562,7 +1570,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		border: 0.5px solid var(--line);
 		border-radius: var(--radius);
 		background: var(--bg);
-		color: var(--accent-2);
+		color: var(--link);
 		font-size: 0.75rem;
 		line-height: 1.5;
 		overflow-wrap: anywhere;
@@ -1670,7 +1678,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		font-size: 0.78rem;
 	}
 	.hint.warn {
-		color: var(--accent-2);
+		color: var(--link);
 	}
 	.onboard {
 		grid-column: 1 / -1;
@@ -1791,7 +1799,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		border: 0.5px solid var(--line-strong);
 		border-radius: var(--radius);
 		background: transparent;
-		color: var(--accent-2);
+		color: var(--link);
 		font-size: 0.85rem;
 		font-weight: 500;
 		cursor: pointer;
@@ -1881,7 +1889,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		border: 0.5px solid var(--line-strong);
 		border-radius: 50%;
 		background: var(--panel-2);
-		color: var(--accent-2);
+		color: var(--link);
 		font-weight: 700;
 		text-transform: uppercase;
 	}
@@ -2089,7 +2097,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	}
 	.welcome .tagline {
 		margin: 0 0 0.8rem;
-		color: var(--accent-2);
+		color: var(--link);
 		font-weight: 600;
 	}
 	.welcome p {
@@ -2201,7 +2209,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	.shell.desktop .icon-btn.on {
 		border-color: transparent;
 		background: var(--panel-2);
-		color: var(--accent-2);
+		color: var(--link);
 	}
 	.shell.desktop .chat-head {
 		flex: none;
@@ -2331,7 +2339,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		gap: 0.7rem;
 		justify-items: start;
 	}
-	.shell.desktop .onboard .card > img {
+	.shell.desktop .onboard .card > :global(.logo) {
 		width: 44px;
 		height: 44px;
 	}
@@ -2372,6 +2380,16 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		height: auto;
 		min-height: 28px;
 		padding: 0.4rem 0.7rem;
+	}
+	.seg {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 0.4rem;
+	}
+	.seg button[aria-pressed='true'] {
+		background: var(--accent);
+		border-color: var(--accent);
+		color: var(--accent-ink);
 	}
 	.lang-row {
 		justify-self: start;

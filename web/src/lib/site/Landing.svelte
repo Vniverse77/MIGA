@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { VERSION_LABEL, VERSION_TITLE } from '../version';
-	import logo from '#lib/assets/favicon.svg';
+	import Logo from '../Logo.svelte';
 	import LangSelect from '../LangSelect.svelte';
 	import { t } from '../i18n.svelte';
 
@@ -32,7 +32,7 @@
 <header class="top">
 	<div class="wrap bar">
 		<a class="brand" href="/">
-			<img src={logo} alt="" width="30" height="30" />
+			<Logo size={30} />
 			<span>MIGA</span>
 			<span class="ver" title={VERSION_TITLE}>{VERSION_LABEL}</span>
 		</a>
@@ -207,9 +207,6 @@
 		border-radius: var(--radius);
 		padding: 0.05rem 0.4rem;
 	}
-	.brand img {
-		display: block;
-	}
 	nav {
 		display: flex;
 		align-items: center;
@@ -223,7 +220,7 @@
 		transition: color 0.15s ease;
 	}
 	.link:hover {
-		color: var(--accent-2);
+		color: var(--link);
 	}
 
 	/* Buttons */
@@ -254,7 +251,7 @@
 		background: var(--accent-2);
 	}
 	.btn.outline {
-		color: var(--accent-2);
+		color: var(--link);
 	}
 	.btn.outline:hover {
 		background: var(--accent);
@@ -273,7 +270,7 @@
 	}
 	.badge {
 		margin: 0 0 1rem;
-		color: var(--accent-2);
+		color: var(--link);
 		font-size: 0.875rem;
 		letter-spacing: 0.02em;
 	}
@@ -328,7 +325,7 @@
 		font-size: 0.92rem;
 	}
 	.flow li span {
-		color: var(--accent-2);
+		color: var(--link);
 	}
 	.flow-note {
 		margin: 1.1rem 0 0;
@@ -380,7 +377,7 @@
 	}
 	.linkcard h3::after {
 		content: ' →';
-		color: var(--accent-2);
+		color: var(--link);
 	}
 
 	/* Downloads */
@@ -436,7 +433,7 @@
 		border-left: 0.5px solid var(--line-strong);
 		border-radius: 0 var(--radius) var(--radius) 0;
 		background: transparent;
-		color: var(--accent-2);
+		color: var(--link);
 		font: inherit;
 		font-size: 0.85rem;
 		cursor: pointer;
@@ -449,7 +446,7 @@
 		display: inline-flex;
 		align-items: center;
 		min-height: 2.75rem;
-		color: var(--accent-2);
+		color: var(--link);
 		font-size: 0.9rem;
 		text-decoration: none;
 	}
@@ -493,7 +490,7 @@
 		text-decoration: none;
 	}
 	footer a:hover {
-		color: var(--accent-2);
+		color: var(--link);
 	}
 
 	@media (max-width: 820px) {

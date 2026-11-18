@@ -109,6 +109,10 @@ const en = {
 
 	// Settings and linked devices
 	settings: "Settings",
+	set_theme: "Appearance",
+	theme_dark: "Dark",
+	theme_light: "Light",
+	theme_system: "System",
 	close: "Close",
 	set_profile: "Profile",
 	set_devices: "Devices",
@@ -287,6 +291,10 @@ const tr: Dictionary = {
 
 	// Settings and linked devices
 	settings: "Ayarlar",
+	set_theme: "Görünüm",
+	theme_dark: "Koyu",
+	theme_light: "Açık",
+	theme_system: "Sistem",
 	close: "Kapat",
 	set_profile: "Profil",
 	set_devices: "Cihazlar",
@@ -464,6 +472,10 @@ const tk: Dictionary = {
 
 	// Settings and linked devices
 	settings: "Sazlamalar",
+	set_theme: "Görnüş",
+	theme_dark: "Garaňky",
+	theme_light: "Ýagty",
+	theme_system: "Ulgam",
 	close: "Ýap",
 	set_profile: "Profil",
 	set_devices: "Enjamlar",
@@ -640,6 +652,10 @@ const ru: Dictionary = {
 
 	// Settings and linked devices
 	settings: "Настройки",
+	set_theme: "Оформление",
+	theme_dark: "Тёмная",
+	theme_light: "Светлая",
+	theme_system: "Системная",
 	close: "Закрыть",
 	set_profile: "Профиль",
 	set_devices: "Устройства",

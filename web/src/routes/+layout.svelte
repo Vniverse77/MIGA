@@ -3,6 +3,7 @@
 	import '@fontsource-variable/jetbrains-mono/wght.css';
 	import { onMount } from 'svelte';
 	import { initLanguage, t } from '../lib/i18n.svelte';
+	import { initTheme } from '../lib/theme.svelte';
 	import { platform } from '../lib/platform';
 	import { newerBuildOnServer } from '../lib/version';
 	import type { LayoutProps } from './$types';
@@ -16,6 +17,7 @@
 	onMount(() => {
 		platform.setupWindow();
 		initLanguage();
+		initTheme();
 		newerBuildOnServer().then((yes) => (updateReady = yes));
 	});
 </script>
@@ -67,6 +69,7 @@
 		--dim: #4a7ab5;
 		--accent: #1a6bbf;
 		--accent-2: #378add;
+		--link: #378add;
 		--accent-ink: #ffffff;
 		--mine: #123a66;
 		--danger: #f0766b;
@@ -84,9 +87,10 @@
 		--text: #0d1525;
 		--heading: #0d1525;
 		--muted: #37506e;
-		--dim: #3a6a9a;
+		--dim: #2f5d8c;
 		--accent: #185fa5;
 		--accent-2: #378add;
+		--link: #185fa5;
 		--mine: #b9d3f5;
 		--danger: #b3261e;
 		color-scheme: light;
@@ -114,7 +118,7 @@
 		overflow-x: hidden;
 	}
 	:global(a) {
-		color: var(--accent-2);
+		color: var(--link);
 	}
 	:global(button, input, textarea) {
 		font: inherit;

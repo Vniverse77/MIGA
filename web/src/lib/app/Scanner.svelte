@@ -184,7 +184,7 @@
 		font-size: 0.85rem;
 	}
 	.notice {
-		color: var(--accent-2);
+		color: var(--link);
 		font-size: 0.85rem;
 	}
 	video {
@@ -199,7 +199,7 @@
 		border: 0.5px solid var(--line-strong);
 		border-radius: var(--radius);
 		background: transparent;
-		color: var(--accent-2);
+		color: var(--link);
 		font-size: 0.85rem;
 		font-weight: 500;
 		cursor: pointer;

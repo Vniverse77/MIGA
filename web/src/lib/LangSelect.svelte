@@ -165,6 +165,6 @@
 		background: var(--panel);
 	}
 	.pop li.sel {
-		color: var(--accent-2);
+		color: var(--link);
 	}
 </style>
