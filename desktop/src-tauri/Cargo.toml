@@ -1,6 +1,6 @@
 [package]
 name = "miga"
-version = "0.6.0-beta.1"
+version = "0.6.0"
 description = "MIGA desktop: end-to-end encrypted messenger with no account"
 authors = ["Vniverse77"]
 license = "AGPL-3.0-or-later"
@@ -15,10 +15,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = [] }
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
 
 [profile.release]
 strip = true

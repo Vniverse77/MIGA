@@ -116,6 +116,8 @@
 			Consolas,
 			monospace;
 		overflow-x: hidden;
+		/* Phones draw edge to edge: keep content clear of the status bar, notch and gesture bar (0 elsewhere). */
+		padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 	}
 	:global(a) {
 		color: var(--link);

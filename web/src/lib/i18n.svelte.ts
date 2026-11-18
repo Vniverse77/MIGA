@@ -46,6 +46,8 @@ const en = {
 	dl_android_text: 'APK for Android phones.',
 	dl_soon: 'Coming soon',
 	dl_android_note: 'It will also be published on F-Droid later.',
+	dl_android_btn: 'Download APK',
+	dl_android_beta: 'Beta for Android 7 and newer. Your phone may ask you to allow installing apps from your browser.',
 	dl_copy: 'Copy',
 	dl_copied: 'Copied',
 	warning:
@@ -316,6 +318,8 @@ const tr: Dictionary = {
 	dl_android_text: 'Android telefonlar için APK.',
 	dl_soon: 'Yakında',
 	dl_android_note: 'İleride F-Droid\'de de yayımlanacak.',
+	dl_android_btn: 'APK indir',
+	dl_android_beta: 'Android 7 ve üstü için beta. Telefonun, tarayıcıdan uygulama yüklemeye izin vermeni isteyebilir.',
 	dl_copy: 'Kopyala',
 	dl_copied: 'Kopyalandı',
 	warning:
@@ -584,6 +588,8 @@ const tk: Dictionary = {
 	dl_android_text: 'Android telefonlar üçin APK.',
 	dl_soon: 'Ýakynda',
 	dl_android_note: 'Soňrak F-Droid-da hem çap ediler.',
+	dl_android_btn: 'APK ýükle',
+	dl_android_beta: 'Android 7 we täze wersiýalar üçin beta. Telefonyňyz brauzerden programma gurmaga rugsat soramagy mümkin.',
 	dl_copy: 'Göçür',
 	dl_copied: 'Göçürildi',
 	warning:
@@ -851,6 +857,8 @@ const ru: Dictionary = {
 	dl_android_text: 'APK для телефонов на Android.',
 	dl_soon: 'Скоро',
 	dl_android_note: 'Позже приложение появится и в F-Droid.',
+	dl_android_btn: 'Скачать APK',
+	dl_android_beta: 'Бета для Android 7 и новее. Телефон может попросить разрешить установку приложений из браузера.',
 	dl_copy: 'Копировать',
 	dl_copied: 'Скопировано',
 	warning:

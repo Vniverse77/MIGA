@@ -6,8 +6,10 @@
 
 	const YAY = 'yay -S miga-messenger';
 	// Bundle file of the current release; update the version with every release.
-	const FLATPAK_FILE = 'MIGA_0.6.0-beta.1_x86_64.flatpak';
-	const FLATPAK_URL = `https://github.com/Vniverse77/MIGA/releases/download/v0.6.0-beta.1/${FLATPAK_FILE}`;
+	const FLATPAK_FILE = 'MIGA_0.6.0_x86_64.flatpak';
+	const FLATPAK_URL = `https://github.com/Vniverse77/MIGA/releases/download/v0.6.0/${FLATPAK_FILE}`;
+	// Android beta APK (sideload; Play Store build comes later)
+	const APK_URL = 'https://github.com/Vniverse77/MIGA/releases/download/v0.6.0/MIGA_0.6.0-beta_android.apk';
 	const FLATPAK_CMD = `flatpak install --user ./${FLATPAK_FILE}`;
 	let copied = $state('');
 	async function copy(text: string) {
@@ -126,12 +128,13 @@
 				<a class="txt" href="https://github.com/Vniverse77/MIGA/releases/latest">{t('dl_deb_link')} →</a>
 				<p class="note">{t('dl_desktop_note')}</p>
 			</article>
-			<article class="card dl disabled" aria-disabled="true">
-				<h3>{t('dl_android_title')}</h3>
+			<article class="card dl">
+				<h3>{t('dl_android_title')} <span class="ver">beta</span></h3>
 				<p>{t('dl_android_text')}</p>
 				<div class="dl-actions">
-					<span class="btn off">{t('dl_soon')}</span>
+					<a class="btn primary" href={APK_URL} download>{t('dl_android_btn')}</a>
 				</div>
+				<p class="note">{t('dl_android_beta')}</p>
 				<p class="note">{t('dl_android_note')}</p>
 			</article>
 		</div>

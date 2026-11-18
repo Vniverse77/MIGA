@@ -57,13 +57,27 @@ The manifest repackages the `.deb`, which is fine for local use. Flathub wants m
 with vendored Cargo and npm sources, an AppStream `metainfo.xml` with screenshots, and a pull request to
 `github.com/flathub/flathub` (branch `new-pr`). That is a separate step.
 
-## Android (not started)
+## Android (beta, sideload)
+Needs JDK 17+ (Temurin 21 works), Android SDK (platform + build-tools 35, platform-tools) and NDK, user-space is fine:
 ```sh
-sudo pacman -S jdk17-openjdk
-# Android SDK + NDK: Android Studio, or the command-line tools; then:
-export ANDROID_HOME=$HOME/Android/Sdk NDK_HOME=$ANDROID_HOME/ndk/<version>
-rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
-cd web && deno task build:mobile
-cd ../desktop && npx tauri android init && npx tauri android build --apk
+export JAVA_HOME=<jdk> ANDROID_HOME=$HOME/Android/Sdk NDK_HOME=$ANDROID_HOME/ndk/<version>
+rustup target add aarch64-linux-android armv7-linux-androideabi
+cd web && npm run build:mobile                      # web/build-mobile
+cd ../desktop && npm install && npx tauri android init --ci   # once; gen/android is git-ignored
+npx tauri android build --apk --target aarch64 --target armv7 # ONE universal APK
 ```
+`desktop/src-tauri/tauri.android.conf.json` is merged over `tauri.conf.json` on Android: it points
+`frontendDist` at `web/build-mobile`, sets the version to `0.6.0` (versionName; Tauri rejects pre-release
+suffixes for Android) and `versionCode` 600. Tray and close-to-tray are `#[cfg(desktop)]` in `src/lib.rs`, and
+the `tray-icon` feature sits in a non-Android target dependency in `Cargo.toml`.
+
+Sign the unsigned APK (debug key for beta sideloading; use a real upload key for Play Store):
+```sh
+U=src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+zipalign -f -p 4 $U aligned.apk
+apksigner sign --ks ~/.android/debug.keystore --ks-pass pass:android --key-pass pass:android \
+  --ks-key-alias androiddebugkey --out MIGA_0.6.0-beta_android.apk aligned.apk
+apksigner verify --print-certs MIGA_0.6.0-beta_android.apk
+```
+(`keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"` if the keystore is missing.)
 The relay will also need `http://tauri.localhost` in `MIGA_ORIGINS`.

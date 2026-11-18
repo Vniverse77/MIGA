@@ -6,7 +6,7 @@ import { webNotifier } from './webnotify';
 
 export const platform: Platform = {
 	target: 'mobile',
-	label: 'mobile',
+	label: 'beta',
 	notifier: webNotifier,
 	packaged: true,
 	relayUrl: () => PUBLIC_RELAY,

@@ -6,15 +6,20 @@
 // and a tray icon. Closing the window hides it to the tray so the relay connection stays alive;
 // "Quit" in the tray menu ends the app. If the tray cannot be created (no status-area support),
 // closing the window quits as before, so the app is never left running without a way back.
+// Tray and close-to-tray are desktop only; on Android the system owns the window lifecycle.
+#[cfg(desktop)]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(desktop)]
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, WindowEvent,
 };
 
+#[cfg(desktop)]
 static TRAY_READY: AtomicBool = AtomicBool::new(false);
 
+#[cfg(desktop)]
 fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -23,9 +28,11 @@ fn show_main(app: &AppHandle) {
     }
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_notification::init())
+    let builder = tauri::Builder::default().plugin(tauri_plugin_notification::init());
+    #[cfg(desktop)]
+    let builder = builder
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "Show MIGA", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -65,7 +72,8 @@ pub fn run() {
                     let _ = window.hide();
                 }
             }
-        })
+        });
+    builder
         .run(tauri::generate_context!())
         .expect("error while running MIGA");
 }
