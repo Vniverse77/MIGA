@@ -7,6 +7,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	import { MAX_ATTACHMENT, type Att } from '../attach';
 	import { AttachError, deleteMedia, deleteRemote, mediaIds, prepare, saveMedia, upload, type Prepared } from '../media';
 	import Scanner from './Scanner.svelte';
+	import { GLOBAL_LIMIT, messageKey, searchAll, searchMessages, segments, snippet } from '../search';
 	import { appUrl, type Scanned } from '../qr';
 	import { VERSION_LABEL, VERSION_TITLE } from '../version';
 	import { onMount, tick, untrack } from 'svelte';
@@ -1390,6 +1391,133 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		}
 	}
 
+	// ── Search (local only: decrypted messages already in memory, nothing is sent anywhere) ──
+
+	const SEARCH_DEBOUNCE_MS = 150;
+	let searchOpen = $state(false);
+	let searchInput = $state('');
+	/** Debounced copy of searchInput; matching uses this one. */
+	let searchQuery = $state('');
+	let searchCur = $state(0);
+	let searchMs = $state(0);
+	let searchField = $state<HTMLInputElement | null>(null);
+	let searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+	const searchHits = $derived.by(() => {
+		if (!searchOpen || !searchQuery.trim()) return [];
+		return searchMessages(activeMessages, searchQuery);
+	});
+
+	/** Runs one search and records how long it took (shown as data-ms on the bar, for tests). */
+	function runSearch(text: string): number {
+		const t0 = performance.now();
+		const n = searchMessages(activeMessages, text).length;
+		searchMs = Math.round((performance.now() - t0) * 10) / 10;
+		return n;
+	}
+	const searchKeys = $derived(new Set(searchHits.map(messageKey)));
+	const searchCurKey = $derived(searchHits[searchCur] ? messageKey(searchHits[searchCur]) : '');
+
+	function onSearchInput(): void {
+		clearTimeout(searchTimer);
+		searchTimer = setTimeout(() => {
+			searchQuery = searchInput;
+			searchCur = Math.max(0, runSearch(searchInput) - 1);
+			void scrollToCurrent();
+		}, SEARCH_DEBOUNCE_MS);
+	}
+
+	function openSearch(): void {
+		menuOpen = false;
+		searchOpen = true;
+		void tick().then(() => searchField?.focus());
+	}
+
+	function closeSearch(): void {
+		clearTimeout(searchTimer);
+		searchOpen = false;
+		searchInput = '';
+		searchQuery = '';
+		searchCur = 0;
+	}
+
+	function stepSearch(delta: number): void {
+		const n = searchHits.length;
+		if (!n) return;
+		searchCur = (searchCur + delta + n) % n;
+		void scrollToCurrent();
+	}
+
+	async function scrollToCurrent(): Promise<void> {
+		await tick();
+		const key = searchCurKey;
+		if (!key) return;
+		const target = Array.from(scroller?.children ?? []).find((el) => (el as HTMLElement).dataset.key === key);
+		target?.scrollIntoView({ block: 'center' });
+	}
+
+	function onSearchKey(event: KeyboardEvent): void {
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			closeSearch();
+		} else if (event.key === 'Enter') {
+			event.preventDefault();
+			clearTimeout(searchTimer);
+			if (searchQuery !== searchInput) {
+				searchQuery = searchInput;
+				searchCur = Math.max(0, runSearch(searchInput) - 1);
+			} else stepSearch(event.shiftKey ? -1 : 1);
+			void scrollToCurrent();
+		}
+	}
+
+	// The search belongs to one conversation: leaving it closes the bar.
+	$effect(() => {
+		void active;
+		untrack(closeSearch);
+	});
+
+	// Search across all conversations (chat list header).
+	let gOpen = $state(false);
+	let gInput = $state('');
+	let gQuery = $state('');
+	let gTimer: ReturnType<typeof setTimeout> | undefined;
+	let gFields = $state<HTMLInputElement[]>([]);
+	const gResults = $derived(gQuery.trim() ? searchAll(chats, gQuery) : null);
+	const nameOf = (address: string) => contacts.find((c) => c.address === address)?.name ?? shortAddress(address);
+
+	function onGlobalInput(): void {
+		clearTimeout(gTimer);
+		gTimer = setTimeout(() => (gQuery = gInput), SEARCH_DEBOUNCE_MS);
+	}
+
+	function toggleGlobal(): void {
+		if (gOpen) return closeGlobal();
+		gOpen = true;
+		void tick().then(() => gFields.find((f) => f && f.offsetParent)?.focus());
+	}
+
+	function closeGlobal(): void {
+		clearTimeout(gTimer);
+		gOpen = false;
+		gInput = '';
+		gQuery = '';
+	}
+
+	/** Opens the chat of a global hit and brings the message into view. */
+	async function openHit(address: string, message: Message): Promise<void> {
+		openChat(address);
+		const key = messageKey(message);
+		await tick();
+		setTimeout(() => {
+			const target = Array.from(scroller?.children ?? []).find((el) => (el as HTMLElement).dataset.key === key);
+			if (!target) return;
+			target.scrollIntoView({ block: 'center' });
+			highlighted = key;
+			setTimeout(() => highlighted === key && (highlighted = ''), 2000);
+		}, 80);
+	}
+
 	function openChat(address: string): void {
 		replyTo = null;
 		editing = null;
@@ -1606,6 +1734,47 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	</span>
 {/snippet}
 
+{#snippet globalBar(slot: number)}
+	{#if gOpen}
+		<div class="gsearch" role="search">
+			<input
+				bind:this={gFields[slot]}
+				bind:value={gInput}
+				type="search"
+				autocomplete="off"
+				data-gfield
+				placeholder={t('search_all_placeholder')}
+				aria-label={t('search_all_placeholder')}
+				oninput={onGlobalInput}
+				onkeydown={(e) => e.key === 'Escape' && (e.preventDefault(), closeGlobal())}
+			/>
+			<button type="button" class="ibtn" title={t('search_close')} aria-label={t('search_close')} onclick={closeGlobal}><Icon name="close" /></button>
+		</div>
+		{#if gResults}
+			<div class="gresults" data-total={gResults.total}>
+				{#each gResults.groups as group (group.chat)}
+					<section class="ggroup">
+						<h3>{nameOf(group.chat)}</h3>
+						<ul>
+							{#each group.hits as hit (hit.mine + hit.id)}
+								<li>
+									<button type="button" class="ghit" onclick={() => { closeGlobal(); void openHit(group.chat, hit); }}>
+										<span class="gsnip">{#each snippet(hit.text, gQuery) as seg, si (si)}{#if seg.hit}<mark>{seg.t}</mark>{:else}{seg.t}{/if}{/each}</span>
+										<small>{dateOf(hit.ts)} {timeOf(hit.ts)}</small>
+									</button>
+								</li>
+							{/each}
+						</ul>
+					</section>
+				{:else}
+					<p class="empty center">{t('search_all_none')}</p>
+				{/each}
+				{#if gResults.total > GLOBAL_LIMIT}<p class="empty center">{t('search_more', { n: GLOBAL_LIMIT })}</p>{/if}
+			</div>
+		{/if}
+	{/if}
+{/snippet}
+
 {#snippet notifyBanner()}
 	{#if notifyPerm === 'default' && !bannerDismissed && identity}
 		<div class="notify-banner" role="region" aria-label={t('notif_title')}>
@@ -1706,13 +1875,15 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				<Logo size={24} />
 				<span class="wordmark">MIGA</span>
 				<span class="status {status}">{t(`status_${status}`)}</span>
+				<button type="button" class="ibtn" data-gsearch title={t('search_all')} aria-label={t('search_all')} aria-pressed={gOpen} onclick={toggleGlobal}><Icon name="search" /></button>
 				<button type="button" class="ibtn" title={t('new_conversation')} aria-label={t('new_conversation')} onclick={openNew}>
 					<Icon name="plus" />
 				</button>
 			</div>
 
-			{@render notifyBanner()}
-			<ul class="contacts side-list">
+			{@render globalBar(0)}
+			{#if gResults === null}{@render notifyBanner()}{/if}
+			<ul class="contacts side-list" class:hidden={gResults !== null}>
 				{#each contacts as contact (contact.address)}
 					{@const last = chats[contact.address]?.at(-1)}
 					<li>
@@ -1795,17 +1966,21 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 			<div class="list-head">
 				<h2>{t('chats')}</h2>
+				<span class="head-actions">
+				<button type="button" class="ibtn" data-gsearch title={t('search_all')} aria-label={t('search_all')} aria-pressed={gOpen} onclick={toggleGlobal}><Icon name="search" /></button>
 				<button type="button" class="ibtn primary" title={t('new_conversation')} aria-label={t('new_conversation')} onclick={openNew}>
 					<Icon name="plus" />
 				</button>
+				</span>
 			</div>
 
+			{@render globalBar(1)}
 			{#if notice && view === 'chat'}
 				<p class="notice" role="status">{notice}</p>
 			{/if}
 
-			{@render notifyBanner()}
-			<ul class="contacts">
+			{#if gResults === null}{@render notifyBanner()}{/if}
+			<ul class="contacts" class:hidden={gResults !== null}>
 				{#each contacts as contact (contact.address)}
 					{@const last = chats[contact.address]?.at(-1)}
 					<li>
@@ -2082,6 +2257,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 <small class="selectable">{shortAddress(activeContact.address)}</small>
 					</div>
 					<span class="lock">{t('f1_title')}</span>
+					<button type="button" class="ibtn" data-search-open title={t('search_chat')} aria-label={t('search_chat')} aria-pressed={searchOpen} onclick={() => (searchOpen ? closeSearch() : openSearch())}><Icon name="search" /></button>
 					<div class="menu-wrap">
 						<button
 							type="button"
@@ -2140,6 +2316,27 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					</div>
 				{/if}
 
+				{#if searchOpen}
+					<div class="searchbar" role="search" data-ms={searchMs}>
+						<input
+							bind:this={searchField}
+							bind:value={searchInput}
+							type="search"
+							autocomplete="off"
+							placeholder={t('search_placeholder')}
+							aria-label={t('search_placeholder')}
+							oninput={onSearchInput}
+							onkeydown={onSearchKey}
+						/>
+						<span class="count" aria-live="polite" data-count={searchHits.length}>
+							{#if !searchQuery.trim()}{:else if searchHits.length}{searchCur + 1} / {searchHits.length}{:else}{t('search_none')}{/if}
+						</span>
+						<button type="button" class="ibtn" data-search-prev title={t('search_prev')} aria-label={t('search_prev')} disabled={!searchHits.length} onclick={() => stepSearch(-1)}><Icon name="chevron-up" /></button>
+						<button type="button" class="ibtn" data-search-next title={t('search_next')} aria-label={t('search_next')} disabled={!searchHits.length} onclick={() => stepSearch(1)}><Icon name="chevron-down" /></button>
+						<button type="button" class="ibtn" data-search-close title={t('search_close')} aria-label={t('search_close')} onclick={closeSearch}><Icon name="close" /></button>
+					</div>
+				{/if}
+
 				<div class="messages" bind:this={scroller} onscroll={checkSeen}>
 					{#each activeMessages as message (message.mine + message.id)}
 						<div
@@ -2171,7 +2368,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 								<Attachment att={message.att} onview={(url, a) => (viewer = { url, mime: a.mime })} />
 							{/if}
 							{#if message.text || !message.att}
-								<p class="selectable">{message.text}</p>
+								<p class="selectable">{#if searchKeys.has(messageKey(message))}{#each segments(message.text, searchQuery) as seg, si (si)}{#if seg.hit}<mark class:cur={messageKey(message) === searchCurKey}>{seg.t}</mark>{:else}{seg.t}{/if}{/each}{:else}{message.text}{/if}</p>
 							{/if}
 							<small>
 								{#if message.edited}<span class="edited">{t('edited')}</span>{' · '}{/if}{timeOf(message.ts)}{#if message.mine}{' · '}{#if message.state === 'sent'}{@const level = tickLevel(message)}<span
@@ -2523,6 +2720,85 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.6rem;
+	}
+	.head-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+	.hidden {
+		display: none;
+	}
+	.searchbar,
+	.gsearch {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.45rem 0.8rem;
+		border-bottom: 0.5px solid var(--line);
+		background: var(--panel);
+	}
+	.searchbar input,
+	.gsearch input {
+		flex: 1;
+		min-width: 0;
+	}
+	.searchbar .count {
+		min-width: 3.4rem;
+		text-align: center;
+		font-size: 0.8rem;
+		color: var(--muted);
+		white-space: nowrap;
+	}
+	:global(mark) {
+		background: color-mix(in srgb, #f2b84b 38%, transparent);
+		color: inherit;
+		border-radius: 3px;
+		padding: 0 0.08em;
+	}
+	:global(mark.cur) {
+		background: #f2b84b;
+		color: #1a1200;
+		outline: 1.5px solid #f2b84b;
+	}
+	.gresults {
+		overflow-y: auto;
+		flex: 1;
+		min-height: 0;
+	}
+	.ggroup h3 {
+		margin: 0;
+		padding: 0.6rem 0.9rem 0.2rem;
+		font-size: 0.78rem;
+		letter-spacing: 0.04em;
+		color: var(--dim);
+	}
+	.ggroup ul {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+	}
+	.ghit {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.15rem;
+		width: 100%;
+		padding: 0.5rem 0.9rem;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		text-align: left;
+		color: var(--text);
+	}
+	.ghit:hover {
+		background: var(--panel-2);
+	}
+	.ghit small {
+		color: var(--muted);
+	}
+	.gsnip {
+		overflow-wrap: anywhere;
 	}
 	.list-head h2 {
 		margin: 0;

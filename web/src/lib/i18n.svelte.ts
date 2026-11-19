@@ -2,6 +2,16 @@
 // The choice is stored in this browser only and never sent anywhere.
 
 const en = {
+	search_chat: 'Search in conversation',
+	search_placeholder: 'Search messages',
+	search_prev: 'Previous match',
+	search_next: 'Next match',
+	search_close: 'Close search',
+	search_none: 'No matches',
+	search_all: 'Search all conversations',
+	search_all_placeholder: 'Search all conversations',
+	search_all_none: 'No messages found',
+	search_more: 'Showing the first {n} results',
 	language: 'Language',
 
 	// Landing page
@@ -278,6 +288,16 @@ export type MessageKey = keyof typeof en;
 type Dictionary = Record<MessageKey, string>;
 
 const tr: Dictionary = {
+	search_chat: 'Sohbette ara',
+	search_placeholder: 'Mesajlarda ara',
+	search_prev: 'Önceki eşleşme',
+	search_next: 'Sonraki eşleşme',
+	search_close: 'Aramayı kapat',
+	search_none: 'Eşleşme yok',
+	search_all: 'Tüm sohbetlerde ara',
+	search_all_placeholder: 'Tüm sohbetlerde ara',
+	search_all_none: 'Mesaj bulunamadı',
+	search_more: 'İlk {n} sonuç gösteriliyor',
 	language: 'Dil',
 
 	nav_app: 'Uygulamayı aç',
@@ -551,6 +571,16 @@ const tr: Dictionary = {
 
 // Turkmen: first draft, to be reviewed by a native speaker.
 const tk: Dictionary = {
+	search_chat: 'Söhbetdeşlikde gözle',
+	search_placeholder: 'Habarlarda gözle',
+	search_prev: 'Öňki gabat gelme',
+	search_next: 'Indiki gabat gelme',
+	search_close: 'Gözlegi ýap',
+	search_none: 'Gabat gelme ýok',
+	search_all: 'Ähli söhbetdeşliklerde gözle',
+	search_all_placeholder: 'Ähli söhbetdeşliklerde gözle',
+	search_all_none: 'Habar tapylmady',
+	search_more: 'Ilkinji {n} netije görkezilýär',
 	language: 'Dil',
 
 	nav_app: 'Programmany aç',
@@ -824,6 +854,16 @@ const tk: Dictionary = {
 };
 
 const ru: Dictionary = {
+	search_chat: 'Поиск в разговоре',
+	search_placeholder: 'Поиск по сообщениям',
+	search_prev: 'Предыдущее совпадение',
+	search_next: 'Следующее совпадение',
+	search_close: 'Закрыть поиск',
+	search_none: 'Нет совпадений',
+	search_all: 'Искать во всех разговорах',
+	search_all_placeholder: 'Искать во всех разговорах',
+	search_all_none: 'Сообщения не найдены',
+	search_more: 'Показаны первые {n} результатов',
 	language: 'Язык',
 
 	nav_app: 'Открыть приложение',

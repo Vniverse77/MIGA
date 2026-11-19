@@ -23,7 +23,10 @@
 		| 'user-x'
 		| 'download'
 		| 'more'
-		| 'more-v';
+		| 'more-v'
+		| 'search'
+		| 'chevron-up'
+		| 'chevron-down';
 
 	let { name, size = 20 }: { name: IconName; size?: number } = $props();
 </script>
@@ -96,6 +99,13 @@
 		<circle cx="12" cy="5" r="1" />
 		<circle cx="12" cy="12" r="1" />
 		<circle cx="12" cy="19" r="1" />
+	{:else if name === 'search'}
+		<circle cx="11" cy="11" r="6.5" />
+		<path d="M16 16l4.5 4.5" />
+	{:else if name === 'chevron-up'}
+		<path d="M6 15l6-6 6 6" />
+	{:else if name === 'chevron-down'}
+		<path d="M6 9l6 6 6-6" />
 	{/if}
 </svg>
 
