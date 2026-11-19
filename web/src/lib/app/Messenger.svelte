@@ -161,6 +161,59 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	}
 	let ready = $state(false);
 	let draft = $state('');
+
+	// Android: the native Back button asks the page first (MainActivity.kt calls window.__migaBack). The page steps back
+	// inside the app (chat -> list, settings or safety number -> chat) and answers false only on the conversation list,
+	// where the app may close. Browser history is not used: entries made without a tap are skipped by WebView.
+	function stepBack(): boolean {
+		if (msgMenu || ctx || menuOpen || emojiOpen || gifOpen) {
+			msgMenu = null;
+			ctx = null;
+			menuOpen = false;
+			emojiOpen = false;
+			gifOpen = false;
+			return true;
+		}
+		if (view !== 'chat') {
+			view = 'chat';
+			return true;
+		}
+		if (active) {
+			active = null;
+			return true;
+		}
+		return false;
+	}
+	$effect(() => {
+		if (!platform.appHistory) return;
+		(window as unknown as { __migaBack?: () => boolean }).__migaBack = stepBack;
+		return () => {
+			delete (window as unknown as { __migaBack?: () => boolean }).__migaBack;
+		};
+	});
+	// Android restores the open chat and the unsent text after the app was closed in the background.
+	const SESSION_KEY = 'miga.session';
+	$effect(() => {
+		if (!platform.appHistory || !ready) return;
+		const snapshot = JSON.stringify({ active, draft: active ? draft : '' });
+		try {
+			localStorage.setItem(SESSION_KEY, snapshot);
+		} catch {
+			// Storage blocked: nothing to restore next time.
+		}
+	});
+	function restoreSession(): void {
+		if (!platform.appHistory) return;
+		try {
+			const saved = JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null') as { active?: string; draft?: string } | null;
+			if (saved?.active && contacts.some((c) => c.address === saved.active)) {
+				active = saved.active;
+				draft = saved.draft ?? '';
+			}
+		} catch {
+			// A damaged snapshot is ignored.
+		}
+	}
 	/** The message the next one will quote. */
 	let replyTo = $state<Reply | null>(null);
 	let composerInput = $state<HTMLInputElement | null>(null);
@@ -308,6 +361,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			muted = data.muted;
 			tombs = data.tombs;
 			hx = data.hx;
+			restoreSession();
 			notifyMode = loadNotifyMode();
 			bannerDismissed = loadNotifyBannerDismissed();
 			void refreshPermission();
@@ -2858,7 +2912,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		display: grid;
 		grid-template-columns: 22rem 1fr;
 		grid-template-rows: 3.5rem 1fr;
-		height: 100dvh;
+		height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
 	}
 
 	/* Top bar, same as the landing page */
@@ -3836,7 +3890,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	.shell.desktop {
 		grid-template-columns: 300px minmax(0, 1fr);
 		grid-template-rows: minmax(0, 1fr);
-		height: 100vh;
+		height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
 		overflow: hidden;
 	}
 	.side {

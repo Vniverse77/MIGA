@@ -117,6 +117,8 @@
 			monospace;
 		overflow-x: hidden;
 		/* Phones draw edge to edge: keep content clear of the status bar, notch and gesture bar (0 elsewhere). */
+		/* Border box: the padding must not add to the height the app fills (the composer would fall off the screen). */
+		box-sizing: border-box;
 		padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 	}
 	:global(a) {

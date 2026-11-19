@@ -64,6 +64,7 @@ export JAVA_HOME=<jdk> ANDROID_HOME=$HOME/Android/Sdk NDK_HOME=$ANDROID_HOME/ndk
 rustup target add aarch64-linux-android armv7-linux-androideabi
 cd web && npm run build:mobile                      # web/build-mobile
 cd ../desktop && npm install && npx tauri android init --ci   # once; gen/android is git-ignored
+bash android-patch/apply.sh                       # after every init: insets, keyboard and status bar colours
 npx tauri android build --apk --target aarch64 --target armv7 # ONE universal APK
 ```
 `desktop/src-tauri/tauri.android.conf.json` is merged over `tauri.conf.json` on Android: it points

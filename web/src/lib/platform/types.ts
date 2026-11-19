@@ -32,6 +32,10 @@ export interface Platform {
 	readonly packaged: boolean;
 	/** Called once when the app mounts: lets a packaged build drop page behaviours (menus, zoom, drag). */
 	setupWindow(): void;
+	/** Android only: tells the native shell the page colour and whether the theme is light, so the status and navigation bars match. */
+	setChrome?(color: string, light: boolean): void;
+	/** Android only: in-app screens take part in the system history, so the Back gesture steps back inside the app. */
+	readonly appHistory?: boolean;
 }
 
 /** The public relay, used by builds that are not served by a relay themselves. */

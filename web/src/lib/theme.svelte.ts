@@ -1,3 +1,5 @@
+import { platform } from './platform';
+
 // Theme choice: dark (default, as on vniverse77.com), light, or follow the system.
 // The inline script in app.html applies the saved choice before first paint; this module keeps it in step.
 export type Theme = 'dark' | 'light' | 'system';
@@ -15,7 +17,9 @@ function apply(): void {
 	const root = document.documentElement;
 	if (light) root.dataset.theme = 'light';
 	else delete root.dataset.theme;
-	document.querySelector('meta[name="theme-color"]')?.setAttribute('content', light ? '#f0f4ff' : '#070b14');
+	const color = light ? '#f0f4ff' : '#070b14';
+	document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color);
+	platform.setChrome?.(color, light);
 }
 
 /** Reads the saved choice and follows system changes while "system" is selected. Browser only. */

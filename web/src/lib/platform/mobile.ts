@@ -12,5 +12,10 @@ export const platform: Platform = {
 	relayUrl: () => PUBLIC_RELAY,
 	publicOrigin: () => PUBLIC_ORIGIN,
 	openExternal: (url) => void window.open(url, '_blank', 'noopener,noreferrer'),
-	setupWindow: () => {}
+	setupWindow: () => {},
+	appHistory: true,
+	setChrome: (color, light) => {
+		// MainActivity.kt registers this object; it is absent in a plain browser.
+		(window as unknown as { MigaNative?: { setChrome(c: string, l: boolean): void } }).MigaNative?.setChrome(color, light);
+	}
 };
