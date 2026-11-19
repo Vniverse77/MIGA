@@ -1,0 +1,18 @@
+[package]
+name = "miga"
+description = "MIGA terminal client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "miga"
+path = "src/main.rs"
+
+[dependencies]
+miga-core = { path = "../miga-core" }
+miga-client = { path = "../miga-client" }
+clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "env"] }
+tokio = { version = "1", features = ["rt", "time", "macros", "io-std", "io-util"] }
