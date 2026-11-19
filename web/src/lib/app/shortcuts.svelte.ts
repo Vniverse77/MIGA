@@ -4,7 +4,7 @@
 import { platform } from '../platform';
 
 /** Which shortcut layers are open. Esc closes the top one first. */
-export const layers = $state({ switcher: false, help: false });
+export const layers = $state({ switcher: false, help: false, lang: false });
 
 /** Shortcuts apply when the platform declares them and the main input is a mouse, not a finger. */
 export function shortcutsOn(): boolean {
@@ -13,6 +13,7 @@ export function shortcutsOn(): boolean {
 
 /** Closes the top shortcut layer; true if one was open. */
 export function closeTopLayer(): boolean {
+	if (layers.lang) return (layers.lang = false), true;
 	if (layers.help) return (layers.help = false), true;
 	if (layers.switcher) return (layers.switcher = false), true;
 	return false;

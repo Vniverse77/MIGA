@@ -76,7 +76,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 	import MessageSheet from './MessageSheet.svelte';
 	import { swipeReply } from './swipe';
 	import { pwa, promptInstall, setUnreadBadge } from '../pwa.svelte';
-	import { closeTopLayer, onShortcutKey, shortcutsOn, type ShortcutActions } from './shortcuts.svelte';
+	import { closeTopLayer, layers, onShortcutKey, shortcutsOn, type ShortcutActions } from './shortcuts.svelte';
 	import { getTheme, setTheme, type Theme } from '../theme.svelte';
 	import { getLanguage, t, type MessageKey } from '../i18n.svelte';
 	import { isEmojiOnly } from '../emoji';
@@ -238,12 +238,17 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 	// inside the app (chat -> list, settings or safety number -> chat) and answers false only on the conversation list,
 	// where the app may close. Browser history is not used: entries made without a tap are skipped by WebView.
 	function stepBack(): boolean {
-		if (confirmOpen() || msgMenu || ctx || menuOpen || emojiOpen || gifOpen || viewer) {
-			dismissConfirm();
-			viewer = null;
+		// One layer per Back: dialog, viewer, sheet or menu first, then the emoji/GIF panel under them.
+		if (layers.lang) return (layers.lang = false), true;
+		if (confirmOpen()) return dismissConfirm(), true;
+		if (viewer) return (viewer = null), true;
+		if (msgMenu || ctx || menuOpen) {
 			msgMenu = null;
 			ctx = null;
 			menuOpen = false;
+			return true;
+		}
+		if (emojiOpen || gifOpen) {
 			emojiOpen = false;
 			gifOpen = false;
 			return true;
@@ -334,8 +339,8 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 
 	// Navigation layers: sheet/picker/menu (1) > settings or other sub screen (1) > open chat (1) > list. One count drives the
 	// browser history (web at phone width), the native back state (Android) and the screen transitions.
-	const overlayOpen = $derived(!!(confirmOpen() || msgMenu || ctx || menuOpen || emojiOpen || gifOpen || viewer));
-	const depth = $derived((active ? 1 : 0) + (view !== 'chat' ? 1 : 0) + (view === 'settings' && phoneLayout && setPage ? 1 : 0) + (overlayOpen ? 1 : 0));
+	const overlayCount = $derived((layers.lang || confirmOpen() || msgMenu || ctx || menuOpen || viewer ? 1 : 0) + (emojiOpen || gifOpen ? 1 : 0));
+	const depth = $derived((active ? 1 : 0) + (view !== 'chat' ? 1 : 0) + (view === 'settings' && phoneLayout && setPage ? 1 : 0) + overlayCount);
 	const screen = $derived(view !== 'chat' ? 'sub' : active ? 'chat' : 'list');
 
 	// Web at phone width: every layer is a history entry, so the browser/gesture Back steps sheet > picker > chat > list and
@@ -411,14 +416,24 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 		}
 		prevScreen = s;
 	});
+	const hexOf = (rgb: string): string | null => {
+		const m = rgb.match(/\d+/g);
+		return m && m.length >= 3 ? '#' + m.slice(0, 3).map((n) => Number(n).toString(16).padStart(2, '0')).join('') : null;
+	};
 	// Android: the navigation bar takes the colour of what is at the bottom of this screen (composer panel in a chat, page elsewhere).
 	$effect(() => {
 		void screen;
 		void getTheme();
+		if (platform.setChrome) {
+			// Image viewer: both bars black. First-run screen (no header): the top bar takes the page colour.
+			const light = document.documentElement.dataset.theme === 'light';
+			const page = hexOf(getComputedStyle(document.body).backgroundColor);
+			platform.setChrome(viewer ? '#08080a' : ready && !identity && page ? page : light ? '#ffffff' : '#0d1525', viewer ? false : light);
+		}
 		if (!platform.setBottom) return;
 		tick().then(() => {
 			const el = document.querySelector('.composer');
-			const bg = screen === 'chat' && el ? getComputedStyle(el).backgroundColor : getComputedStyle(document.body).backgroundColor;
+			const bg = viewer ? '#08080a' : screen === 'chat' && el ? getComputedStyle(el).backgroundColor : getComputedStyle(document.body).backgroundColor;
 			const m = bg.match(/\d+/g);
 			if (m && m.length >= 3) platform.setBottom?.('#' + m.slice(0, 3).map((n) => Number(n).toString(16).padStart(2, '0')).join(''));
 		});
@@ -3997,6 +4012,23 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 	.contact.selected:hover {
 		border-color: var(--line-strong);
 		background: var(--panel-2);
+	}
+	/* Touch: no sticky hover and no "selected" tint on the phone list (the chat covers it), so a tapped row does not stay lit while the screen slides. */
+	@media (hover: none) {
+		.contact:hover:not(:disabled):not(:active) {
+			border-color: transparent;
+			background: transparent;
+		}
+		.contact:active:not(:disabled) {
+			background: var(--panel);
+		}
+	}
+	@media (max-width: 760px) {
+		.shell:not(.desktop) .contact.selected,
+		.shell:not(.desktop) .contact.selected:hover {
+			border-color: transparent;
+			background: transparent;
+		}
 	}
 	.avatar {
 		display: grid;
