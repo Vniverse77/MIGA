@@ -9,6 +9,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	import Scanner from './Scanner.svelte';
 	import { GLOBAL_LIMIT, messageKey, searchAll, searchMessages, segments, snippet } from '../search';
 	import { appUrl, type Scanned } from '../qr';
+	import { linkify } from '../links';
 	import { VERSION_LABEL, VERSION_TITLE } from '../version';
 	import { onMount, tick, untrack } from 'svelte';
 	import {
@@ -72,7 +73,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	import Logo from '../Logo.svelte';
 	import Icon from './Icon.svelte';
 	import { getTheme, setTheme, type Theme } from '../theme.svelte';
-	import { t } from '../i18n.svelte';
+	import { getLanguage, t } from '../i18n.svelte';
 	import { isEmojiOnly } from '../emoji';
 	import type { Component } from 'svelte';
 	import type { NotifyPermission } from '../platform/types';
@@ -216,7 +217,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	}
 	/** The message the next one will quote. */
 	let replyTo = $state<Reply | null>(null);
-	let composerInput = $state<HTMLInputElement | null>(null);
+	let composerInput = $state<HTMLTextAreaElement | null>(null);
 	/** Set while the composer edits one of my own messages. */
 	let editing = $state<{ peer: string; id: string; text: string } | null>(null);
 	let emojiOpen = $state(false);
@@ -1385,6 +1386,35 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		replyTo = null;
 	}
 
+	/** Grows the composer with its text, up to a few lines, then it scrolls. */
+	function growComposer(): void {
+		const el = composerInput;
+		if (!el) return;
+		el.style.height = 'auto';
+		const max = 6 * 24;
+		el.style.height = Math.min(el.scrollHeight, max) + 'px';
+		el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
+	}
+	// An emptied or replaced draft (send, edit, emoji) must shrink the box again.
+	$effect(() => {
+		void draft;
+		tick().then(growComposer);
+	});
+
+	/** Enter sends, Shift+Enter starts a new line. A key press that only confirms an IME candidate is left alone. */
+	function onComposerKey(e: KeyboardEvent): void {
+		if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+		e.preventDefault();
+		(e.currentTarget as HTMLTextAreaElement).form?.requestSubmit();
+	}
+
+	/** Enter in a single-line field: move on or run the action (some on-screen keyboards do not submit forms by themselves). */
+	function onEnter(e: KeyboardEvent, action: () => void): void {
+		if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+		e.preventDefault();
+		action();
+	}
+
 	function sendMessage(event: SubmitEvent): void {
 		event.preventDefault();
 		const text = draft.trim();
@@ -1898,13 +1928,20 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 	function openMsgMenu(x: number, y: number, message: Message): void {
 		// Keep the menu inside the window.
-		msgMenu = {
-			x: Math.max(8, Math.min(x, window.innerWidth - 220)),
-			y: Math.max(8, Math.min(y, window.innerHeight - 190)),
-			message,
-			at: Date.now()
-		};
-		tick().then(() => msgMenuEl?.querySelector<HTMLElement>('button')?.focus());
+		msgMenu = { x, y, message, at: Date.now() };
+		// Clamp with the menu's real size, measured once it is on screen.
+		tick().then(() => {
+			const el = msgMenuEl;
+			if (!el || !msgMenu) return;
+			const { width, height } = el.getBoundingClientRect();
+			const vw = document.documentElement.clientWidth;
+			const vh = document.documentElement.clientHeight;
+			const nx = Math.max(8, Math.min(x, vw - width - 8));
+			// Open upwards when there is no room below the anchor.
+			const ny = y + height + 8 > vh ? Math.max(8, y - height - 8) : y;
+			msgMenu = { ...msgMenu, x: nx, y: Math.max(8, Math.min(ny, vh - height - 8)) };
+			el.querySelector<HTMLElement>('button')?.focus();
+		});
 	}
 
 	async function deleteForMe(message: Message): Promise<void> {
@@ -1936,6 +1973,13 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		const items = [{ id: message.id, mine: true }];
 		if (chats[peer] && removeMessages(chats[peer], items)) persist();
 		rememberDeletes(items.map((i) => ({ c: peer, s: 'm' as const, id: i.id, mine: i.mine, ts: Date.now() })));
+	}
+
+	/** From the message menu: close it first, the message is passed by value. Reading the menu's own
+	 * state after clearing it (as a `{@const}` inside the menu block does) throws and ends in the error page. */
+	function reply(message: Message): void {
+		msgMenu = null;
+		startReply(message);
 	}
 
 	function startReply(message: Message): void {
@@ -1980,9 +2024,14 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 	const initial = (name: string) => [...name.trim()][0] ?? '?';
 	const shortAddress = (a: string) => a.slice(0, 8) + '…' + a.slice(-6);
+	/** Times follow the app language: 24 hour for Turkish, Turkmen and Russian. */
 	const timeOf = (ts: number) =>
-		new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-	const dateOf = (ts: number) => new Date(ts).toLocaleDateString();
+		new Date(ts).toLocaleTimeString(getLanguage() === 'en' ? [] : getLanguage() === 'tk' ? 'tr' : getLanguage(), {
+			hour: '2-digit',
+			minute: '2-digit',
+			hourCycle: getLanguage() === 'en' ? undefined : 'h23'
+		});
+	const dateOf = (ts: number) => new Date(ts).toLocaleDateString(getLanguage() === 'en' ? [] : getLanguage() === 'tk' ? 'tr' : getLanguage());
 	const stateLabel = (state: Message['state']) =>
 		state === 'received' ? '' : t(`state_${state}`);
 	/** Tick level of an own, sent message. Read is only shown while read receipts are on. */
@@ -2098,7 +2147,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	<p class="hint">{t('profile_note')}</p>
 {/snippet}
 
-<div class="shell" class:desktop={isDesktop} class:chat-open={active !== null || view !== 'chat'}>
+<div class="shell" class:desktop={isDesktop} class:sub={view !== 'chat' && !!identity} class:chat-open={active !== null || view !== 'chat'}>
 	{#if !isDesktop}
 	<header class="top">
 		{#if platform.target === 'web'}
@@ -2159,7 +2208,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					<button type="submit" class="primary" disabled={linking || !codeInput.trim()}>
 						{linking ? t('link_wait') : t('link_go')}
 					</button>
-					<button type="button" class="ibtn" title={t('scan_button')} aria-label={t('scan_button')} disabled={linking} onclick={() => (scanning = 'link')}><Icon name="scan" /></button>
+					<button type="button" class="with-icon" disabled={linking} onclick={() => (scanning = 'link')}><Icon name="scan" size={16} />{t('scan_button')}</button>
 					<button type="button" disabled={linking} onclick={() => ((onboard = 'create'), (notice = ''))}>
 						← {t('back')}
 					</button>
@@ -2175,9 +2224,11 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				<span class="wordmark">MIGA</span>
 				<span class="status {status}">{t(`status_${status}`)}</span>
 				<button type="button" class="ibtn" data-gsearch title={t('search_all')} aria-label={t('search_all')} aria-pressed={gOpen} onclick={toggleGlobal}><Icon name="search" /></button>
+				{#if contacts.length}
 				<button type="button" class="ibtn" title={t('new_conversation')} aria-label={t('new_conversation')} onclick={openNew}>
 					<Icon name="plus" />
 				</button>
+				{/if}
 			</div>
 
 			{@render globalBar(0)}
@@ -2195,7 +2246,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						>
 							<span class="avatar" aria-hidden="true">{initial(contact.name)}</span>
 							<span class="who">
-								<strong>{contact.name}{#if contact.verified}{@render verifiedMark(12)}{/if}</strong>
+								<strong>{contact.name}{#if contact.verified}{@render verifiedMark(14)}{/if}</strong>
 								<small>{last ? previewOf(last) : shortAddress(contact.address)}</small>
 							</span>
 							{@render rowMeta(contact.address, last)}
@@ -2267,9 +2318,11 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				<h2>{t('chats')}</h2>
 				<span class="head-actions">
 				<button type="button" class="ibtn" data-gsearch title={t('search_all')} aria-label={t('search_all')} aria-pressed={gOpen} onclick={toggleGlobal}><Icon name="search" /></button>
+				{#if contacts.length}
 				<button type="button" class="ibtn primary" title={t('new_conversation')} aria-label={t('new_conversation')} onclick={openNew}>
 					<Icon name="plus" />
 				</button>
+				{/if}
 				</span>
 			</div>
 
@@ -2291,7 +2344,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						>
 							<span class="avatar" aria-hidden="true">{initial(contact.name)}</span>
 							<span class="who">
-								<strong>{contact.name}{#if contact.verified}{@render verifiedMark(12)}{/if}</strong>
+								<strong>{contact.name}{#if contact.verified}{@render verifiedMark(14)}{/if}</strong>
 								<small>{last ? previewOf(last) : shortAddress(contact.address)}</small>
 							</span>
 							{@render rowMeta(contact.address, last)}
@@ -2311,7 +2364,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			{#if view === 'settings'}
 				<header class="chat-head">
 					<button type="button" class="ibtn back" title={t('back')} aria-label={t('back')} onclick={() => (view = 'chat')}><Icon name="back" /></button>
-					<div class="who"><strong>{t('settings')}</strong></div>
+					<div class="who title"><Icon name="settings" size={18} /><strong>{t('settings')}</strong></div>
 					<button type="button" class="ibtn close" aria-label={t('close')} title={t('close')} onclick={() => (view = 'chat')}>
 						<Icon name="close" />
 					</button>
@@ -2321,7 +2374,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					<section class="card">
 						<h2>{t('your_address')}</h2>
 						<code class="selectable">{identity?.address ?? '…'}</code>
-						<button type="button" class="ibtn" title={t('copy_address')} aria-label={t('copy_address')} onclick={copyAddress}><Icon name="copy" /></button>
+						<button type="button" class="with-icon" onclick={copyAddress}><Icon name="copy" size={16} />{t('copy_address')}</button>
 						{#if inviteUrl}
 							<h3>{t('qr_contact_title')}</h3>
 							<QrCode text={inviteUrl} label={t('qr_contact_title')} />
@@ -2417,7 +2470,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 								<button type="button" onclick={() => endLink('')}>{t('cancel')}</button>
 							</div>
 						{:else}
-							<button type="button" class="ibtn primary" title={t('dev_add')} aria-label={t('dev_add')} onclick={addDevice}><Icon name="device-add" /></button>
+							<button type="button" class="primary with-icon" onclick={addDevice}><Icon name="device-add" size={16} />{t('dev_add')}</button>
 						{/if}
 						{#if linkNotice}<p class="notice" role="status">{linkNotice}</p>{/if}
 						<p class="hint">{t('dev_hint')}</p>
@@ -2462,12 +2515,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						</div>
 					</section>
 
-{#if isDesktop}
-						<section class="card">
-							<h2>{t('language')}</h2>
-							<div class="lang-row"><LangSelect /></div>
-						</section>
-					{/if}
+<section class="card">
+						<h2>{t('language')}</h2>
+						<div class="lang-row"><LangSelect /></div>
+					</section>
 
 					<section class="card">
 						<h2>{t('set_erase')}</h2>
@@ -2490,7 +2541,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			{:else if view === 'new'}
 				<header class="chat-head">
 					<button type="button" class="ibtn back" title={t('back')} aria-label={t('back')} onclick={() => (view = 'chat')}><Icon name="back" /></button>
-					<div class="who"><strong>{t('new_conversation')}</strong></div>
+					<div class="who title"><Icon name="plus" size={18} /><strong>{t('new_conversation')}</strong></div>
 					<button type="button" class="ibtn close" aria-label={t('close')} title={t('close')} onclick={() => (view = 'chat')}>
 						<Icon name="close" />
 					</button>
@@ -2498,24 +2549,23 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 				<div class="settings">
 					<form class="card" onsubmit={addContact}>
-						<h2>{t('new_conversation')}</h2>
-						<input bind:value={newAddress} placeholder={t('ph_address')} autocomplete="off" spellcheck="false" />
-						<input bind:value={newName} placeholder={t('ph_name')} autocomplete="off" maxlength="40" />
+						<input bind:value={newAddress} placeholder={t('ph_address')} autocomplete="off" spellcheck="false" enterkeyhint="next" onkeydown={(e) => onEnter(e, () => (e.currentTarget as HTMLInputElement).form?.querySelectorAll('input')[1]?.focus())} />
+						<input bind:value={newName} placeholder={t('ph_name')} autocomplete="off" maxlength="40" enterkeyhint="go" onkeydown={(e) => onEnter(e, () => addContact())} />
 						<button type="submit" class="primary">{t('start_chat')}</button>
-						<button type="button" class="ibtn" title={t('scan_button')} aria-label={t('scan_button')} onclick={() => (scanning = 'to')}><Icon name="scan" /></button>
+						<button type="button" class="with-icon" onclick={() => (scanning = 'to')}><Icon name="scan" size={16} />{t('scan_button')}</button>
 						{#if notice}<p class="notice" role="status">{notice}</p>{/if}
 					</form>
 
 					<section class="card">
 						<h2>{t('your_address')}</h2>
 						<code class="selectable">{identity?.address ?? '…'}</code>
-						<button type="button" class="ibtn" title={t('copy_address')} aria-label={t('copy_address')} onclick={copyAddress}><Icon name="copy" /></button>
+						<button type="button" class="with-icon" onclick={copyAddress}><Icon name="copy" size={16} />{t('copy_address')}</button>
 					</section>
 				</div>
 			{:else if view === 'verify' && activeContact}
 				<header class="chat-head">
 					<button type="button" class="ibtn back" title={t('back')} aria-label={t('back')} onclick={() => (view = 'chat')}><Icon name="back" /></button>
-					<div class="who"><strong>{t('safety_title')}</strong></div>
+					<div class="who title"><Icon name="shield" size={18} /><strong>{t('safety_title')}</strong></div>
 					<button type="button" class="ibtn close" aria-label={t('close')} title={t('close')} onclick={() => (view = 'chat')}>
 						<Icon name="close" />
 					</button>
@@ -2523,7 +2573,6 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 				<div class="settings">
 					<section class="card safety">
-						<h2>{t('safety_with', { name: activeContact.name })}</h2>
 						<p class="hint">{t('safety_help', { name: activeContact.name })}</p>
 						<div class="safety-number selectable" data-safety={activeSafety} aria-label={groupSafety(activeSafety)}>
 							{#each groupSafety(activeSafety).split(' ') as group, i (i)}<span>{group}</span>{/each}
@@ -2670,8 +2719,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 								<Attachment att={message.att} onview={(url, a) => (viewer = { url, mime: a.mime })} />
 							{/if}
 							{#if message.text || !message.att}
-								<p class="selectable">{#if searchKeys.has(messageKey(message))}{#each segments(message.text, searchQuery) as seg, si (si)}{#if seg.hit}<mark class:cur={messageKey(message) === searchCurKey}>{seg.t}</mark>{:else}{seg.t}{/if}{/each}{:else}{message.text}{/if}</p>
+								<p class="selectable">{#if searchKeys.has(messageKey(message))}{#each segments(message.text, searchQuery) as seg, si (si)}{#if seg.hit}<mark class:cur={messageKey(message) === searchCurKey}>{seg.t}</mark>{:else}{seg.t}{/if}{/each}{:else}{#each linkify(message.text) as part, pi (pi)}{#if part.url}<a href={part.url} target="_blank" rel="noopener noreferrer" onclick={(e) => (e.preventDefault(), platform.openExternal(part.url as string))}>{part.t}</a>{:else}{part.t}{/if}{/each}{/if}</p>
 							{/if}
+							<div class="foot">
 							<small>
 								{#if message.edited}<span class="edited">{t('edited')}</span>{' · '}{/if}{timeOf(message.ts)}{#if message.mine}{' · '}{#if message.state === 'sent'}{@const level = tickLevel(message)}<span
 										class="ticks {level}"
@@ -2686,6 +2736,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 										</svg>
 									</span>{:else}{stateLabel(message.state)}{/if}{/if}
 							</small>
+							<span class="acts">
 							<button
 								type="button"
 								class="reply-btn"
@@ -2708,9 +2759,11 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							>
 								<Icon name="more" size={14} />
 							</button>
+							</span>
+							</div>
 						</div>
 					{:else}
-						{#if !uploads.some((u) => u.peer === active)}<p class="empty center">{t('no_messages')}</p>{/if}
+						{#if !uploads.some((u) => u.peer === active)}<p class="empty-box">{t('no_messages')}</p>{/if}
 					{/each}
 					{#each uploads.filter((u) => u.peer === active) as u (u.key)}
 						<div class="bubble mine uploading" class:failed={u.state === 'failed'} data-upload={u.state}>
@@ -2744,7 +2797,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				{#if replyTo}
 					<div class="replybar">
 						<div class="quote-text">
-							<strong>{t('replying_to', { name: quoteName(replyTo.from) })}</strong>
+							<strong>{replyTo.from === identity?.address ? t('replying_to_self') : t('replying_to', { name: quoteName(replyTo.from) })}</strong>
 							<span>{replyTo.text}</span>
 						</div>
 						<button type="button" aria-label={t('cancel_reply')} title={t('cancel_reply')} onclick={() => (replyTo = null)}><Icon name="close" size={16} /></button>
@@ -2808,7 +2861,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							<path d="M10 10.5a1.8 1.8 0 1 0 0 3v-1.2H8.8M13 10v4M15.5 14v-4h2" />
 						</svg>
 					</button>
-					<input bind:this={composerInput} bind:value={draft} onfocus={() => (composerFocused = true)} onblur={() => (composerFocused = false)} onpaste={onPaste} placeholder={t('ph_message')} autocomplete="off" maxlength={MAX_TEXT} />
+					<textarea class="composer-input" rows="1" bind:this={composerInput} bind:value={draft} oninput={growComposer} onkeydown={onComposerKey} onfocus={() => (composerFocused = true)} onblur={() => (composerFocused = false)} onpaste={onPaste} placeholder={t('ph_message')} enterkeyhint="send" autocomplete="off" autocapitalize="sentences" maxlength={MAX_TEXT}></textarea>
 					<button
 						type="submit"
 						class="ibtn primary send-btn"
@@ -2865,7 +2918,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		style:left="{msgMenu.x}px"
 		style:top="{msgMenu.y}px"
 	>
-		<button type="button" role="menuitem" onclick={() => ((msgMenu = null), startReply(target))}>
+		<button type="button" role="menuitem" onclick={() => reply(target)}>
 			<Icon name="reply" size={16} />{t('reply')}
 		</button>
 		{#if target.mine && target.state === 'sent'}
@@ -2964,7 +3017,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		gap: 0.4rem;
 		padding: 0.2rem 0.65rem;
 		border: 0.5px solid var(--line-strong);
-		border-radius: 999px;
+		border-radius: var(--radius);
 		color: var(--muted);
 		font-size: 0.8rem;
 		white-space: nowrap;
@@ -3074,7 +3127,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	:global(mark) {
 		background: color-mix(in srgb, #f2b84b 38%, transparent);
 		color: inherit;
-		border-radius: 3px;
+		border-radius: 2px;
 		padding: 0 0.08em;
 	}
 	:global(mark.cur) {
@@ -3467,7 +3520,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	.badge {
 		min-width: 1.2rem;
 		padding: 0 0.4rem;
-		border-radius: 999px;
+		border-radius: var(--radius);
 		background: var(--accent);
 		color: var(--accent-ink);
 		font-size: 0.7rem;
@@ -3606,7 +3659,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	.lock {
 		padding: 0.2rem 0.65rem;
 		border: 0.5px solid var(--line);
-		border-radius: 999px;
+		border-radius: var(--radius);
 		color: var(--dim);
 		font-size: 0.75rem;
 		white-space: nowrap;
@@ -3648,14 +3701,14 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		padding: 0.55rem 0.8rem;
 		border: 0.5px solid var(--line);
 		border-radius: var(--radius-lg);
-		border-bottom-left-radius: 3px;
+		border-bottom-left-radius: var(--radius);
 		background: var(--panel);
 	}
 	.bubble.mine {
 		align-self: flex-end;
 		border-color: var(--line-strong);
 		border-radius: var(--radius-lg);
-		border-bottom-right-radius: 3px;
+		border-bottom-right-radius: var(--radius);
 		background: var(--mine);
 	}
 	.bubble {
@@ -3672,7 +3725,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		padding: 0.25rem 0.5rem;
 		border: 0;
 		border-left: 3px solid var(--accent-2);
-		border-radius: 4px;
+		border-radius: var(--radius);
 		background: var(--bg);
 		color: var(--muted);
 		font: inherit;
@@ -3698,7 +3751,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		min-height: 0;
 		padding: 0.25rem;
 		border: 0;
-		border-radius: 6px;
+		border-radius: var(--radius);
 		background: var(--panel);
 		color: var(--muted);
 		opacity: 0;
@@ -4013,7 +4066,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		min-height: 0;
 		height: 28px;
 		padding: 0 0.7rem;
-		border-radius: 6px;
+		border-radius: var(--radius);
 		font-size: 13px;
 		line-height: 1;
 	}
@@ -4098,13 +4151,13 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	.shell.desktop input {
 		height: 32px;
 		padding: 0 0.65rem;
-		border-radius: 6px;
+		border-radius: var(--radius);
 		font-size: 13px;
 	}
 	.shell.desktop .card,
 	.shell.desktop .onboard .card {
 		padding: 0.85rem 1rem;
-		border-radius: 8px;
+		border-radius: var(--radius-lg);
 	}
 	.shell.desktop .onboard .card {
 		padding: 1.4rem;
@@ -4202,7 +4255,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		min-height: 2.75rem;
 		padding: 0;
 		border-color: transparent;
-		border-radius: 10px;
+		border-radius: var(--radius);
 		background: transparent;
 		color: var(--muted);
 		font-size: inherit;
@@ -4261,6 +4314,185 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	.shell .reply-btn {
 		min-width: 2rem;
 		min-height: 2rem;
+	}
+
+	/* v0.8 consistency pass: one button, one icon size, one heading style, one spacing rhythm. */
+	.with-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+	}
+	.settings .card > .with-icon,
+	.settings .card > code + .with-icon {
+		justify-self: start;
+	}
+	.settings .card > form .with-icon {
+		justify-self: start;
+	}
+	h3 {
+		color: var(--dim);
+		font-size: 0.75rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+	.who.title {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+	}
+	.who.title :global(.icon) {
+		color: var(--dim);
+	}
+	.chat-head .who.title strong {
+		font-size: 0.92rem;
+	}
+	/* Sub screens (settings, new conversation, safety number): a single bar, not three. */
+	.shell.sub:not(.desktop) .top {
+		display: none;
+	}
+	.shell.sub:not(.desktop) {
+		grid-template-rows: minmax(0, 1fr);
+	}
+	/* Buttons in a row are equal in width, the last odd one spans. Same on every platform. */
+	.row,
+	.shell.desktop .row,
+	.notify-banner .row,
+	.safety-banner .row,
+	.safety .row {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.5rem;
+	}
+	.row > :global(button:only-child),
+	.row > :global(button:first-child:nth-last-child(3)) {
+		grid-column: 1 / -1;
+	}
+	.up-over .row {
+		display: flex;
+	}
+	.about-links,
+	.shell.desktop .about-links {
+		grid-template-columns: repeat(3, auto);
+		justify-content: start;
+	}
+	.empty-box {
+		margin: auto;
+		padding: 1rem 1.25rem;
+		border: 0.5px dashed var(--line-strong);
+		border-radius: var(--radius-lg);
+		color: var(--muted);
+		font-size: 0.85rem;
+		text-align: center;
+	}
+	.devices li.empty {
+		border-color: var(--line-strong);
+		color: var(--muted);
+	}
+	/* Bubble footer: time and actions share a line below the text, never on top of it. */
+	.foot {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		min-height: 1.1rem;
+	}
+	.acts {
+		display: inline-flex;
+		gap: 0.1rem;
+		margin: -0.5rem -0.4rem -0.5rem 0;
+	}
+	.shell .bubble .reply-btn {
+		position: static;
+		min-width: 1.75rem;
+		min-height: 1.75rem;
+		padding: 0.25rem;
+		background: transparent;
+	}
+	.shell .bubble .reply-btn:hover {
+		background: var(--panel-2);
+		color: var(--heading);
+	}
+	.bubble:focus-within .reply-btn {
+		opacity: 1;
+	}
+	.bubble.mine small,
+	.bubble.mine .ticks {
+		color: color-mix(in srgb, var(--text) 70%, transparent);
+	}
+	.bubble.mine .ticks.read {
+		color: var(--accent-2);
+	}
+	.bubble p :global(a),
+	.bubble p a {
+		color: var(--link);
+		text-decoration: underline;
+		text-underline-offset: 2px;
+		overflow-wrap: anywhere;
+	}
+	.bubble.mine p a {
+		color: var(--heading);
+	}
+	/* Composer: grows to a few lines, then scrolls. */
+	.composer {
+		align-items: flex-end;
+	}
+	.composer-input {
+		flex: 1;
+		min-width: 0;
+		min-height: 2.75rem;
+		max-height: 9rem;
+		padding: 0.6rem 0.75rem;
+		border: 0.5px solid var(--line-strong);
+		border-radius: var(--radius);
+		background: var(--bg);
+		font-size: 0.9rem;
+		line-height: 1.5rem;
+		resize: none;
+		overflow-y: auto;
+	}
+	.composer-input::placeholder {
+		color: var(--dim);
+	}
+	.composer-input:focus {
+		border-color: var(--accent-2);
+		outline: none;
+	}
+	.shell .composer .attach-btn,
+	.shell .composer .emoji-btn,
+	.shell .composer .gif-btn {
+		height: 2.75rem;
+		min-height: 2.75rem;
+	}
+	.shell.desktop .composer-input {
+		min-height: 32px;
+		padding: 0.3rem 0.65rem;
+		font-size: 13px;
+		line-height: 20px;
+	}
+	.shell.desktop .composer .attach-btn,
+	.shell.desktop .composer .emoji-btn,
+	.shell.desktop .composer .gif-btn {
+		height: 32px;
+		min-height: 32px;
+	}
+	.notify-banner button {
+		width: 100%;
+	}
+	.notify-banner .row,
+	.shell.desktop .notify-banner .row {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.composer {
+		gap: 0.3rem;
+	}
+	.shell .composer .attach-btn,
+	.shell .composer .emoji-btn,
+	.shell .composer .gif-btn {
+		padding: 0 0.4rem;
+	}
+	.composer-input {
+		overflow-y: hidden;
 	}
 
 	@media (max-width: 760px) {

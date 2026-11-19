@@ -1,9 +1,8 @@
 <script lang="ts">
 	import { getLanguage, languages, setLanguage, t, type Lang } from './i18n.svelte';
-	import { platform } from './platform';
-
-	// The desktop window uses its own dropdown: the browser's raw list looks like a web page.
-	const custom = platform.target === 'desktop';
+	
+	// One styled dropdown on every platform: the native list differs per browser and phone.
+	const custom = true;
 
 	let open = $state(false);
 	let index = $state(0);
@@ -119,8 +118,10 @@
 		position: relative;
 		display: inline-block;
 	}
-	.trigger {
+	.wrap > .trigger.trigger.trigger {
 		display: inline-flex;
+		height: 2rem;
+		min-height: 2rem;
 		align-items: center;
 		gap: 0.5rem;
 		padding: 0.35rem 0.6rem;

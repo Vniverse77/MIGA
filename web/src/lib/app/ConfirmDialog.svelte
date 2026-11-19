@@ -197,7 +197,7 @@
 		gap: 0.6rem;
 		max-width: 24rem;
 		padding: 1rem;
-		border-radius: 8px;
+		border-radius: var(--radius-lg);
 	}
 	.panel.desktop h2 {
 		font-size: 0.95rem;
@@ -211,12 +211,12 @@
 		min-height: 0;
 		height: 28px;
 		padding: 0 0.8rem;
-		border-radius: 6px;
+		border-radius: var(--radius);
 	}
 	.panel.desktop input {
 		height: 32px;
 		padding: 0 0.65rem;
-		border-radius: 6px;
+		border-radius: var(--radius);
 	}
 	@media (max-width: 760px) {
 		button {

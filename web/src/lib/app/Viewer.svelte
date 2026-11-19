@@ -134,7 +134,7 @@
 		min-height: 0;
 		padding: 0;
 		border: 0.5px solid rgba(255, 255, 255, 0.35);
-		border-radius: 8px;
+		border-radius: var(--radius);
 		background: rgba(255, 255, 255, 0.1);
 		color: #f2f2f2;
 		font: inherit;
