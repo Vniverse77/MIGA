@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Icon from './Icon.svelte';
 	// Full-screen picture viewer: wheel and pinch zoom, drag to pan, double-click to reset, Save.
 	import { onMount } from 'svelte';
 	import { extFor } from '../attach';
@@ -88,8 +89,8 @@
 
 <div class="viewer" role="dialog" aria-modal="true" aria-label={t('att_img_alt')}>
 	<div class="bar">
-		<button type="button" class="save" onclick={save}>{t('att_save')}</button>
-		<button type="button" class="close" bind:this={closeBtn} onclick={onclose} aria-label={t('att_close')} title={t('att_close')}>✕</button>
+		<button type="button" class="save" onclick={save} aria-label={t('att_save')} title={t('att_save')}><Icon name="download" /></button>
+		<button type="button" class="close" bind:this={closeBtn} onclick={onclose} aria-label={t('att_close')} title={t('att_close')}><Icon name="close" /></button>
 	</div>
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 	<div
@@ -126,8 +127,12 @@
 		padding: 0.7rem 1rem;
 	}
 	.bar button {
+		display: grid;
+		place-items: center;
+		width: 2.75rem;
+		height: 2.75rem;
 		min-height: 0;
-		padding: 0.4rem 1rem;
+		padding: 0;
 		border: 0.5px solid rgba(255, 255, 255, 0.35);
 		border-radius: 8px;
 		background: rgba(255, 255, 255, 0.1);

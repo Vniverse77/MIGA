@@ -55,6 +55,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		type SyncMessage
 	} from '../devices';
 	import Logo from '../Logo.svelte';
+	import Icon from './Icon.svelte';
 	import { getTheme, setTheme, type Theme } from '../theme.svelte';
 	import { t } from '../i18n.svelte';
 	import { isEmojiOnly } from '../emoji';
@@ -1601,7 +1602,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					<button type="submit" class="primary" disabled={linking || !codeInput.trim()}>
 						{linking ? t('link_wait') : t('link_go')}
 					</button>
-					<button type="button" disabled={linking} onclick={() => (scanning = 'link')}>{t('scan_button')}</button>
+					<button type="button" class="ibtn" title={t('scan_button')} aria-label={t('scan_button')} disabled={linking} onclick={() => (scanning = 'link')}><Icon name="scan" /></button>
 					<button type="button" disabled={linking} onclick={() => ((onboard = 'create'), (notice = ''))}>
 						← {t('back')}
 					</button>
@@ -1616,10 +1617,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				<Logo size={24} />
 				<span class="wordmark">MIGA</span>
 				<span class="status {status}">{t(`status_${status}`)}</span>
-				<button type="button" class="icon-btn" title={t('new_conversation')} aria-label={t('new_conversation')} onclick={openNew}>
-					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-						<path d="M12 5v14M5 12h14" />
-					</svg>
+				<button type="button" class="ibtn" title={t('new_conversation')} aria-label={t('new_conversation')} onclick={openNew}>
+					<Icon name="plus" />
 				</button>
 			</div>
 
@@ -1673,17 +1672,13 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				</span>
 				<button
 					type="button"
-					class="icon-btn gear"
+					class="ibtn gear"
 					class:on={view === 'settings'}
 					title={t('settings')}
 					aria-label={t('settings')}
 					onclick={(e) => (e.stopPropagation(), toggleSettings())}
 				>
-					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
-						<circle cx="15" cy="7" r="2" />
-						<circle cx="9" cy="17" r="2" />
-					</svg>
+					<Icon name="settings" />
 				</button>
 			</div>
 		</aside>
@@ -1697,14 +1692,23 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						{myName ? t(profile.share ? 'profile_visible' : 'profile_hidden') : t('profile_anon')}
 					</small>
 				</span>
-				<button type="button" onclick={() => (view = view === 'settings' ? 'chat' : 'settings')}>
-					{t('settings')}
+				<button
+					type="button"
+					class="ibtn"
+					class:on={view === 'settings'}
+					title={t('settings')}
+					aria-label={t('settings')}
+					onclick={() => (view = view === 'settings' ? 'chat' : 'settings')}
+				>
+					<Icon name="settings" />
 				</button>
 			</div>
 
 			<div class="list-head">
 				<h2>{t('chats')}</h2>
-				<button type="button" class="primary" onclick={openNew}>{t('new_conversation')}</button>
+				<button type="button" class="ibtn primary" title={t('new_conversation')} aria-label={t('new_conversation')} onclick={openNew}>
+					<Icon name="plus" />
+				</button>
 			</div>
 
 			{#if notice && view === 'chat'}
@@ -1743,12 +1747,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		<main ondragover={onDragOver} ondragleave={() => (dragging = false)} ondrop={onDrop} class:dragging>
 			{#if view === 'settings'}
 				<header class="chat-head">
-					<button type="button" class="back" onclick={() => (view = 'chat')}>← {t('back')}</button>
+					<button type="button" class="ibtn back" title={t('back')} aria-label={t('back')} onclick={() => (view = 'chat')}><Icon name="back" /></button>
 					<div class="who"><strong>{t('settings')}</strong></div>
-					<button type="button" class="close" aria-label={t('close')} title={t('close')} onclick={() => (view = 'chat')}>
-						{#if isDesktop}
-							<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
-						{:else}{t('close')}{/if}
+					<button type="button" class="ibtn close" aria-label={t('close')} title={t('close')} onclick={() => (view = 'chat')}>
+						<Icon name="close" />
 					</button>
 				</header>
 
@@ -1756,7 +1758,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					<section class="card">
 						<h2>{t('your_address')}</h2>
 						<code class="selectable">{identity?.address ?? '…'}</code>
-						<button type="button" class={isDesktop ? '' : 'primary'} onclick={copyAddress}>{t('copy_address')}</button>
+						<button type="button" class="ibtn" title={t('copy_address')} aria-label={t('copy_address')} onclick={copyAddress}><Icon name="copy" /></button>
 						{#if inviteUrl}
 							<h3>{t('qr_contact_title')}</h3>
 							<QrCode text={inviteUrl} label={t('qr_contact_title')} />
@@ -1817,8 +1819,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 										<strong>{other.label}</strong>
 										<small>{dateOf(other.added)}</small>
 									</span>
-									<button type="button" onclick={() => removeDevice(other.address)}>
-										{t('dev_remove')}
+									<button type="button" class="ibtn" title={t('dev_remove')} aria-label={t('dev_remove')} onclick={() => removeDevice(other.address)}>
+										<Icon name="trash" />
 									</button>
 								</li>
 							{:else}
@@ -1836,7 +1838,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 								<button type="button" onclick={() => endLink('')}>{t('cancel')}</button>
 							</div>
 						{:else}
-							<button type="button" class="primary" onclick={addDevice}>{t('dev_add')}</button>
+							<button type="button" class="ibtn primary" title={t('dev_add')} aria-label={t('dev_add')} onclick={addDevice}><Icon name="device-add" /></button>
 						{/if}
 						{#if linkNotice}<p class="notice" role="status">{linkNotice}</p>{/if}
 						<p class="hint">{t('dev_hint')}</p>
@@ -1908,12 +1910,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				</div>
 			{:else if view === 'new'}
 				<header class="chat-head">
-					<button type="button" class="back" onclick={() => (view = 'chat')}>← {t('back')}</button>
+					<button type="button" class="ibtn back" title={t('back')} aria-label={t('back')} onclick={() => (view = 'chat')}><Icon name="back" /></button>
 					<div class="who"><strong>{t('new_conversation')}</strong></div>
-					<button type="button" class="close" aria-label={t('close')} title={t('close')} onclick={() => (view = 'chat')}>
-						{#if isDesktop}
-							<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
-						{:else}{t('close')}{/if}
+					<button type="button" class="ibtn close" aria-label={t('close')} title={t('close')} onclick={() => (view = 'chat')}>
+						<Icon name="close" />
 					</button>
 				</header>
 
@@ -1923,24 +1923,22 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						<input bind:value={newAddress} placeholder={t('ph_address')} autocomplete="off" spellcheck="false" />
 						<input bind:value={newName} placeholder={t('ph_name')} autocomplete="off" maxlength="40" />
 						<button type="submit" class="primary">{t('start_chat')}</button>
-						<button type="button" onclick={() => (scanning = 'to')}>{t('scan_button')}</button>
+						<button type="button" class="ibtn" title={t('scan_button')} aria-label={t('scan_button')} onclick={() => (scanning = 'to')}><Icon name="scan" /></button>
 						{#if notice}<p class="notice" role="status">{notice}</p>{/if}
 					</form>
 
 					<section class="card">
 						<h2>{t('your_address')}</h2>
 						<code class="selectable">{identity?.address ?? '…'}</code>
-						<button type="button" onclick={copyAddress}>{t('copy_address')}</button>
+						<button type="button" class="ibtn" title={t('copy_address')} aria-label={t('copy_address')} onclick={copyAddress}><Icon name="copy" /></button>
 					</section>
 				</div>
 			{:else if view === 'verify' && activeContact}
 				<header class="chat-head">
-					<button type="button" class="back" onclick={() => (view = 'chat')}>← {t('back')}</button>
+					<button type="button" class="ibtn back" title={t('back')} aria-label={t('back')} onclick={() => (view = 'chat')}><Icon name="back" /></button>
 					<div class="who"><strong>{t('safety_title')}</strong></div>
-					<button type="button" class="close" aria-label={t('close')} title={t('close')} onclick={() => (view = 'chat')}>
-						{#if isDesktop}
-							<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
-						{:else}{t('close')}{/if}
+					<button type="button" class="ibtn close" aria-label={t('close')} title={t('close')} onclick={() => (view = 'chat')}>
+						<Icon name="close" />
 					</button>
 				</header>
 
@@ -1975,7 +1973,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				</div>
 			{:else if activeContact}
 				<header class="chat-head">
-					<button type="button" class="back" onclick={() => (active = null)}>← {t('back')}</button>
+					<button type="button" class="ibtn back" title={t('back')} aria-label={t('back')} onclick={() => (active = null)}><Icon name="back" /></button>
 					<span class="avatar" aria-hidden="true">{initial(activeContact.name)}</span>
 					<div class="who">
 						<strong>{activeContact.name}{#if activeContact.verified}{@render verifiedMark(14)}{/if}</strong>
@@ -1985,25 +1983,21 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					<div class="menu-wrap">
 						<button
 							type="button"
-							class="kebab"
+							class="ibtn kebab"
 							aria-label={t('chat_menu')}
 							aria-haspopup="menu"
 							aria-expanded={menuOpen}
 							onclick={() => (menuOpen = !menuOpen)}
 						>
-							<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor">
-								<circle cx="12" cy="5" r="2" />
-								<circle cx="12" cy="12" r="2" />
-								<circle cx="12" cy="19" r="2" />
-							</svg>
+							<Icon name="more-v" />
 						</button>
 						{#if menuOpen}
 							<div class="menu" role="menu">
 								<button type="button" role="menuitem" onclick={() => openVerify(activeContact.address)}>
-									{t('verify_safety')}
+									<Icon name="shield" size={16} />{t('verify_safety')}
 								</button>
 								<button type="button" role="menuitem" onclick={() => toggleMute(activeContact.address)}>
-									{t(muted.includes(activeContact.address) ? 'unmute_chat' : 'mute_chat')}
+									<Icon name={muted.includes(activeContact.address) ? 'bell' : 'bell-off'} size={16} />{t(muted.includes(activeContact.address) ? 'unmute_chat' : 'mute_chat')}
 								</button>
 								<button
 									type="button"
@@ -2011,7 +2005,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 									class="danger"
 									onclick={() => deleteConversation(activeContact.address)}
 								>
-									{t('delete_chat')}
+									<Icon name="trash" size={16} />{t('delete_chat')}
 								</button>
 								<button
 									type="button"
@@ -2019,7 +2013,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 									class="danger"
 									onclick={() => deleteContact(activeContact.address)}
 								>
-									{t('delete_contact')}
+									<Icon name="user-x" size={16} />{t('delete_contact')}
 								</button>
 								<button
 									type="button"
@@ -2027,7 +2021,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 									class={blocked.includes(activeContact.address) ? '' : 'danger'}
 									onclick={() => toggleBlock(activeContact.address)}
 								>
-									{t(blocked.includes(activeContact.address) ? 'unblock' : 'block')}
+									<Icon name="block" size={16} />{t(blocked.includes(activeContact.address) ? 'unblock' : 'block')}
 								</button>
 							</div>
 						{/if}
@@ -2098,10 +2092,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 								title={t('reply')}
 								onclick={() => startReply(message)}
 							>
-								<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-									<path d="M9 14 4 9l5-5" />
-									<path d="M4 9h10a6 6 0 0 1 6 6v3" />
-								</svg>
+								<Icon name="reply" size={14} />
 							</button>
 							<button
 								type="button"
@@ -2114,11 +2105,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 									openMsgMenu(r.left, r.bottom + 4, message);
 								}}
 							>
-								<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="currentColor">
-									<circle cx="5" cy="12" r="2" />
-									<circle cx="12" cy="12" r="2" />
-									<circle cx="19" cy="12" r="2" />
-								</svg>
+								<Icon name="more" size={14} />
 							</button>
 						</div>
 					{:else}
@@ -2153,7 +2140,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							<strong>{t('replying_to', { name: quoteName(replyTo.from) })}</strong>
 							<span>{replyTo.text}</span>
 						</div>
-						<button type="button" aria-label={t('cancel_reply')} title={t('cancel_reply')} onclick={() => (replyTo = null)}>✕</button>
+						<button type="button" aria-label={t('cancel_reply')} title={t('cancel_reply')} onclick={() => (replyTo = null)}><Icon name="close" size={16} /></button>
 					</div>
 				{/if}
 				{#if editing}
@@ -2162,7 +2149,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							<strong>{t('editing_msg')}</strong>
 							<span>{editing.text}</span>
 						</div>
-						<button type="button" aria-label={t('cancel_edit')} title={t('cancel_edit')} onclick={cancelEdit}>✕</button>
+						<button type="button" aria-label={t('cancel_edit')} title={t('cancel_edit')} onclick={cancelEdit}><Icon name="close" size={16} /></button>
 					</div>
 				{/if}
 				{#if emojiOpen && EmojiPicker && !blocked.includes(activeContact.address)}
@@ -2197,7 +2184,15 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						</svg>
 					</button>
 					<input bind:this={composerInput} bind:value={draft} onpaste={onPaste} placeholder={t('ph_message')} autocomplete="off" maxlength={MAX_TEXT} />
-					<button type="submit" class="primary" disabled={!draft.trim() && !editing}>{editing ? t('save_edit') : t('send')}</button>
+					<button
+						type="submit"
+						class="ibtn primary send-btn"
+						title={editing ? t('save_edit') : t('send')}
+						aria-label={editing ? t('save_edit') : t('send')}
+						disabled={!draft.trim() && !editing}
+					>
+						<Icon name={editing ? 'check' : 'send'} />
+					</button>
 				</form>
 				<input bind:this={fileInput} class="file-input" type="file" multiple accept="image/*,video/mp4,video/webm" tabindex="-1" aria-hidden="true" onchange={(e) => { void attachFiles([...(e.currentTarget.files ?? [])]); e.currentTarget.value = ''; }} />
 				{/if}
@@ -2219,19 +2214,19 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 {#if ctx}
 	<div class="menu ctx" role="menu" style:left="{ctx.x}px" style:top="{ctx.y}px">
 		<button type="button" role="menuitem" onclick={() => ctx && openVerify(ctx.address)}>
-			{t('verify_safety')}
+			<Icon name="shield" size={16} />{t('verify_safety')}
 		</button>
 		<button type="button" role="menuitem" onclick={() => ctx && toggleMute(ctx.address)}>
-			{t(ctx && muted.includes(ctx.address) ? 'unmute_chat' : 'mute_chat')}
+			<Icon name={ctx && muted.includes(ctx.address) ? 'bell' : 'bell-off'} size={16} />{t(ctx && muted.includes(ctx.address) ? 'unmute_chat' : 'mute_chat')}
 		</button>
 		<button type="button" role="menuitem" class="danger" onclick={() => ctx && deleteConversation(ctx.address)}>
-			{t('delete_chat')}
+			<Icon name="trash" size={16} />{t('delete_chat')}
 		</button>
 		<button type="button" role="menuitem" class="danger" onclick={() => ctx && deleteContact(ctx.address)}>
-			{t('delete_contact')}
+			<Icon name="user-x" size={16} />{t('delete_contact')}
 		</button>
 		<button type="button" role="menuitem" onclick={() => ctx && toggleBlock(ctx.address)}>
-			{t(ctx && blocked.includes(ctx.address) ? 'unblock' : 'block')}
+			<Icon name="block" size={16} />{t(ctx && blocked.includes(ctx.address) ? 'unblock' : 'block')}
 		</button>
 	</div>
 {/if}
@@ -2246,19 +2241,19 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		style:top="{msgMenu.y}px"
 	>
 		<button type="button" role="menuitem" onclick={() => ((msgMenu = null), startReply(target))}>
-			{t('reply')}
+			<Icon name="reply" size={16} />{t('reply')}
 		</button>
 		{#if target.mine && target.state === 'sent'}
 			<button type="button" role="menuitem" onclick={() => startEdit(target)}>
-				{t('edit_msg')}
+				<Icon name="edit" size={16} />{t('edit_msg')}
 			</button>
 		{/if}
 		<button type="button" role="menuitem" class="danger" onclick={() => deleteForMe(target)}>
-			{t('delete_msg_me')}
+			<Icon name="trash" size={16} />{t('delete_msg_me')}
 		</button>
 		{#if target.mine}
 			<button type="button" role="menuitem" class="danger" onclick={() => deleteForEveryone(target)}>
-				{t('delete_msg_all')}
+				<Icon name="trash" size={16} />{t('delete_msg_all')}
 			</button>
 		{/if}
 	</div>
@@ -3269,7 +3264,6 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		font-size: 13px;
 		line-height: 1;
 	}
-	.shell.desktop button.icon-btn,
 	.shell.desktop button.kebab {
 		padding: 0;
 	}
@@ -3333,9 +3327,6 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	}
 	.shell.desktop .side-bottom:hover {
 		background: var(--panel-2);
-	}
-	.shell.desktop .side-bottom .icon-btn:hover:not(:disabled) {
-		background: var(--panel);
 	}
 	.shell.desktop .icon-btn.gear {
 		width: 30px;
@@ -3448,6 +3439,77 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		z-index: 90;
 	}
 
+	/* Icon buttons: 44 px hit area, same on web, mobile and desktop. */
+	.shell button.ibtn.ibtn {
+		display: inline-grid;
+		flex: none;
+		place-items: center;
+		width: 2.75rem;
+		height: 2.75rem;
+		min-height: 2.75rem;
+		padding: 0;
+		border-color: transparent;
+		border-radius: 10px;
+		background: transparent;
+		color: var(--muted);
+		font-size: inherit;
+	}
+	.shell button.ibtn.ibtn:hover:not(:disabled),
+	.shell button.ibtn.ibtn.on {
+		border-color: transparent;
+		background: var(--panel-2);
+		color: var(--heading);
+	}
+	.shell button.ibtn.ibtn.primary {
+		border-color: var(--accent);
+		background: var(--accent);
+		color: var(--accent-ink);
+	}
+	.shell button.ibtn.ibtn.primary:hover:not(:disabled) {
+		border-color: var(--accent-2);
+		background: var(--accent-2);
+		color: var(--accent-ink);
+	}
+	.shell button.ibtn.ibtn:disabled {
+		opacity: 0.4;
+	}
+	.shell button.ibtn.ibtn.back {
+		display: none;
+	}
+	.shell button.ibtn.ibtn.gear {
+		width: 2.5rem;
+		height: 2.5rem;
+		min-height: 2.5rem;
+	}
+	.shell .composer button.send-btn {
+		padding: 0;
+		align-self: flex-end;
+	}
+	.menu button {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+	}
+	.menu button :global(.icon) {
+		color: var(--muted);
+	}
+	.menu button.danger :global(.icon) {
+		color: inherit;
+	}
+	.shell .replybar:not(.blocked-bar) > button {
+		display: grid;
+		place-items: center;
+		width: 2.5rem;
+		height: 2.5rem;
+		min-height: 2.5rem;
+		padding: 0;
+		border-color: transparent;
+	}
+	.shell .reply-btn {
+		min-width: 2rem;
+		min-height: 2rem;
+	}
+
 	@media (max-width: 760px) {
 		.shell:not(.desktop) {
 			grid-template-columns: minmax(0, 1fr);
@@ -3482,8 +3544,11 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		.shell:not(.chat-open):not(.desktop) main {
 			display: none;
 		}
-		.shell:not(.desktop) .back {
-			display: block;
+		.shell:not(.desktop) button.ibtn.ibtn.back {
+			display: inline-grid;
+		}
+		.shell:not(.desktop) button.ibtn.ibtn.close {
+			display: none;
 		}
 		.shell:not(.desktop) .link,
 		.shell:not(.desktop) .lock,
