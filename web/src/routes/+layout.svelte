@@ -65,7 +65,7 @@
 		--line-strong: rgba(55, 138, 221, 0.45);
 		--text: #c8d8f0;
 		--heading: #e8f0fe;
-		--muted: #8fa6c4;
+		--muted: #4a7ab5;
 		--dim: #4a7ab5;
 		--accent: #1a6bbf;
 		--accent-2: #378add;
@@ -80,14 +80,14 @@
 	/* Dark is the default, as on vniverse77.com. Light applies only when asked for explicitly. */
 	:global(:root[data-theme='light']) {
 		--bg: #f0f4ff;
-		--panel: #e0eaff;
-		--panel-2: #cfdcf7;
-		--line: rgba(24, 95, 165, 0.2);
-		--line-strong: rgba(24, 95, 165, 0.45);
+		--panel: #ffffff;
+		--panel-2: #e0eaff;
+		--line: rgba(24, 95, 165, 0.28);
+		--line-strong: rgba(24, 95, 165, 0.5);
 		--text: #0d1525;
 		--heading: #0d1525;
-		--muted: #37506e;
-		--dim: #2f5d8c;
+		--muted: #3a6a9a;
+		--dim: #3a6a9a;
 		--accent: #185fa5;
 		--accent-2: #378add;
 		--link: #185fa5;
