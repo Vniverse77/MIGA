@@ -14,6 +14,8 @@
 	let busy = $state(false);
 	let attempt = $state(0);
 	let current = '';
+	let thumbOk = $state(false);
+	let fullOk = $state(false);
 
 	const isVideo = $derived(att.mime.startsWith('video/'));
 	// Fit the box: at most 18rem wide and 20rem tall, keeping the picture's proportions.
@@ -59,15 +61,15 @@
 
 <div class="att" style:aspect-ratio={ratio} style:--ratio={ratio} data-state={url ? 'ready' : error ? 'error' : 'loading'}>
 	{#if att.thumb}
-		<img class="thumb" src={att.thumb} alt="" aria-hidden="true" />
+		<img class="thumb" class:in={thumbOk} src={att.thumb} alt="" aria-hidden="true" onload={() => (thumbOk = true)} />
 	{/if}
 	{#if url}
 		{#if isVideo}
 			<!-- svelte-ignore a11y_media_has_caption -->
-			<video class="full" src={url} controls playsinline preload="metadata"></video>
+			<video class="full in" src={url} controls playsinline preload="metadata"></video>
 		{:else}
 			<button type="button" class="open" aria-label={t('att_open')} title={t('att_open')} onclick={() => onview(url, att)}>
-				<img class="full" src={url} alt={t('att_img_alt')} draggable="false" />
+				<img class="full" class:in={fullOk} src={url} alt={t('att_img_alt')} draggable="false" onload={() => (fullOk = true)} />
 			</button>
 		{/if}
 	{:else if error}
@@ -89,7 +91,7 @@
 		max-height: 20rem;
 		overflow: hidden;
 		border-radius: calc(var(--radius-lg) - 4px);
-		background: var(--panel-2);
+		background: color-mix(in srgb, var(--panel-2) 100%, var(--line) 0%);
 		/* Wide pictures stay 18rem wide; tall ones shrink so they never exceed 20rem. */
 		width: min(18rem, calc(20rem * var(--ratio)), 70vw);
 	}
@@ -100,6 +102,16 @@
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
+	}
+	/* The card colour shows until a picture has loaded; each picture fades in over it, so nothing flashes black. */
+	.thumb,
+	.full:not(video) {
+		opacity: 0;
+		transition: opacity 0.18s ease-out;
+	}
+	.thumb.in,
+	.full.in {
+		opacity: 1;
 	}
 	.thumb {
 		filter: blur(10px);
