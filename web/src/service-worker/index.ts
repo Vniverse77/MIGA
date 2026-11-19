@@ -16,7 +16,8 @@ const toPath = (e: { path: string }) => '/' + e.path;
 const HASHED = new Set<string>(immutable.map(toPath)); // content-hashed names: safe to serve from cache
 const SHELL = [
 	...immutable.map(toPath),
-	...assets.map(toPath).filter((f: string) => f !== '/version.json'),
+	// The default GIFs (about 8 MB) are not precached; they are cached on first use by the fetch handler.
+	...assets.map(toPath).filter((f: string) => f !== '/version.json' && !f.startsWith('/gifs/')),
 	...prerendered.map(toPath)
 ];
 

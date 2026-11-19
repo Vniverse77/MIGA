@@ -167,6 +167,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	/** Set while the composer edits one of my own messages. */
 	let editing = $state<{ peer: string; id: string; text: string } | null>(null);
 	let emojiOpen = $state(false);
+	let gifOpen = $state(false);
 	// Attachments: uploads in progress (heavy bytes live in uploadData, not in reactive state).
 	type UploadItem = {
 		key: string;
@@ -190,6 +191,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	let viewer = $state<{ url: string; mime: string } | null>(null);
 	/** The picker is a separate chunk, fetched the first time it is opened. */
 	let EmojiPicker = $state.raw<Component<{ onpick: (emoji: string) => void }> | null>(null);
+	let GifPanel = $state.raw<Component<{ onsend: (file: File) => void; onnotice: (text: string) => void }> | null>(null);
 	let highlighted = $state('');
 	let newAddress = $state('');
 	let newName = $state('');
@@ -1219,6 +1221,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		if (!active || !message.mine || message.state !== 'sent') return;
 		replyTo = null;
 		emojiOpen = false;
+		gifOpen = false;
 		editing = { peer: active, id: message.id, text: message.text };
 		draft = message.text;
 		tick().then(() => composerInput?.focus());
@@ -1265,7 +1268,39 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				return;
 			}
 		}
+		gifOpen = false;
 		emojiOpen = true;
+	}
+
+	async function toggleGif(): Promise<void> {
+		if (gifOpen) return closeGif();
+		if (!GifPanel) {
+			try {
+				GifPanel = (await import('./GifPanel.svelte')).default;
+			} catch {
+				return;
+			}
+		}
+		emojiOpen = false;
+		gifOpen = true;
+	}
+
+	function closeGif(): void {
+		if (!gifOpen) return;
+		gifOpen = false;
+		composerInput?.focus();
+	}
+
+	/** One tap in the GIF panel: the file goes through the normal encrypted attachment path. */
+	function sendGif(file: File): void {
+		gifOpen = false;
+		void attachFiles([file]);
+	}
+
+	function showGifNotice(text: string): void {
+		attError = text;
+		clearTimeout(attErrorTimer);
+		attErrorTimer = setTimeout(() => (attError = ''), 9000);
 	}
 
 	function closeEmoji(): void {
@@ -1291,6 +1326,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		ctx = null;
 		msgMenu = null;
 		if (emojiOpen) return closeEmoji();
+		if (gifOpen) return closeGif();
 		if (editing) return cancelEdit();
 		replyTo = null;
 	}
@@ -1717,6 +1753,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		replyTo = null;
 		editing = null;
 		emojiOpen = false;
+		gifOpen = false;
 		view = 'chat';
 		menuOpen = false;
 		active = address;
@@ -2671,6 +2708,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				{#if emojiOpen && EmojiPicker && !blocked.includes(activeContact.address)}
 					<EmojiPicker onpick={insertEmoji} />
 				{/if}
+				{#if gifOpen && GifPanel && !blocked.includes(activeContact.address)}
+					<GifPanel onsend={sendGif} onnotice={showGifNotice} />
+				{/if}
 				{#if blocked.includes(activeContact.address)}
 					<div class="replybar blocked-bar">
 						<div class="quote-text"><span>{t('blocked_banner')}</span></div>
@@ -2697,6 +2737,21 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							<circle cx="12" cy="12" r="9" />
 							<path d="M8.5 14a4 4 0 0 0 7 0" />
 							<path d="M9 9.5h.01M15 9.5h.01" />
+						</svg>
+					</button>
+					<button
+						type="button"
+						class="gif-btn"
+						aria-label={t('gif_btn')}
+						title={t('gif_btn')}
+						aria-haspopup="dialog"
+						aria-expanded={gifOpen}
+						disabled={!!editing}
+						onclick={toggleGif}
+					>
+						<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<rect x="3" y="6" width="18" height="12" rx="2" />
+							<path d="M10 10.5a1.8 1.8 0 1 0 0 3v-1.2H8.8M13 10v4M15.5 14v-4h2" />
 						</svg>
 					</button>
 					<input bind:this={composerInput} bind:value={draft} onfocus={() => (composerFocused = true)} onblur={() => (composerFocused = false)} onpaste={onPaste} placeholder={t('ph_message')} autocomplete="off" maxlength={MAX_TEXT} />
@@ -2789,6 +2844,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	onclick={(e) => {
 		ctx = null;
 		if (emojiOpen && !(e.target as Element | null)?.closest?.('.emoji-panel, .emoji-btn')) emojiOpen = false;
+		if (gifOpen && !(e.target as Element | null)?.closest?.('.gif-panel, .gif-btn')) gifOpen = false;
 		// A long-press may be followed by a click on touch screens; keep the menu it just opened.
 		if (msgMenu && Date.now() - msgMenu.at > 400 && !(e.target as Element | null)?.closest?.('.act-btn')) msgMenu = null;
 		if (!(e.target as Element | null)?.closest?.('.menu-wrap')) menuOpen = false;
@@ -3649,6 +3705,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		padding-inline: 1.4rem;
 	}
 	.composer .emoji-btn,
+	.composer .gif-btn,
 	.composer .attach-btn {
 		flex: none;
 		display: grid;
@@ -3723,6 +3780,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		gap: 0.4rem;
 	}
 	.composer .emoji-btn:hover:not(:disabled),
+	.composer .gif-btn:hover:not(:disabled),
+	.composer .gif-btn[aria-expanded='true'],
 	.composer .attach-btn:hover:not(:disabled),
 	.composer .emoji-btn[aria-expanded='true'] {
 		border: 0;

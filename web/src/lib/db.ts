@@ -7,10 +7,11 @@
 //             new message writes one small record instead of rewriting a whole chat.
 //   contacts  key address; `i` keeps the list order.
 //   meta      key name; small values such as the blocked list and the migration marker.
-//   media     key id; empty for now, reserved for photos (P6).
+//   media     key id; local copies of sent and received attachments (P6).
+//   gifs      key id; the user's own GIF library ("My GIFs"), device only (v2).
 
 const DB_NAME = 'miga';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export type MessageRecord = { chat: string; id: string; i: number; ts: number } & Record<string, unknown>;
 
@@ -20,12 +21,15 @@ export function openDb(): Promise<IDBDatabase> {
 		const req = indexedDB.open(DB_NAME, DB_VERSION);
 		req.onupgradeneeded = () => {
 			const db = req.result;
-			const messages = db.createObjectStore('messages', { keyPath: ['chat', 'id'] });
-			messages.createIndex('chat_i', ['chat', 'i']);
-			messages.createIndex('chat_ts', ['chat', 'ts']);
-			db.createObjectStore('contacts', { keyPath: 'address' });
-			db.createObjectStore('meta');
-			db.createObjectStore('media', { keyPath: 'id' });
+			if (!db.objectStoreNames.contains('messages')) {
+				const messages = db.createObjectStore('messages', { keyPath: ['chat', 'id'] });
+				messages.createIndex('chat_i', ['chat', 'i']);
+				messages.createIndex('chat_ts', ['chat', 'ts']);
+			}
+			if (!db.objectStoreNames.contains('contacts')) db.createObjectStore('contacts', { keyPath: 'address' });
+			if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
+			if (!db.objectStoreNames.contains('media')) db.createObjectStore('media', { keyPath: 'id' });
+			if (!db.objectStoreNames.contains('gifs')) db.createObjectStore('gifs', { keyPath: 'id' });
 		};
 		req.onsuccess = () => resolve(req.result);
 		req.onerror = () => reject(req.error);
