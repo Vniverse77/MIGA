@@ -289,7 +289,9 @@ fn draw_list(f: &mut Frame, app: &mut App, r: Rect) {
         if selected && !t.fills {
             row_style = row_style.add_modifier(Modifier::REVERSED);
         }
-        let bar = if selected {
+        let bar = if selected && !t.fills {
+            Span::styled(" ", row_style)
+        } else if selected {
             Span::styled(
                 glyph(app, "\u{258c}", ">"),
                 Style::default().fg(if app.focus == Focus::List { t.secondary } else { t.primary }).bg(bg),
@@ -608,7 +610,7 @@ fn message_lines(
     meta.push((clock(app, m.ts), sty(dim_fg)));
     if mine {
         let (tick, style) = tick_for(app, m);
-        let style = if t.fills { style } else { style.bg(bg) };
+        let style = style.bg(bg);
         meta.push((" ".into(), sty(dim_fg)));
         meta.push((tick, style));
     }
@@ -937,6 +939,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect, scroll: usize) {
                 Action::Quit,
             ],
         ),
+        ("Composer", &[Action::Send, Action::Newline, Action::EditLast, Action::OpenEditor, Action::Cancel]),
         (
             "Chat list and messages",
             &[
@@ -955,9 +958,8 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect, scroll: usize) {
                 Action::Compose,
             ],
         ),
-        ("Composer", &[Action::Send, Action::Newline, Action::EditLast, Action::OpenEditor, Action::Cancel]),
     ];
-    let key_w = 22usize;
+    let key_w = 27usize;
     let mut lines: Vec<Line> = Vec::new();
     for (title, actions) in sections {
         lines.push(Line::from(""));
@@ -980,10 +982,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect, scroll: usize) {
         }
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  Config: ~/.config/miga/config.toml (read only). Mouse: wheel scrolls, click selects.",
-        t.dim(t.card),
-    )));
+    lines.push(Line::from(Span::styled("  Config (read only): ~/.config/miga/config.toml", t.dim(t.card))));
     let body_h = usize::from(r.height).saturating_sub(3);
     let max_scroll = lines.len().saturating_sub(body_h);
     let scroll = scroll.min(max_scroll);
