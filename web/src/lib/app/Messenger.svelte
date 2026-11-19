@@ -2370,7 +2370,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			</div>
 
 			<div class="list-head">
-				<h2>{t('chats')}</h2>
+				<h2>
+					<span class="t-wide">{t('chats')}</span>
+					<span class="t-phone">MIGA<i class="dot {status}" role="img" aria-label={t(`status_${status}`)} title={t(`status_${status}`)}></i></span>
+				</h2>
 				<span class="head-actions">
 				<button type="button" class="ibtn" data-gsearch title={t('search_all')} aria-label={t('search_all')} aria-pressed={gOpen} onclick={toggleGlobal}><Icon name="search" /></button>
 				{#if contacts.length}
@@ -2378,6 +2381,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					<Icon name="plus" />
 				</button>
 				{/if}
+				<button type="button" class="ibtn phone-only" class:on={view === 'settings'} title={t('settings')} aria-label={t('settings')} onclick={() => (view = view === 'settings' ? 'chat' : 'settings')}>
+					<Icon name="settings" />
+				</button>
 				</span>
 			</div>
 
@@ -2580,7 +2586,6 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						<p class="hint">{t('set_erase_help')}</p>
 						<button type="button" class="danger" onclick={eraseThisDevice}>{t('erase')}</button>
 					</section>
-	{#if isDesktop}
 						<section class="card">
 							<h2>{t('set_about')}</h2>
 							<p class="about-name"><strong>MIGA</strong> <span class="ver selectable" title={VERSION_TITLE}>{VERSION_LABEL}</span></p>
@@ -2591,7 +2596,6 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 								<button type="button" onclick={() => platform.openExternal('https://vniverse77.com/')}>Vniverse77</button>
 							</div>
 						</section>
-					{/if}
 				</div>
 			{:else if view === 'new'}
 				<header class="chat-head">
@@ -2659,7 +2663,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					<button type="button" class="ibtn back" title={t('back')} aria-label={t('back')} onclick={() => (active = null)}><Icon name="back" /></button>
 					<span class="avatar" aria-hidden="true">{initial(activeContact.name)}</span>
 					<div class="who">
-						<strong>{activeContact.name}{#if activeContact.verified}{@render verifiedMark(14)}{/if}</strong>
+						<strong>{activeContact.name}{#if activeContact.verified}{@render verifiedMark(14)}{/if}{#if status !== 'online'}<i class="dot {status}" role="img" aria-label={t(`status_${status}`)} title={t(`status_${status}`)}></i>{/if}</strong>
 <small class="selectable">{shortAddress(activeContact.address)}</small>
 					</div>
 					<span class="lock">{t('f1_title')}</span>
@@ -3003,11 +3007,11 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 {/if}
 
 <ConfirmDialog />
+<Shortcuts {contacts} {chats} onchat={openChat} onhit={(address, message) => void openHit(address, message)} />
 {#if scanning}
 	<Scanner accept={scanning} onresult={scanned} onclose={() => (scanning = null)} />
 {/if}
 
-<Shortcuts {contacts} {chats} onchat={openChat} onhit={(address, message) => void openHit(address, message)} />
 <svelte:window
 	onkeydown={(e) => (e.key === 'Escape' ? onEscape() : onShortcutKey(e, shortcutActions))}
 	onclick={(e) => {
@@ -3024,6 +3028,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 <style>
 	.shell {
+		font-size: var(--fs-body);
 		display: grid;
 		grid-template-columns: 22rem 1fr;
 		grid-template-rows: 3.5rem 1fr;
@@ -3099,6 +3104,29 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	}
 	.status.offline::before {
 		background: var(--danger);
+	}
+
+	/* Connection dot: the state in one glance, used in the phone list title and chat header. */
+	.dot {
+		display: inline-block;
+		flex: none;
+		width: 0.5rem;
+		height: 0.5rem;
+		margin-left: 0.5rem;
+		border-radius: 50%;
+		background: var(--dim);
+		vertical-align: middle;
+	}
+	.dot.online {
+		background: var(--accent-2);
+	}
+	.dot.offline {
+		background: var(--danger);
+	}
+	.t-phone,
+	.chat-head .dot,
+	.shell button.ibtn.ibtn.phone-only {
+		display: none;
 	}
 
 	/* Sidebar */
@@ -4601,18 +4629,93 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		.shell:not(.desktop) {
 			grid-template-columns: minmax(0, 1fr);
 		}
-		.shell:not(.desktop) .top {
-			gap: 0.5rem;
-			padding: 0 0.75rem;
+		/* One bar per screen. The logo, version, links and language live in Settings; the list and the chat
+		   each carry their own bar of at most 56px. */
+		.shell:not(.desktop) {
+			grid-template-rows: minmax(0, 1fr);
 		}
-		.shell:not(.desktop) nav {
-			gap: 0.5rem;
+		.shell:not(.desktop) .top,
+		.shell:not(.desktop) .profile {
+			display: none;
 		}
-		/* The dot carries the state; the word comes back on wider screens. */
-		.shell:not(.desktop) .status {
-			font-size: 0;
+		.shell:not(.desktop) .t-wide {
+			display: none;
+		}
+		.shell:not(.desktop) .t-phone {
+			display: inline-flex;
+			align-items: center;
+		}
+		.shell:not(.desktop) button.ibtn.ibtn.phone-only {
+			display: inline-grid;
+		}
+		.shell:not(.desktop) .chat-head .dot {
+			display: inline-block;
+		}
+		.shell:not(.desktop) aside {
+			gap: 0.5rem;
+			padding: 0 0 1rem;
+			border-right: 0;
+		}
+		.shell:not(.desktop) aside > :global(:not(.list-head)) {
+			margin-inline: 0.75rem;
+		}
+		.shell:not(.desktop) .list-head {
+			flex: none;
+			height: var(--bar-h);
+			padding: 0 0.25rem 0 1rem;
+			border-bottom: 0.5px solid var(--line);
+			background: var(--panel);
+		}
+		.shell:not(.desktop) .list-head h2 {
+			color: var(--heading);
+			font-size: 1.15rem;
+			letter-spacing: 0.14em;
+			text-transform: none;
+		}
+		.shell:not(.desktop) .head-actions {
 			gap: 0;
-			padding: 0.4rem;
+		}
+		.shell:not(.desktop) .head-actions button.ibtn.ibtn.primary {
+			background: transparent;
+			border-color: transparent;
+			color: var(--muted);
+		}
+		.shell:not(.desktop) .chat-head {
+			flex: none;
+			gap: 0.6rem;
+			height: var(--bar-h);
+			min-height: var(--bar-h);
+			padding: 0 0.25rem;
+		}
+		.shell:not(.desktop) .chat-head .avatar {
+			width: 2.25rem;
+			height: 2.25rem;
+		}
+		.shell:not(.desktop) .chat-head .who {
+			min-width: 0;
+			flex: 1;
+		}
+		.shell:not(.desktop) .chat-head .who strong {
+			display: flex;
+			align-items: center;
+			font-size: 1rem;
+			line-height: 1.3;
+		}
+		.shell:not(.desktop) .chat-head .who small {
+			font-size: 0.75rem;
+			line-height: 1.2;
+		}
+		.shell:not(.desktop) .about-links {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.shell:not(.desktop) .about-links button:first-child {
+			grid-column: 1 / -1;
+		}
+		.shell:not(.desktop) .chat-head .title {
+			display: flex;
+			align-items: center;
+			gap: 0.5rem;
+			padding-left: 0.25rem;
 		}
 		/* Comfortable touch targets, and 16px inputs so phones do not zoom in on focus. */
 		.shell:not(.desktop) :global(button),
@@ -4683,6 +4786,26 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		.shell:not(.desktop) :global(.emoji-panel),
 		.shell:not(.desktop) :global(.gif-panel) {
 			padding-inline: 0.6rem;
+		}
+	}
+
+	/* Touch: 16px body (from --fs-body) and captions that stay readable. Desktop keeps the dense 14px scale. */
+	@media (pointer: coarse), (hover: none) {
+		.shell:not(.desktop) small,
+		.shell:not(.desktop) .hint,
+		.shell:not(.desktop) .field {
+			font-size: var(--fs-small);
+		}
+		.shell:not(.desktop) .lock,
+		.shell:not(.desktop) .badge,
+		.shell:not(.desktop) .live-tag,
+		.shell:not(.desktop) .ggroup h3,
+		.shell:not(.desktop) .settings h3,
+		.shell:not(.desktop) .card h2 {
+			font-size: var(--fs-cap);
+		}
+		.shell:not(.desktop) code {
+			font-size: var(--fs-small);
 		}
 	}
 </style>

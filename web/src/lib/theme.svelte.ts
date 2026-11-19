@@ -17,7 +17,8 @@ function apply(): void {
 	const root = document.documentElement;
 	if (light) root.dataset.theme = 'light';
 	else delete root.dataset.theme;
-	const color = light ? '#f0f4ff' : '#070b14';
+	// The system bars take the header colour (--panel), so the status bar and the top bar read as one surface.
+	const color = light ? '#ffffff' : '#0d1525';
 	document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color);
 	platform.setChrome?.(color, light);
 }

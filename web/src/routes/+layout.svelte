@@ -75,9 +75,21 @@
 		--danger: #f0766b;
 		--radius: 6px;
 		--radius-lg: 12px;
+		/* Type scale by input type: dense for mouse and keyboard, larger for touch. */
+		--fs-body: 14px;
+		--fs-small: 12px;
+		--fs-cap: 11px;
+		--bar-h: 56px;
 		color-scheme: dark;
 	}
 	/* Dark is the default, as on vniverse77.com. Light applies only when asked for explicitly. */
+	@media (pointer: coarse), (hover: none) {
+		:global(:root) {
+			--fs-body: 16px;
+			--fs-small: 13px;
+			--fs-cap: 12px;
+		}
+	}
 	:global(:root[data-theme='light']) {
 		--bg: #f0f4ff;
 		--panel: #ffffff;
