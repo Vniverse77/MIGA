@@ -1,9 +1,9 @@
 {
 	"$schema": "https://schema.tauri.app/config/2",
-	"version": "0.7.0",
+	"version": "0.8.0",
 	"build": { "frontendDist": "../../web/build-mobile" },
 	"bundle": {
 		"targets": "all",
-		"android": { "versionCode": 700, "minSdkVersion": 24 }
+		"android": { "versionCode": 800, "minSdkVersion": 24 }
 	}
 }
