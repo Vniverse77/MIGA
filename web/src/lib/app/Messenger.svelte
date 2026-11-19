@@ -72,6 +72,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	} from '../sync';
 	import Logo from '../Logo.svelte';
 	import Icon from './Icon.svelte';
+	import Shortcuts from './Shortcuts.svelte';
+	import { closeTopLayer, onShortcutKey, shortcutsOn, type ShortcutActions } from './shortcuts.svelte';
 	import { getTheme, setTheme, type Theme } from '../theme.svelte';
 	import { getLanguage, t } from '../i18n.svelte';
 	import { isEmojiOnly } from '../emoji';
@@ -1400,6 +1402,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 	/** Escape closes the innermost thing first: picker, then edit or reply, menus always. */
 	function onEscape(): void {
+		if (closeTopLayer()) return;
 		menuOpen = false;
 		ctx = null;
 		msgMenu = null;
@@ -1426,6 +1429,13 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 	/** Enter sends, Shift+Enter starts a new line. A key press that only confirms an IME candidate is left alone. */
 	function onComposerKey(e: KeyboardEvent): void {
+		if (e.key === 'ArrowUp' && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.isComposing && !draft && !editing && shortcutsOn()) {
+			const last = active ? chats[active]?.findLast((m) => m.mine && m.state === 'sent' && m.text) : undefined;
+			if (last) {
+				e.preventDefault();
+				return startEdit(last);
+			}
+		}
 		if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229) return;
 		e.preventDefault();
 		(e.currentTarget as HTMLTextAreaElement).form?.requestSubmit();
@@ -1877,6 +1887,28 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			address
 		};
 	}
+
+	/** Keyboard layer (shortcuts.svelte.ts): what each shortcut does in this page. */
+	const shortcutActions: ShortcutActions = {
+		ready: () => !!identity,
+		newChat: () => openNew(),
+		settings: () => toggleSettings(),
+		step(delta) {
+			if (!contacts.length) return;
+			const i = contacts.findIndex((c) => c.address === active);
+			const next = i < 0 ? (delta > 0 ? 0 : contacts.length - 1) : Math.min(contacts.length - 1, Math.max(0, i + delta));
+			openChat(contacts[next].address);
+			void tick().then(() => document.querySelector('.contact.selected')?.scrollIntoView({ block: 'nearest' }));
+		},
+		find() {
+			if (active && view === 'chat') openSearch();
+		},
+		focusComposer() {
+			if (!active || view !== 'chat' || !composerInput) return false;
+			composerInput.focus();
+			return true;
+		}
+	};
 
 	function openNew(): void {
 		view = 'new';
@@ -2975,8 +3007,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	<Scanner accept={scanning} onresult={scanned} onclose={() => (scanning = null)} />
 {/if}
 
+<Shortcuts {contacts} {chats} onchat={openChat} onhit={(address, message) => void openHit(address, message)} />
 <svelte:window
-	onkeydown={(e) => e.key === 'Escape' && onEscape()}
+	onkeydown={(e) => (e.key === 'Escape' ? onEscape() : onShortcutKey(e, shortcutActions))}
 	onclick={(e) => {
 		ctx = null;
 		if (emojiOpen && !(e.target as Element | null)?.closest?.('.emoji-panel, .gif-panel, .picker-bar, .emoji-btn')) emojiOpen = false;

@@ -7,6 +7,7 @@ export const platform: Platform = {
 	target: 'web',
 	label: '',
 	notifier: webNotifier,
+	shortcuts: { newChat: 'Alt+N', find: false },
 	packaged: false,
 	relayUrl: () => (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws',
 	publicOrigin: () => location.origin,

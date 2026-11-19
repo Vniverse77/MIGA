@@ -51,6 +51,7 @@ export const platform: Platform = {
 		show: (n) => (inTauri() ? nativeNotifier : webNotifier).show(n),
 		close: (tag) => (inTauri() ? nativeNotifier : webNotifier).close(tag)
 	},
+	shortcuts: { newChat: 'Ctrl+N', find: true },
 	packaged: true,
 	relayUrl: () => PUBLIC_RELAY,
 	publicOrigin: () => PUBLIC_ORIGIN,
@@ -78,7 +79,7 @@ function setupWindow(): void {
 		const ctrl = event.ctrlKey || event.metaKey;
 		const blocked =
 			key === 'f5' ||
-			(ctrl && ['r', 'p', 'u', 'f', '=', '+', '-', '_', '0'].includes(key));
+			(ctrl && ['r', 'p', 'u', '=', '+', '-', '_', '0'].includes(key));
 		if (blocked) event.preventDefault();
 	});
 	document.addEventListener(

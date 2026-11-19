@@ -16,7 +16,17 @@ export interface Notifier {
 	close(tag: string): void;
 }
 
+/** Keyboard shortcuts of a build with a physical keyboard (desktop app, web). Absent on touch builds. */
+export interface ShortcutProfile {
+	/** The key that starts a new chat; browsers keep Ctrl+N for a new window, so the web uses Alt+N. */
+	readonly newChat: 'Ctrl+N' | 'Alt+N';
+	/** Ctrl+F opens search inside the chat. A browser keeps its own find bar. */
+	readonly find: boolean;
+}
+
 export interface Platform {
+	/** Keyboard shortcuts; undefined on builds that have no keyboard layer (mobile). */
+	readonly shortcuts?: ShortcutProfile;
 	/** Native notifications on desktop, the Notification API elsewhere. */
 	readonly notifier: Notifier;
 	readonly target: Target;

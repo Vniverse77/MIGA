@@ -6,6 +6,7 @@
 // and a tray icon. Closing the window hides it to the tray so the relay connection stays alive;
 // "Quit" in the tray menu ends the app. If the tray cannot be created (no status-area support),
 // closing the window quits as before, so the app is never left running without a way back.
+// Also on desktop: single instance and remembered window size/position (official plugins).
 // Tray and close-to-tray are desktop only; on Android the system owns the window lifecycle.
 #[cfg(desktop)]
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,7 +31,15 @@ fn show_main(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_notification::init());
+    let builder = tauri::Builder::default();
+    // Single instance must be the first plugin: a second launch shows the running window and exits.
+    // Window state remembers size, position and maximized between runs (closing hides to the tray,
+    // and the plugin also saves on quit); the 800x560 minimum comes from tauri.conf.json.
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
+        .plugin(tauri_plugin_window_state::Builder::default().build());
+    let builder = builder.plugin(tauri_plugin_notification::init());
     #[cfg(desktop)]
     let builder = builder
         .setup(|app| {
