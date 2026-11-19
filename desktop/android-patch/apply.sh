@@ -11,6 +11,10 @@ manifest="$here/../src-tauri/gen/android/app/src/main/AndroidManifest.xml"
 if ! grep -q enableOnBackInvokedCallback "$manifest"; then
   sed -i '0,/<application/s//<application android:enableOnBackInvokedCallback="true"/' "$manifest"
 fi
+# Camera for the QR scanner: wry's WebChromeClient asks for the runtime permission, but only if the manifest declares it.
+if ! grep -q android.permission.CAMERA "$manifest"; then
+  sed -i '0,/<uses-permission/s//<uses-permission android:name="android.permission.CAMERA" \/>\n    <uses-feature android:name="android.hardware.camera" android:required="false" \/>\n    <uses-permission/' "$manifest"
+fi
 echo "patched $manifest"
 # Launcher icon: adaptive icon (background + foreground + monochrome for themed icons) and legacy PNG fallbacks.
 resdir="$here/../src-tauri/gen/android/app/src/main/res"
