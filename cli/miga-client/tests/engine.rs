@@ -60,3 +60,66 @@ fn identity_file_is_private_and_never_overwritten() {
         assert_eq!(mode, 0o600);
     }
 }
+
+#[test]
+fn reply_edit_and_delete_for_everyone_between_two_stores() {
+    use miga_client::engine::{
+        apply_own_delete, apply_own_edit, prepare_delete, prepare_edit, prepare_message, reseal_pending, seen_receipt,
+    };
+    use miga_core::payload::Reply;
+    let (sa, sb) = (temp("c"), temp("d"));
+    let (a, b) = (sa.create_identity(Some("Ada")).unwrap(), sb.create_identity(None).unwrap());
+
+    // B sends a first message, A replies to it.
+    let first = prepare_message(&sb, &b, a.address(), "where?", None).unwrap();
+    handle_incoming(&sa, &a, b.address(), &first.id, &first.body, 1000.0).unwrap();
+    let quote = Reply { id: first.id.clone(), from: b.address().into(), text: "where?".into() };
+    let out = prepare_message(&sa, &a, b.address(), "at the cafe", Some(&quote)).unwrap();
+    let h = handle_incoming(&sb, &b, a.address(), &out.id, &out.body, 2000.0).unwrap();
+    assert_eq!(h.shown.unwrap().text, "at the cafe");
+    let got = sb.chat(a.address()).unwrap();
+    let theirs = got.iter().find(|m| m["id"] == out.id.as_str()).unwrap();
+    assert_eq!(theirs["reply"]["text"], "where?");
+
+    // The stored reply survives a resend of a pending message.
+    let pending = sa.pending(b.address()).unwrap();
+    let again = reseal_pending(&sa, &a, b.address(), &pending[0]).unwrap();
+    let h2 = handle_incoming(&sb, &b, a.address(), &again.id, &again.body, 2500.0).unwrap();
+    assert!(h2.shown.is_none(), "same id is deduplicated");
+
+    // Edit: validated, applied locally after the relay confirmed, then applied by the peer.
+    assert!(prepare_edit(&a, b.address(), &out.id, "   ").is_err());
+    let edit = prepare_edit(&a, b.address(), &out.id, "  at the old cafe ").unwrap();
+    assert_eq!(edit.text, "at the old cafe");
+    assert!(apply_own_edit(&sa, b.address(), &out.id, &edit.text, edit.ts).unwrap());
+    handle_incoming(&sb, &b, a.address(), &edit.frame_id, &edit.body, 3000.0).unwrap();
+    let theirs = sb.chat(a.address()).unwrap().into_iter().find(|m| m["id"] == out.id.as_str()).unwrap();
+    assert_eq!(theirs["text"], "at the old cafe");
+    let mine = sa.chat(b.address()).unwrap().into_iter().find(|m| m["id"] == out.id.as_str()).unwrap();
+    assert!(mine["edited"].as_f64().unwrap() > 0.0);
+
+    // Read receipt reaches the author.
+    let seen = seen_receipt(&b, a.address(), std::slice::from_ref(&out.id)).unwrap();
+    handle_incoming(&sa, &a, b.address(), "s1", &seen, 3500.0).unwrap();
+    let mine = sa.chat(b.address()).unwrap().into_iter().find(|m| m["id"] == out.id.as_str()).unwrap();
+    assert_eq!(mine["delivery"], "read");
+
+    // Delete for everyone.
+    let del = prepare_delete(&a, b.address(), &out.id).unwrap();
+    assert!(apply_own_delete(&sa, b.address(), &out.id).unwrap());
+    handle_incoming(&sb, &b, a.address(), &del.frame_id, &del.body, 4000.0).unwrap();
+    assert_eq!(sb.chat(a.address()).unwrap().len(), 1);
+    assert_eq!(sa.chat(b.address()).unwrap().len(), 1);
+}
+
+#[test]
+fn ui_lock_is_exclusive_and_state_roundtrips() {
+    let s = temp("lock");
+    let held = s.lock_ui().unwrap().expect("first lock");
+    assert!(s.ui_running());
+    assert!(s.lock_ui().unwrap().is_none());
+    drop(held);
+    assert!(!s.ui_running());
+    s.save_ui_state(&serde_json::json!({"read": {"x": 5.0}})).unwrap();
+    assert_eq!(s.ui_state()["read"]["x"], 5.0);
+}

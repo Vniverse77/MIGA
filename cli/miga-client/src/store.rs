@@ -228,5 +228,38 @@ impl Store {
     }
 }
 
+impl Store {
+    // ---- interface state ------------------------------------------------------------------
+
+    /// Small per-profile state of the terminal UI (read markers, drafts). Never holds secrets.
+    pub fn ui_state(&self) -> Value {
+        read_json(&self.data.join("ui.json")).ok().flatten().filter(Value::is_object).unwrap_or_else(|| json!({}))
+    }
+
+    pub fn save_ui_state(&self, state: &Value) -> Result<()> {
+        private_dir(&self.data)?;
+        write_atomic(&self.data.join("ui.json"), serde_json::to_string(state).expect("json").as_bytes(), 0o600)
+    }
+
+    // ---- one interactive session per profile ------------------------------------------------
+
+    /// Takes the exclusive "terminal UI is open" lock. `Ok(None)` means another process holds it.
+    /// The lock lives as long as the returned file.
+    pub fn lock_ui(&self) -> Result<Option<fs::File>> {
+        private_dir(&self.data)?;
+        let file = fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.data.join("ui.lock"))?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(file)),
+            Err(fs::TryLockError::WouldBlock) => Ok(None),
+            Err(fs::TryLockError::Error(e)) => Err(e.into()),
+        }
+    }
+
+    /// True while a terminal UI holds the lock for this profile.
+    pub fn ui_running(&self) -> bool {
+        matches!(self.lock_ui(), Ok(None))
+    }
+}
+
 /// Longest message the CLI sends (UTF-16 units, like the web client).
 pub const MAX_SEND: usize = MAX_TEXT;

@@ -56,7 +56,7 @@ pub fn to_hex(bytes: &[u8]) -> String {
 /// Strict hex decoding (either case, even length).
 pub fn from_hex(text: &str) -> Result<Vec<u8>> {
     let b = text.as_bytes();
-    if b.len() % 2 != 0 {
+    if !b.len().is_multiple_of(2) {
         return Err(Error::Invalid("odd hex length"));
     }
     let nib = |c: u8| match c {

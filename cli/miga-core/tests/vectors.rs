@@ -188,7 +188,7 @@ fn envelopes(c: &mut Counter) {
             let padded = open(&key, body, b"").expect("opens");
             let plaintext = s(case, "plaintext");
             let unpadded = name == "no_padding_still_opens";
-            c.ok(unpadded || padded.len() % 256 == 0, || format!("{file} {name}: padding multiple"));
+            c.ok(unpadded || padded.len().is_multiple_of(256), || format!("{file} {name}: padding multiple"));
             c.ok(
                 padded.starts_with(plaintext.as_bytes()) && padded[plaintext.len()..].iter().all(|&b| b == 0x20),
                 || format!("{file} {name}: plaintext"),

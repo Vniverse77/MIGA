@@ -4,7 +4,10 @@ use crate::{now_ms, Error, Result};
 use miga_core::crypto::pair_key;
 use miga_core::identity::{is_address, Identity};
 use miga_core::js::{js_trim, utf16_len};
-use miga_core::payload::{apply_edit, decrypt, encrypt, encrypt_receipt, seal_json_with_nonce, text_json, MAX_TEXT};
+use miga_core::payload::{
+    apply_edit, clean_reply, decrypt, encrypt, encrypt_delete, encrypt_edit, encrypt_receipt, seal_json_with_nonce,
+    text_json, Reply, MAX_TEXT,
+};
 use serde_json::{json, Value};
 
 /// What the caller should do after a `msg` frame was processed.
@@ -119,9 +122,9 @@ pub fn handle_incoming(
     if let Some(a) = &plain.att {
         message["att"] = a.to_value();
     }
-    store.merge(from, &[message])?;
+    let added = store.merge(from, &[message])?;
     let contact_name = label(store, from);
-    out.shown = Some(Shown {
+    out.shown = added.then(|| Shown {
         from: from.into(),
         name: contact_name,
         id: id.into(),
@@ -161,6 +164,17 @@ pub struct Outgoing {
 
 /// Validates the text, persists a pending message, and builds the encrypted body.
 pub fn prepare_text(store: &Store, me: &Identity, peer: &str, text: &str) -> Result<Outgoing> {
+    prepare_message(store, me, peer, text, None)
+}
+
+/// Like [`prepare_text`], optionally quoting an earlier message (`reply`).
+pub fn prepare_message(
+    store: &Store,
+    me: &Identity,
+    peer: &str,
+    text: &str,
+    reply: Option<&Reply>,
+) -> Result<Outgoing> {
     let text = js_trim(text);
     if text.is_empty() {
         return Err(Error::Invalid("nothing to send".into()));
@@ -170,9 +184,13 @@ pub fn prepare_text(store: &Store, me: &Identity, peer: &str, text: &str) -> Res
     }
     let id = miga_core::random_id()?;
     let ts = now_ms();
-    store.merge(peer, &[json!({"id": id, "mine": true, "text": text, "ts": ts, "state": "pending"})])?;
+    let mut message = json!({"id": id, "mine": true, "text": text, "ts": ts, "state": "pending"});
+    if let Some(r) = reply {
+        message["reply"] = r.to_value();
+    }
+    store.merge(peer, &[message])?;
     let name = store.profile_name()?;
-    let body = encrypt(me, peer, text, ts, name.as_deref(), None)?;
+    let body = encrypt(me, peer, text, ts, name.as_deref(), reply)?;
     Ok(Outgoing { id, body })
 }
 
@@ -180,13 +198,80 @@ pub fn prepare_text(store: &Store, me: &Identity, peer: &str, text: &str) -> Res
 pub fn reseal_pending(store: &Store, me: &Identity, peer: &str, message: &Value) -> Result<Outgoing> {
     let text = message["text"].as_str().unwrap_or_default();
     let name = store.profile_name()?;
+    let reply = message.get("reply").and_then(clean_reply);
     let body = seal_json_with_nonce(
         me,
         peer,
-        &text_json(text, now_ms(), name.as_deref(), None, None),
+        &text_json(text, now_ms(), name.as_deref(), reply.as_ref(), None),
         &miga_core::random_bytes::<24>()?,
     )?;
     Ok(Outgoing { id: message["id"].as_str().unwrap_or_default().into(), body })
+}
+
+/// A control frame (edit or delete) ready to go out; apply the change locally once the relay says `sent`.
+pub struct Control {
+    /// Id of the relay frame (not the message id).
+    pub frame_id: String,
+    pub body: String,
+    /// The cleaned text for an edit.
+    pub text: String,
+    pub ts: i64,
+}
+
+/// Validates an edit of one of our own messages (ENGINE.md section 9, "Edit (sender)").
+pub fn prepare_edit(me: &Identity, peer: &str, id: &str, text: &str) -> Result<Control> {
+    let text = js_trim(text);
+    if text.is_empty() {
+        return Err(Error::Invalid("an edited message cannot be empty".into()));
+    }
+    if utf16_len(text) > MAX_TEXT {
+        return Err(Error::Invalid(format!("message is longer than {MAX_TEXT} characters")));
+    }
+    let ts = now_ms();
+    Ok(Control {
+        frame_id: miga_core::random_id()?,
+        body: encrypt_edit(me, peer, id, text, ts)?,
+        text: text.to_string(),
+        ts,
+    })
+}
+
+/// A "delete for everyone" request for one of our own messages.
+pub fn prepare_delete(me: &Identity, peer: &str, id: &str) -> Result<Control> {
+    let ts = now_ms();
+    Ok(Control {
+        frame_id: miga_core::random_id()?,
+        body: encrypt_delete(me, peer, std::slice::from_ref(&id.to_string()), ts)?,
+        text: String::new(),
+        ts,
+    })
+}
+
+/// Applies a confirmed edit of our own message. `ts` must be larger than any earlier edit.
+pub fn apply_own_edit(store: &Store, peer: &str, id: &str, text: &str, ts: i64) -> Result<bool> {
+    let mut list = store.chat(peer)?;
+    let ok = apply_edit(&mut list, id, true, text, ts as f64, now_ms() as f64);
+    if ok {
+        store.save_chat(peer, &list)?;
+    }
+    Ok(ok)
+}
+
+/// Removes one of our own messages after the delete request was accepted.
+pub fn apply_own_delete(store: &Store, peer: &str, id: &str) -> Result<bool> {
+    let mut list = store.chat(peer)?;
+    let before = list.len();
+    list.retain(|m| !(m["mine"] == true && m["id"] == id));
+    let removed = list.len() != before;
+    if removed {
+        store.save_chat(peer, &list)?;
+    }
+    Ok(removed)
+}
+
+/// A read receipt (`seen`) for the given ids.
+pub fn seen_receipt(me: &Identity, peer: &str, ids: &[String]) -> Result<String> {
+    Ok(encrypt_receipt(me, peer, "seen", ids, now_ms())?)
 }
 
 /// A delivery receipt for the given ids.
