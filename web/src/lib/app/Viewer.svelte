@@ -10,6 +10,7 @@
 	let scale = $state(1);
 	let x = $state(0);
 	let y = $state(0);
+	const touch = typeof matchMedia === 'function' && matchMedia('(hover: none)').matches;
 	let closeBtn = $state<HTMLButtonElement | null>(null);
 	const pointers = new Map<number, { x: number; y: number }>();
 	let pinchStart = 0;
@@ -107,7 +108,7 @@
 	>
 		<img src={url} alt={t('att_img_alt')} draggable="false" style:transform="translate({x}px, {y}px) scale({scale})" />
 	</div>
-	<p class="hint">{t('att_zoom_hint')}</p>
+	<p class="hint">{touch ? t('att_zoom_hint_touch') : t('att_zoom_hint')}</p>
 </div>
 
 <style>
