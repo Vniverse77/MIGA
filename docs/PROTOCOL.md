@@ -104,7 +104,8 @@ to the relay: one as the account address, one as its device address.
    address, receives the bundle, rejects it if `exp` has passed, and acknowledges it (the
    relay then deletes it).
 4. The new device makes its own device key and sends `hello` (below) to every device in the
-   bundle. The sponsor answers with the profile, contacts, device list and recent history.
+   bundle. The sponsor answers with the profile, contacts, device list, block and mute lists; the new
+   device then pulls the full history from it ("Full history transfer" below).
 
 **QR code.** The old device also shows the code as a QR code containing
 `<web origin>/app/#link=<code>` (packaged desktop and mobile builds use
@@ -138,9 +139,13 @@ belongs to the account. JSON kinds:
 |---|---|
 | `hello` | A new device announces itself: `label`, `sponsor`. |
 | `state` | Any of `profile`, `contacts`, `devices` to merge, and `blocked`: the complete list of blocked addresses, which replaces the receiver's list (valid addresses only, at most 500). |
-| `history` | `chats`: a piece of recent message history. |
+| `history` | `chats`: a piece of message history (the old, push-style snapshot; still accepted, but filtered through tombstones; no longer sent). |
+| `hxq` | New device to another device: `sid`, `q`, `after`. Asks for the next page of history after the cursor `after` (null = from the start). |
+| `hx` | The answer: `sid`, `q`, `chats` (one page), `next` (cursor for the next request, null = that was the last page), `total` (messages the sender holds). |
+| `tomb` | `items`: remembered deletes ("Tombstones" below), at most 100 per message. |
+| `read` | `peer`, `upTo` (ms): this chat is read up to its newest incoming message with `ts <= upTo` on the sending device. |
 | `msg` | A copy of one message just sent or received: `peer`, `message`, optional `name`. |
-| `del` | `peer`, `items`: `[{"id","mine"}]` (at most 100). The receiver removes those messages from the chat with `peer`; `mine` says whether we wrote it. Sent for "delete for me" and after a delete request was applied. |
+| `del` | Old form of a message delete (`peer`, `items`). Still accepted and treated as a message tombstone; current clients send `tomb` instead. |
 | `edit` | `peer`, `id`, `mine`, `text`, `ts`: an edit one device already applied (own edit, or one received from the peer), so the others show the same text. |
 | `st` | `peer`, `ids`, `d` (`delivered` or `read`): a receipt one device already applied, so the others show the same ticks. `read` is applied only if read receipts are on. |
 | `receipts` | `on`: the account-wide read receipts setting. |
@@ -150,6 +155,72 @@ The relay pushes a message for the account address to every device online at tha
 deletes it on the first acknowledgement; the receiving device forwards a `msg` copy so
 devices that were offline get it too. Clients de-duplicate by message id.
 
+### Full history transfer
+
+The old snapshot pushed at most the newest 200 messages per chat in at most 40 pages, from an
+in-memory queue that was lost if the sponsor's tab closed. Now the new device **pulls** the history
+(stop-and-wait, one request open at a time), so the sponsor keeps no state and either side can stop
+and resume.
+
+1. After linking, the new device stores a job `{sid, from, cursor, done, total}` (IndexedDB `meta`,
+   key `hx`) and sends `hxq` to the sponsor with `after = null`.
+2. Canonical order: chat address (ascending), then message `ts`, then `id`. A cursor is
+   `{c, t, i}` (chat, ts, id) and means "everything strictly after this message".
+3. The answering device builds one page of up to about 12 000 bytes of message JSON (so the sealed
+   body stays well under the relay's 24 000 character body limit and 32 KiB frame limit), answers with
+   `hx` (`next` = cursor of the last message of the page, or null at the end, plus `total`). The
+   answers are paced by the 400 ms sync outbox, so a copy stays under the relay's 30 sends per
+   10 seconds (about 2.5 pages per second).
+4. The new device accepts only the answer to its open request (`q` matches), merges the page
+   (idempotent: a message that is already there is not duplicated), stores the new cursor and
+   `done`, then asks for the next page. The job is deleted when `next` is null.
+5. Everything on a message travels: `delivery` (delivered/read), `edited`, `reply`, and `att` with
+   the blob id, file key, nonce, hash and (for own messages) the blob delete token, so the new
+   device can fetch the media from the relay while the blob still exists (30 days). Media files
+   themselves are not re-sent over the sync channel. Messages that arrive as history are marked
+   seen (no read receipts, no unread counts, no notifications). Contacts (with `verified`, which
+   is only kept if it matches the safety number the new device computes itself), the block list,
+   muted chats and the read-receipts setting are sent as `state`/`receipts` right after `hello`.
+6. Resume: after a restart the job is read back and the request repeats from the saved cursor. If no
+   answer comes for 20 seconds the request is repeated; after three silent tries the next device of
+   the account is asked. A stale answer is ignored.
+7. The first request (`after = null`) also makes the answering device send its tombstones, before the
+   first page.
+8. UI: a banner "Copying history N%" with a progress bar (`N` = `done / total`, never 100 before the
+   last page); it shows 100% for a few seconds at the end. Settings, Devices has a button per device
+   to copy the history from it again; the merge is the same, so it can only add or update.
+
+**Merge rule.** A message that is already present is not replaced, except: the one with the larger
+`edited` time supplies the text (last writer wins), and `delivery` only moves forward
+(delivered, read). So an edit made while a device was offline reaches it by `edit` (the relay keeps the
+message for it) or, if that was missed, by any later history copy.
+
+### Tombstones
+
+A delete is remembered so a device that was offline, or a later history copy, cannot bring the item back.
+A tombstone is `{c, s, id?, mine?, ts}`: `c` = chat (peer address); `s` = `m` (one message: `id`,
+`mine`), `c` (the conversation: every message with `ts <=` the tombstone's `ts`) or `k` (the contact and
+its conversation, same rule); `ts` = when it was deleted. They are kept in IndexedDB `meta` key `tombs`.
+
+- Created by: delete for me, delete for everyone, a delete request received from the peer, delete
+  conversation, delete contact. Each is sent to the other devices as `tomb`.
+- Applied on arrival: a tombstone removes matching messages, the conversation and (`k`) the contact.
+  Incoming messages, `msg` copies and history pages that match a tombstone are dropped (a relay
+  re-delivery of a deleted message is acknowledged and dropped).
+- A message newer than a `c`/`k` tombstone is not covered. A `k` tombstone is removed when the contact is
+  added again, or when a message or contact update newer than it arrives (the sync message's relay time
+  is compared, so an old queued rename cannot bring a deleted contact back).
+- A `c`/`k` tombstone replaces older message tombstones of that chat; at most 5000 are kept.
+- Pruned after 90 days. A device that was offline for longer than that can bring old items back and
+  should be re-linked.
+
+### Read state between devices
+
+When a chat is read on one device (opened on screen, or a message arrived while it was open), that
+device sends `read` with `upTo` = `ts` of the newest incoming message. The others lower that chat's
+unread counter to the number of incoming messages newer than `upTo` (0 clears it, removes the
+notification) and mark the older ones seen, so they do not send a second read receipt.
+
 **Limits to know.** Removing a device is cooperative: it erases itself the next time it
 connects, but it did hold the account key. If a device is lost, the only real fix is a new
 address. The relay can see that the account address and its device addresses connect from
@@ -157,7 +228,7 @@ the same IP and exchange messages, so it can tell which devices belong together.
 
 ## Deleting messages and blocking
 
-- **Delete for me** removes a message on this device and, through `del`, on the linked devices.
+- **Delete for me** removes a message on this device and, through a `tomb` tombstone, on the linked devices.
   The other person keeps their copy.
 - **Delete for everyone** (own messages only) sends the delete request above, sends `unsend`
   to the relay, and removes the message locally and on linked devices. It needs a relay
@@ -166,14 +237,13 @@ the same IP and exchange messages, so it can tell which devices belong together.
   arrives later and does the job.
 - **Block** is local state, synced between linked devices as `blocked`. Messages from a blocked
   address are acknowledged (so the relay deletes them) and dropped unread. The sender is not
-  told. A deleted contact stays blocked until unblocked. Delete contact and "delete
-  conversation" act on this device only.
+  told. A deleted contact stays blocked until unblocked. Delete conversation and delete contact are
+  also synced to the linked devices as tombstones (they do not affect the other person).
 
 Honest limits: deletion is a request, not a guarantee. The recipient may have read the message
 already, may have a copy or screenshot, and a modified client can ignore the request. Clients
-that predate the request silently ignore it, so the message stays on their side. A linked
-device that was offline and later receives an old `history` snapshot can bring a deleted
-message back. The relay's stored copy of an unsent message is deleted, but the relay can still
+that predate the request silently ignore it, so the message stays on their side. Tombstones stop a linked
+device that was offline from bringing a deleted message back, for 90 days (see "Tombstones"). The relay's stored copy of an unsent message is deleted, but the relay can still
 have seen that it existed. Blocking cannot stop a blocked address from sending; the relay
 still carries and sees the messages until they are acknowledged.
 

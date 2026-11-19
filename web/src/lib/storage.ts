@@ -11,6 +11,7 @@ import {
 import type { Att } from './attach';
 import { RECENT_EMOJI_KEY } from './emoji';
 import { deleteDb, openDb, req, tx, type MessageRecord } from './db';
+import { cleanHistoryJob, cleanTombs, pruneTombs, type HistoryJob, type Tomb } from './sync';
 
 /** `custom` marks a name the user typed; a name the contact shares never replaces it. */
 export type Contact = {
@@ -58,6 +59,8 @@ const KEY_UNREAD = 'miga.unread';
 const KEY_MUTED = 'miga.muted';
 const KEY_NOTIFY = 'miga.notify';
 const KEY_NOTIFY_BANNER = 'miga.notify-banner';
+const KEY_TOMBS = 'miga.tombs';
+const KEY_HX = 'miga.hx';
 
 /** What a notification shows: sender and text, sender only (default), or nothing but "New message". */
 export type NotifyMode = 'full' | 'name' | 'generic';
@@ -212,6 +215,8 @@ export async function eraseAll(): Promise<void> {
 		KEY_MUTED,
 		KEY_NOTIFY,
 		KEY_NOTIFY_BANNER,
+		KEY_TOMBS,
+		KEY_HX,
 		RECENT_EMOJI_KEY
 	]) {
 		localStorage.removeItem(key);
@@ -229,6 +234,10 @@ export type AppData = {
 	unread: Unread;
 	/** Chats that count unread messages but never notify. */
 	muted: string[];
+	/** Remembered deletes (see sync.ts). Old ones are pruned on load. */
+	tombs: Tomb[];
+	/** An unfinished history copy from another device, if any. */
+	hx: HistoryJob | null;
 };
 
 let db: IDBDatabase | null = null;
@@ -241,6 +250,8 @@ let storedContacts = new Map<string, string>();
 let storedBlocked = '';
 let storedUnread = '';
 let storedMuted = '';
+let storedTombs = '';
+let storedHx = '';
 
 function queue(job: () => Promise<unknown>): void {
 	writeQueue = writeQueue.then(job).catch(() => {});
@@ -270,7 +281,9 @@ function legacyData(): AppData {
 		muted: cleanBlocked(readJson<unknown>(KEY_MUTED, [])),
 		contacts: readJson<Contact[]>(KEY_CONTACTS, []),
 		chats: readJson<Chats>(KEY_CHATS, {}),
-		blocked: cleanBlocked(readJson<unknown>(KEY_BLOCKED, []))
+		blocked: cleanBlocked(readJson<unknown>(KEY_BLOCKED, [])),
+		tombs: cleanTombs(readJson<unknown>(KEY_TOMBS, [])),
+		hx: cleanHistoryJob(readJson<unknown>(KEY_HX, null))
 	};
 }
 
@@ -315,6 +328,8 @@ export async function loadData(): Promise<AppData> {
 			const blocked = cleanBlocked(await req(t.objectStore('meta').get('blocked')));
 			const unread = cleanUnread(await req(t.objectStore('meta').get('unread')));
 			const muted = cleanBlocked(await req(t.objectStore('meta').get('muted')));
+			const tombs = cleanTombs(await req(t.objectStore('meta').get('tombs')));
+			const hx = cleanHistoryJob(await req(t.objectStore('meta').get('hx')));
 			const chats: Chats = {};
 			storedMessages = new Map();
 			for (const { chat, i, ...m } of msgs as MessageRecord[]) {
@@ -330,8 +345,11 @@ export async function loadData(): Promise<AppData> {
 			storedBlocked = JSON.stringify(blocked);
 			storedUnread = JSON.stringify(unread);
 			storedMuted = JSON.stringify(muted);
+			pruneTombs(tombs);
+			storedTombs = JSON.stringify(tombs);
+			storedHx = JSON.stringify(hx);
 			void navigator.storage?.persist?.();
-			return { contacts, chats, blocked, unread, muted };
+			return { contacts, chats, blocked, unread, muted, tombs, hx };
 		});
 	} catch {
 		// No usable IndexedDB (some private modes): keep working from localStorage as before.
@@ -406,6 +424,37 @@ export function saveMuted(muted: string[]): void {
 		if (json === storedMuted) return;
 		await tx(db!, ['meta'], 'readwrite', (t) => void t.objectStore('meta').put(muted, 'muted'));
 		storedMuted = json;
+	});
+}
+
+/** Delete tombstones (small, rewritten whole when they change). */
+export function saveTombs(tombs: Tomb[]): void {
+	if (erased) return;
+	if (!db) return void localStorage.setItem(KEY_TOMBS, JSON.stringify(tombs));
+	const json = JSON.stringify(tombs);
+	queue(async () => {
+		if (json === storedTombs) return;
+		await tx(db!, ['meta'], 'readwrite', (t) => void t.objectStore('meta').put(tombs, 'tombs'));
+		storedTombs = json;
+	});
+}
+
+/** Progress of the history copy on a newly linked device; null removes it. */
+export function saveHx(job: HistoryJob | null): void {
+	if (erased) return;
+	if (!db) {
+		if (job) localStorage.setItem(KEY_HX, JSON.stringify(job));
+		else localStorage.removeItem(KEY_HX);
+		return;
+	}
+	const json = JSON.stringify(job);
+	queue(async () => {
+		if (json === storedHx) return;
+		await tx(db!, ['meta'], 'readwrite', (t) => {
+			if (job) t.objectStore('meta').put(job, 'hx');
+			else t.objectStore('meta').delete('hx');
+		});
+		storedHx = json;
 	});
 }
 

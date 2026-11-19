@@ -45,7 +45,6 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		deriveLink,
 		formatLinkCode,
 		guessDeviceLabel,
-		historyChunks,
 		mergeMessages,
 		newLinkCode,
 		normalizeLinkCode,
@@ -56,6 +55,20 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		type LinkBundle,
 		type SyncMessage
 	} from '../devices';
+	import {
+		addTombs,
+		applyTombs,
+		cleanCursor,
+		cleanTombs,
+		clearContactTomb,
+		contactTombTs,
+		countMessages,
+		historyPage,
+		historyPercent,
+		tombFilter,
+		type HistoryJob,
+		type Tomb
+	} from '../sync';
 	import Logo from '../Logo.svelte';
 	import Icon from './Icon.svelte';
 	import { getTheme, setTheme, type Theme } from '../theme.svelte';
@@ -84,6 +97,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		saveChats,
 		saveContacts,
 		saveDevices,
+		saveHx,
+		saveTombs,
 		saveIdentity,
 		saveOpenLink,
 		saveProfile,
@@ -193,6 +208,20 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	let linkNotice = $state('');
 	let deviceLabel = $state('');
 
+	/** Copy of history from another device in progress (new device), or null. Saved, so it resumes. */
+	let hx = $state<HistoryJob | null>(null);
+	/** Shows "100%" for a few seconds after the copy finished. */
+	let hxFlash = $state(false);
+	let hxFlashTimer: ReturnType<typeof setTimeout> | undefined;
+	const hxPercent = $derived(hx ? historyPercent(hx) : 100);
+	/** The request waiting for an answer; an answer with another `q` is stale and ignored. */
+	let hxPending: { q: string; at: number } | null = null;
+	let hxTry = 0;
+	let hxTimer: ReturnType<typeof setInterval> | undefined;
+	const HX_RETRY_MS = 20_000;
+	/** Remembered deletes (message, conversation, contact), see sync.ts. */
+	let tombs: Tomb[] = [];
+
 	// Not reactive: connections and keys.
 	let relay: RelayClient | null = null;
 	let deviceRelay: RelayClient | null = null;
@@ -275,6 +304,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			liveOn = loadLive();
 			unread = data.unread;
 			muted = data.muted;
+			tombs = data.tombs;
+			hx = data.hx;
 			notifyMode = loadNotifyMode();
 			bannerDismissed = loadNotifyBannerDismissed();
 			void refreshPermission();
@@ -300,6 +331,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			deviceRelay?.close();
 			clearInterval(outboxTimer);
 			clearTimeout(linkTimer);
+			clearInterval(hxTimer);
+			clearTimeout(hxFlashTimer);
 		};
 	});
 
@@ -357,10 +390,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				if (plain.del) {
 					const items = plain.del.map((id) => ({ id, mine: false }));
 					const list = chats[m.from];
-					if (list && removeMessages(list, items)) {
-						persist();
-						syncAll({ k: 'del', peer: m.from, items });
-					}
+					if (list && removeMessages(list, items)) persist();
+					const now = Date.now();
+					rememberDeletes(items.map((i) => ({ c: m.from, s: 'm' as const, id: i.id, mine: false, ts: now })));
 					return true;
 				}
 				// An edit: only applied to a message THIS sender wrote (their own chat list, mine: false).
@@ -381,6 +413,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					if (plain.seen && receipts) applyStatus(m.from, plain.seen, 'read', true);
 					return true;
 				}
+				// Deleted earlier (a re-delivery after "delete for me", or a conversation that was cleared): acknowledged and dropped.
+				if (tombFilter(tombs)(m.from, { id: m.id, mine: false, ts: m.ts })) return true;
+				reviveContact(m.from, m.ts);
 				// The real message replaces the live line (control messages such as receipts do not).
 				if (liveIn?.peer === m.from) {
 					clearTimeout(liveInTimer);
@@ -420,9 +455,14 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		});
 		relay.connect();
 
-		deviceRelay = new RelayClient(relayUrl(), device, { ...quiet, onMessage: onSyncMessage });
+		deviceRelay = new RelayClient(relayUrl(), device, {
+			...quiet,
+			onReady: () => hxRequest(),
+			onMessage: onSyncMessage
+		});
 		deviceRelay.connect();
 		outboxTimer = setInterval(pumpOutbox, OUTBOX_MS);
+		hxTimer = setInterval(hxTick, 5000);
 		applyInvite();
 
 		// A code left open by an earlier visit can no longer be shown; delete its bundle now.
@@ -476,6 +516,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				for (const raw of message.contacts ?? []) {
 					const contact = cleanContact(raw);
 					if (!contact || contact.address === identity?.address) continue;
+					// Deleted on another device after this was sent: stays deleted. Added again later: comes back.
+					if (contactTombTs(tombs, contact.address) >= m.ts) continue;
+					reviveContact(contact.address, m.ts);
 					const known = contacts.find((c) => c.address === contact.address);
 					// A synced verification counts only if it matches the number this device computes.
 					const verified =
@@ -506,11 +549,86 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				break;
 			}
 			case 'history': {
+				const deleted = tombFilter(tombs);
 				for (const [peer, list] of Object.entries(message.chats ?? {})) {
 					if (!isAddress(peer) || !Array.isArray(list)) continue;
-					const clean = list.map((x) => cleanMessage(x, MAX_TEXT)).filter((x) => x !== null);
+					const clean = list
+						.map((x) => cleanMessage(x, MAX_TEXT))
+						.filter((x): x is Message => x !== null && !deleted(peer, x));
+					if (!clean.length) continue;
 					ensureContact(peer);
 					addMessages(peer, clean);
+				}
+				persist();
+				break;
+			}
+			case 'hxq': {
+				if (!ID_RE.test(message.sid ?? '') || !ID_RE.test(message.q ?? '')) break;
+				const after = message.after === null ? null : cleanCursor(message.after);
+				if (message.after !== null && !after) break;
+				// A fresh copy starts with what was deleted, so nothing deleted is sent as history.
+				if (after === null) {
+					for (let i = 0; i < tombs.length; i += 100) {
+						syncSend(m.from, { k: 'tomb', items: tombs.slice(i, i + 100) });
+					}
+				}
+				const snap = $state.snapshot(chats);
+				const page = historyPage(snap, after);
+				syncSend(m.from, { k: 'hx', sid: message.sid, q: message.q, chats: page.chats, next: page.next, total: countMessages(snap) });
+				break;
+			}
+			case 'hx': {
+				if (!hx || message.sid !== hx.sid || !hxPending || message.q !== hxPending.q) break;
+				hxPending = null;
+				hxTry = 0;
+				const deleted = tombFilter(tombs);
+				let seen = 0;
+				for (const [peer, list] of Object.entries(message.chats ?? {})) {
+					if (!isAddress(peer) || !Array.isArray(list)) continue;
+					seen += list.length;
+					const clean = list
+						.map((x) => cleanMessage(x, MAX_TEXT))
+						.filter((x): x is Message => x !== null && !deleted(peer, x))
+						// Old incoming messages are already read somewhere: no receipts, no unread, no notification.
+						.map((x) => (x.mine ? x : { ...x, seen: true }));
+					if (!clean.length) continue;
+					ensureContact(peer);
+					addMessages(peer, clean);
+				}
+				const next = message.next === null ? null : cleanCursor(message.next);
+				persist();
+				if (message.next === null || !next) {
+					hx = null;
+					saveHx(null);
+					hxFlash = true;
+					clearTimeout(hxFlashTimer);
+					hxFlashTimer = setTimeout(() => (hxFlash = false), 4000);
+				} else {
+					hx = { ...hx, cursor: next, done: hx.done + seen, total: Math.max(Number(message.total) || 0, hx.total) };
+					saveHx($state.snapshot(hx));
+					hxRequest();
+				}
+				break;
+			}
+			case 'tomb': {
+				applyRemoteTombs(message.items);
+				break;
+			}
+			case 'read': {
+				if (!isAddress(message.peer) || !Number.isFinite(Number(message.upTo))) break;
+				const upTo = Number(message.upTo);
+				const list = chats[message.peer] ?? [];
+				let newer = 0;
+				for (const x of list) {
+					if (x.mine) continue;
+					if (x.ts <= upTo) x.seen = true;
+					else newer++;
+				}
+				if ((unread[message.peer] ?? 0) > newer) {
+					if (newer) unread[message.peer] = newer;
+					else delete unread[message.peer];
+					saveUnread($state.snapshot(unread));
+					if (!newer) platform.notifier.close('chat-' + message.peer);
 				}
 				persist();
 				break;
@@ -518,6 +636,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			case 'msg': {
 				const clean = cleanMessage(message.message, MAX_TEXT);
 				if (!clean || !isAddress(message.peer)) break;
+				if (tombFilter(tombs)(message.peer, clean)) break;
+				reviveContact(message.peer, clean.ts);
 				ensureContact(message.peer, clean.mine ? undefined : message.name);
 				// A copy from another device (it was offline when this arrived): counted, never notified.
 				if (addMessages(message.peer, [clean]) && !clean.mine) noteIncoming(message.peer, previewOf(clean), false);
@@ -526,8 +646,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			}
 			case 'del': {
 				if (!isAddress(message.peer)) break;
-				const list = chats[message.peer];
-				if (list && removeMessages(list, cleanDeleteItems(message.items))) persist();
+				// Older devices send `del`: remembered like a tombstone.
+				const items = cleanDeleteItems(message.items);
+				applyRemoteTombs(items.map((i) => ({ c: message.peer, s: 'm' as const, id: i.id, mine: i.mine, ts: m.ts })));
 				break;
 			}
 			case 'edit': {
@@ -580,9 +701,64 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		for (let i = 0; i < all.length; i += 50) {
 			syncSend(to, { k: 'state', contacts: all.slice(i, i + 50) });
 		}
-		for (const chunk of historyChunks($state.snapshot(chats))) {
-			syncSend(to, { k: 'history', chats: chunk });
+		// The history itself is pulled page by page by the new device (see 'hxq'), so it can resume.
+	}
+
+	// ── Full history transfer (new device side) and tombstones ──────────────────────────
+
+	const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+	/** Asks a device for the next page of history. One request is open at a time. */
+	function hxRequest(): void {
+		if (!hx || !device || !sync) return;
+		const others = [hx.from, ...devices.map((d) => d.address).filter((a) => a !== hx!.from)];
+		// Silent for three tries: the next device is asked (the first one may be gone).
+		const to = others[Math.floor(hxTry / 3) % others.length];
+		hxPending = { q: randomId(), at: Date.now() };
+		syncSend(to, { k: 'hxq', sid: hx.sid, q: hxPending.q, after: hx.cursor });
+	}
+
+	function hxTick(): void {
+		if (!hx) return;
+		if (!hxPending) return hxRequest();
+		if (Date.now() - hxPending.at > HX_RETRY_MS) {
+			hxTry++;
+			hxRequest();
 		}
+	}
+
+	/** Copies all history again from another device (merge only: nothing deleted comes back). */
+	function copyHistoryFrom(address: string): void {
+		if (hx) return;
+		hx = { sid: randomId(), from: address, cursor: null, done: 0, total: 0 };
+		saveHx($state.snapshot(hx));
+		hxTry = 0;
+		hxRequest();
+	}
+
+	/** Records deletes made here and tells the other devices. */
+	function rememberDeletes(items: Tomb[]): void {
+		const added = addTombs(tombs, items);
+		if (!added.length) return;
+		saveTombs([...tombs]);
+		for (let i = 0; i < added.length; i += 100) syncAll({ k: 'tomb', items: added.slice(i, i + 100) });
+	}
+
+	/** Deletes announced by another device: remembered and applied here. */
+	function applyRemoteTombs(raw: unknown): void {
+		const added = addTombs(tombs, cleanTombs(raw));
+		if (!added.length) return;
+		saveTombs([...tombs]);
+		const result = applyTombs(added, chats, contacts);
+		for (const t of added) if (t.s !== 'm') clearUnread(t.c);
+		if (active && result.goneContacts.includes(active)) active = null;
+		persist();
+	}
+
+	/** A contact that was deleted comes back when it is added again or writes after the delete. */
+	function reviveContact(address: string, ts: number): void {
+		const at = contactTombTs(tombs, address);
+		if (at && ts > at && clearContactTomb(tombs, address)) saveTombs([...tombs]);
 	}
 
 	// ── Adding a device (shown on a device that already has the account) ───────────────
@@ -706,6 +882,13 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					codeInput = '';
 					start(me);
 					syncAll({ k: 'hello', label: deviceLabel, sponsor: bundle.sponsor });
+					if (isAddress(bundle.sponsor)) {
+						// The history is copied from the device that showed the code, page by page.
+						hx = { sid: randomId(), from: bundle.sponsor, cursor: null, done: 0, total: 0 };
+						saveHx($state.snapshot(hx));
+						hxTry = 0;
+						hxRequest();
+					}
 				}, 0);
 				return true;
 			}
@@ -906,6 +1089,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		if (!reading) {
 			unread[peer] = (unread[peer] ?? 0) + 1;
 			saveUnread($state.snapshot(unread));
+		} else if (notify) {
+			// Read right here as it arrived: my other devices must not count it as unread.
+			sendRead(peer);
 		}
 		if (!notify || muted.includes(peer) || blocked.includes(peer)) return;
 		// Reading with the window in front of the user: no alert.
@@ -930,7 +1116,15 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		delete unread[peer];
 		saveUnread($state.snapshot(unread));
 		platform.notifier.close('chat-' + peer);
+		sendRead(peer);
 	});
+
+	/** Tells my other devices this chat is read up to its newest incoming message. */
+	function sendRead(peer: string): void {
+		let upTo = 0;
+		for (const x of chats[peer] ?? []) if (!x.mine && x.ts > upTo) upTo = x.ts;
+		if (upTo) syncAll({ k: 'read', peer, upTo });
+	}
 
 	async function refreshPermission(): Promise<void> {
 		notifyPerm = await platform.notifier.permission();
@@ -1256,6 +1450,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				name: typed || t('name_contact') + ' ' + address.slice(0, 6),
 				custom: typed !== ''
 			};
+			reviveContact(address, Date.now());
 			contacts.push(contact);
 			persist();
 			syncAll({ k: 'state', contacts: [contact] });
@@ -1559,6 +1754,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		if (!ok) return;
 		delete chats[address];
 		clearUnread(address);
+		rememberDeletes([{ c: address, s: 'c', ts: Date.now() }]);
 		persist();
 	}
 
@@ -1604,6 +1800,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		contacts = contacts.filter((c) => c.address !== address);
 		delete chats[address];
 		clearUnread(address);
+		rememberDeletes([{ c: address, s: 'k', ts: Date.now() }]);
 		persist();
 		if (active === address) active = null;
 	}
@@ -1627,7 +1824,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		if (!ok) return;
 		const items = [{ id: message.id, mine: message.mine }];
 		if (chats[peer] && removeMessages(chats[peer], items)) persist();
-		syncAll({ k: 'del', peer, items });
+		rememberDeletes(items.map((i) => ({ c: peer, s: 'm' as const, id: i.id, mine: i.mine, ts: Date.now() })));
 	}
 
 	async function deleteForEveryone(message: Message): Promise<void> {
@@ -1647,7 +1844,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		if (message.att) void deleteRemote($state.snapshot(message.att));
 		const items = [{ id: message.id, mine: true }];
 		if (chats[peer] && removeMessages(chats[peer], items)) persist();
-		syncAll({ k: 'del', peer, items });
+		rememberDeletes(items.map((i) => ({ c: peer, s: 'm' as const, id: i.id, mine: i.mine, ts: Date.now() })));
 	}
 
 	function startReply(message: Message): void {
@@ -1775,6 +1972,17 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	{/if}
 {/snippet}
 
+{#snippet hxBanner()}
+	{#if hx || hxFlash}
+		<div class="hx-banner" role="status" data-hx-percent={hxPercent}>
+			<p>{hx ? t('hx_progress', { n: hxPercent }) : t('hx_done')}</p>
+			<div class="hx-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={hxPercent} aria-label={t('hx_progress', { n: hxPercent })}>
+				<span style:width="{hxPercent}%"></span>
+			</div>
+		</div>
+	{/if}
+{/snippet}
+
 {#snippet notifyBanner()}
 	{#if notifyPerm === 'default' && !bannerDismissed && identity}
 		<div class="notify-banner" role="region" aria-label={t('notif_title')}>
@@ -1882,7 +2090,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			</div>
 
 			{@render globalBar(0)}
-			{#if gResults === null}{@render notifyBanner()}{/if}
+			{#if gResults === null}{@render hxBanner()}{@render notifyBanner()}{/if}
 			<ul class="contacts side-list" class:hidden={gResults !== null}>
 				{#each contacts as contact (contact.address)}
 					{@const last = chats[contact.address]?.at(-1)}
@@ -1979,7 +2187,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				<p class="notice" role="status">{notice}</p>
 			{/if}
 
-			{#if gResults === null}{@render notifyBanner()}{/if}
+			{#if gResults === null}{@render hxBanner()}{@render notifyBanner()}{/if}
 			<ul class="contacts" class:hidden={gResults !== null}>
 				{#each contacts as contact (contact.address)}
 					{@const last = chats[contact.address]?.at(-1)}
@@ -2096,6 +2304,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 										<strong>{other.label}</strong>
 										<small>{dateOf(other.added)}</small>
 									</span>
+									<button type="button" class="ibtn" data-hx-from title={t('dev_resync')} aria-label={t('dev_resync')} disabled={!!hx} onclick={() => copyHistoryFrom(other.address)}>
+										<Icon name="download" />
+									</button>
 									<button type="button" class="ibtn" title={t('dev_remove')} aria-label={t('dev_remove')} onclick={() => removeDevice(other.address)}>
 										<Icon name="trash" />
 									</button>
@@ -3168,6 +3379,32 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		border: 0.5px solid var(--line-strong);
 		border-radius: var(--radius-lg);
 		background: var(--panel);
+	}
+	.hx-banner {
+		display: grid;
+		gap: 0.4rem;
+		margin: 0 0 0.6rem;
+		padding: 0.65rem 0.75rem;
+		border: 0.5px solid var(--line-strong);
+		border-radius: var(--radius-lg);
+		background: var(--panel);
+	}
+	.hx-banner p {
+		margin: 0;
+		font-size: 0.82rem;
+		color: var(--text);
+	}
+	.hx-bar {
+		height: 4px;
+		border-radius: 2px;
+		background: var(--panel-2);
+		overflow: hidden;
+	}
+	.hx-bar span {
+		display: block;
+		height: 100%;
+		background: var(--accent);
+		transition: width 0.3s ease;
 	}
 	.notify-banner p {
 		margin: 0;

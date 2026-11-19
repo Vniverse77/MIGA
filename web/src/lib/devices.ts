@@ -9,6 +9,7 @@ import { cleanAtt } from './attach';
 import { cleanIds, cleanReply, editTime, fromBase64, identityFromSecret, isAddress, isSafetyNumber, toBase64, type Identity } from './crypto';
 import { MAX_BLOCKED, type Chats, type Contact, type Device, type Message, type Profile } from './storage';
 import { platform } from './platform';
+import type { Cursor, Tomb } from './sync';
 
 /** How long a link code stays valid. */
 export const LINK_TTL_MS = 10 * 60_000;
@@ -47,6 +48,14 @@ export type SyncMessage =
 			muted?: string[];
 	  }
 	| { k: 'history'; chats: Chats }
+	/** New device -> another device: send the next page of history after `after` (null = from the start). */
+	| { k: 'hxq'; sid: string; q: string; after: Cursor | null }
+	/** The answer: one page, the cursor to ask for next (null = that was the last page) and the total. */
+	| { k: 'hx'; sid: string; q: string; chats: Chats; next: Cursor | null; total: number }
+	/** Remembered deletes (message, conversation, contact). */
+	| { k: 'tomb'; items: Tomb[] }
+	/** This chat was read up to `upTo` (ms) on the sending device. */
+	| { k: 'read'; peer: string; upTo: number }
 	| { k: 'msg'; peer: string; message: Message; name?: string }
 	| { k: 'del'; peer: string; items: { id: string; mine: boolean }[] }
 	| { k: 'edit'; peer: string; id: string; mine: boolean; text: string; ts: number }
@@ -221,41 +230,36 @@ export function cleanMessage(value: unknown, maxText: number): Message | null {
 	};
 }
 
-/** Adds messages that are not there yet and keeps the list in time order. Returns true if it changed. */
+const DELIVERY_RANK = { delivered: 1, read: 2 } as const;
+
+/**
+ * Adds messages that are not there yet and keeps the list in time order. For a message that is
+ * already here the newer edit wins (by `edited` time) and a receipt never goes backwards.
+ * Returns true if a NEW message was added (updates to known ones are applied silently).
+ */
 export function mergeMessages(list: Message[], incoming: Message[]): boolean {
-	const known = new Set(list.map((m) => (m.mine ? 'm' : 't') + m.id));
-	let changed = false;
+	const known = new Map(list.map((m) => [(m.mine ? 'm' : 't') + m.id, m]));
+	let added = false;
 	for (const message of incoming) {
 		const key = (message.mine ? 'm' : 't') + message.id;
-		if (known.has(key)) continue;
-		known.add(key);
-		list.push(message);
-		changed = true;
-	}
-	if (changed) list.sort((a, b) => a.ts - b.ts);
-	return changed;
-}
-
-/** Splits recent history into pieces small enough for one relay message each. */
-export function historyChunks(chats: Chats, perChat = 200, maxBytes = 12_000, maxChunks = 40): Chats[] {
-	const chunks: Chats[] = [];
-	let current: Chats = {};
-	let size = 0;
-	for (const [peer, list] of Object.entries(chats)) {
-		for (const message of list.slice(-perChat)) {
-			const bytes = utf8ToBytes(JSON.stringify(message)).length + 80;
-			if (size > 0 && size + bytes > maxBytes) {
-				chunks.push(current);
-				current = {};
-				size = 0;
+		const have = known.get(key);
+		if (have) {
+			if ((message.edited ?? 0) > (have.edited ?? 0)) {
+				have.text = message.text;
+				have.edited = message.edited;
 			}
-			(current[peer] ??= []).push(message);
-			size += bytes;
+			const rank = (d?: 'delivered' | 'read') => (d ? DELIVERY_RANK[d] : 0);
+			if (have.mine && rank(message.delivery) > rank(have.delivery)) {
+				have.delivery = message.delivery;
+			}
+			continue;
 		}
+		known.set(key, message);
+		list.push(message);
+		added = true;
 	}
-	if (size > 0) chunks.push(current);
-	// Newest chunks matter most when there is too much to send.
-	return chunks.slice(-maxChunks);
+	if (added) list.sort((a, b) => a.ts - b.ts);
+	return added;
 }
 
 /** A short label such as "Android · Chrome". It is shown only on the user's own devices. */
