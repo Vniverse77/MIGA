@@ -75,6 +75,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 	import Shortcuts from './Shortcuts.svelte';
 	import MessageSheet from './MessageSheet.svelte';
 	import { swipeReply } from './swipe';
+	import { pwa, promptInstall, setUnreadBadge } from '../pwa.svelte';
 	import { closeTopLayer, onShortcutKey, shortcutsOn, type ShortcutActions } from './shortcuts.svelte';
 	import { getTheme, setTheme, type Theme } from '../theme.svelte';
 	import { getLanguage, t, type MessageKey } from '../i18n.svelte';
@@ -1325,6 +1326,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 	);
 
 	$effect(() => {
+		if (platform.target === 'web') setUnreadBadge(unreadTotal);
 		document.title = unreadTotal > 0 ? `(${unreadTotal > 99 ? '99+' : unreadTotal}) ${baseTitle}` : baseTitle;
 	});
 
@@ -2845,6 +2847,14 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 							<h2>{t('set_about')}</h2>
 							<p class="about-name"><strong>MIGA</strong> <span class="ver selectable" title={VERSION_TITLE}>{VERSION_LABEL}</span></p>
 							<p class="hint">{t('about_text')}</p>
+							{#if platform.target === 'web' && !pwa.standalone && (pwa.canInstall || pwa.ios)}
+								<div class="install-row">
+									<p class="hint">{t(pwa.canInstall ? 'install_hint' : 'install_ios')}</p>
+									{#if pwa.canInstall}
+										<button type="button" class="primary" onclick={() => void promptInstall()}><Icon name="download" size={16} />{t('install_app')}</button>
+									{/if}
+								</div>
+							{/if}
 							<div class="row about-links">
 								<button type="button" onclick={() => platform.openExternal('https://github.com/Vniverse77/MIGA')}>{t('nav_source')}</button>
 								<button type="button" onclick={() => platform.openExternal('https://forum.vniverse77.com/')}>{t('about_forum')}</button>
@@ -5378,6 +5388,22 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 	}
 	.fab {
 		display: none;
+	}
+	.install-row {
+		display: grid;
+		gap: 0.6rem;
+		justify-items: start;
+	}
+	.install-row button {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	/* Installed as an app: no links back to the website. */
+	@media (display-mode: standalone) {
+		.top .link {
+			display: none;
+		}
 	}
 	/* Touch phones: swipe-to-reply needs vertical panning left to the browser; new chat is a floating button instead of the header plus. */
 	@media (hover: none), (pointer: coarse) {
