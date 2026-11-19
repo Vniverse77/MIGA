@@ -74,6 +74,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 	import Icon, { type IconName } from './Icon.svelte';
 	import Shortcuts from './Shortcuts.svelte';
 	import MessageSheet from './MessageSheet.svelte';
+	import { swipeReply } from './swipe';
 	import { closeTopLayer, onShortcutKey, shortcutsOn, type ShortcutActions } from './shortcuts.svelte';
 	import { getTheme, setTheme, type Theme } from '../theme.svelte';
 	import { getLanguage, t, type MessageKey } from '../i18n.svelte';
@@ -1200,6 +1201,20 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 		}
 	}
 
+	let farFromBottom = $state(false);
+	/** Incoming messages that are below the visible part of the chat. */
+	const belowCount = $derived(farFromBottom ? activeMessages.filter((m) => !m.mine && !m.seen).length : 0);
+	function onMessagesScroll(): void {
+		checkSeen();
+		farFromBottom = !!scroller && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 160;
+	}
+	function jumpToLatest(): void {
+		scroller?.scrollTo({ top: scroller.scrollHeight, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+	}
+	$effect(() => {
+		void active;
+		farFromBottom = false;
+	});
 	function nearBottom(): boolean {
 		return !!scroller && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 48;
 	}
@@ -2075,6 +2090,13 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 		}
 	};
 
+	let fabHidden = $state(false);
+	let listTop = 0;
+	function onListScroll(e: Event): void {
+		const y = (e.currentTarget as HTMLElement).scrollTop;
+		if (Math.abs(y - listTop) > 6) fabHidden = y > listTop && y > 24;
+		listTop = y;
+	}
 	function openNew(): void {
 		view = 'new';
 		menuOpen = false;
@@ -2549,7 +2571,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 			</div>
 		</aside>
 		{:else}
-		<aside>
+		<aside class="list-pane" onscroll={onListScroll}>
 			<div class="profile">
 				<span class="avatar" aria-hidden="true">{initial(myName || '?')}</span>
 				<span class="who">
@@ -2619,6 +2641,11 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 					</li>
 				{/each}
 			</ul>
+			{#if contacts.length}
+				<button type="button" class="fab" class:away={fabHidden} title={t('new_conversation')} aria-label={t('new_conversation')} onclick={openNew}>
+					<Icon name="plus" size={24} />
+				</button>
+			{/if}
 		</aside>
 		{/if}
 
@@ -2985,7 +3012,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 					</div>
 				{/if}
 
-				<div class="messages" bind:this={scroller} onscroll={checkSeen}>
+				<div class="messages" bind:this={scroller} onscroll={onMessagesScroll}>
 					{#each activeMessages as message (message.mine + message.id)}
 						<div
 							class="bubble"
@@ -2997,6 +3024,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 							data-key={(message.mine ? 'm' : 't') + message.id}
 							role="group"
 							oncontextmenu={(e) => msgContext(e, message)}
+							use:swipeReply={{ onreply: () => startReply(message), haptic: () => platform.haptic?.() }}
 							onpointerdown={(e) => pressStart(e, message)}
 							onpointerup={pressEnd}
 							onpointercancel={pressEnd}
@@ -3077,6 +3105,14 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 						<div class="live-line" data-live aria-live="off">
 							<span class="live-tag">{t('live_tag')}</span>
 							<span class="live-text">{liveIn.text}</span>
+						</div>
+					{/if}
+					{#if farFromBottom}
+						<div class="jump-wrap">
+							<button type="button" class="jump" title={t('jump_latest')} aria-label={t('jump_latest')} onclick={jumpToLatest}>
+								<Icon name="chevron-down" size={22} />
+								{#if belowCount}<span class="jump-count" aria-hidden="true">{belowCount > 99 ? '99+' : belowCount}</span>{/if}
+							</button>
 						</div>
 					{/if}
 				</div>
@@ -5282,6 +5318,112 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 		}
 		.shell:not(.desktop) code {
 			font-size: var(--fs-small);
+		}
+	}
+	/* Jump to latest: a round button pinned to the bottom of the scrolling chat, with the unread count when there is one. */
+	.messages {
+		overflow-x: hidden;
+	}
+	.jump-wrap {
+		position: sticky;
+		bottom: 0.25rem;
+		align-self: flex-end;
+		height: 0;
+		overflow: visible;
+		z-index: 2;
+	}
+	.jump {
+		position: absolute;
+		right: 0;
+		bottom: 0;
+		display: grid;
+		place-items: center;
+		width: 2.75rem;
+		height: 2.75rem;
+		padding: 0;
+		border: 0.5px solid var(--line-strong);
+		border-radius: 50%;
+		background: var(--panel-2);
+		color: var(--heading);
+		cursor: pointer;
+		animation: jump-in 0.15s ease-out;
+	}
+	.jump:hover {
+		border-color: var(--accent);
+		background: var(--panel);
+	}
+	.jump:focus-visible {
+		outline: 1px solid var(--accent-2);
+		outline-offset: 2px;
+	}
+	.jump-count {
+		position: absolute;
+		top: -0.4rem;
+		right: -0.2rem;
+		min-width: 1.15rem;
+		padding: 0 0.3rem;
+		border-radius: 999px;
+		background: var(--accent);
+		color: var(--accent-ink);
+		font-size: 0.7rem;
+		font-weight: 600;
+		line-height: 1.15rem;
+		text-align: center;
+	}
+	@keyframes jump-in {
+		from {
+			opacity: 0;
+			transform: translateY(0.5rem);
+		}
+	}
+	.fab {
+		display: none;
+	}
+	/* Touch phones: swipe-to-reply needs vertical panning left to the browser; new chat is a floating button instead of the header plus. */
+	@media (hover: none), (pointer: coarse) {
+		.bubble {
+			touch-action: pan-y;
+		}
+	}
+	@media ((hover: none) or (pointer: coarse)) and (max-width: 760px) {
+		.shell:not(.desktop) .list-head .ibtn.primary {
+			display: none;
+		}
+		.shell:not(.desktop) aside.list-pane {
+			padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+		}
+		.shell:not(.desktop) .fab {
+			position: fixed;
+			right: 1rem;
+			bottom: calc(1rem + env(safe-area-inset-bottom));
+			z-index: 20;
+			display: grid;
+			place-items: center;
+			width: 3.5rem;
+			height: 3.5rem;
+			margin: 0;
+			padding: 0;
+			border: 0;
+			border-radius: 50%;
+			background: var(--accent);
+			color: var(--accent-ink);
+			cursor: pointer;
+			transition: transform 0.2s ease-out, opacity 0.2s ease-out;
+		}
+		.shell:not(.desktop) .fab:active {
+			transform: scale(0.94);
+		}
+		.shell:not(.desktop) .fab.away {
+			opacity: 0;
+			pointer-events: none;
+			transform: translateY(calc(100% + 1.5rem));
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.jump,
+		.fab {
+			animation: none;
+			transition: none;
 		}
 	}
 </style>
