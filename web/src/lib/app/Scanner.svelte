@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { t } from '../i18n.svelte';
 	import { decodeQr, parseScanned, type Scanned } from '../qr';
 
@@ -47,7 +47,11 @@
 	}
 
 	function frame(): void {
-		if (stopped || !video) return;
+		if (stopped) return;
+		if (!video || video.readyState < 2) {
+			timer = setTimeout(frame, FRAME_MS);
+			return;
+		}
 		const canvas = document.createElement('canvas');
 		const scale = Math.min(1, 800 / Math.max(video.videoWidth, 1));
 		canvas.width = Math.round(video.videoWidth * scale);
@@ -73,7 +77,7 @@
 		}
 		try {
 			const opened = await navigator.mediaDevices.getUserMedia({
-				video: { facingMode: { ideal: 'environment' } },
+				video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
 				audio: false
 			});
 			if (stopped) {
@@ -82,11 +86,11 @@
 			}
 			stream = opened;
 			camera = true;
-			await Promise.resolve();
-			if (video) {
-				video.srcObject = opened;
-				await video.play();
-			}
+			await tick();
+			if (!video) throw new Error('no video element');
+			video.srcObject = opened;
+			video.muted = true;
+			await video.play();
 			frame();
 		} catch (error) {
 			stop();
