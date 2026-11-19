@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { platform } from '../platform';
-import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
+import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './ConfirmDialog.svelte';
 	import QrCode from './QrCode.svelte';
 	import Attachment from './Attachment.svelte';
 	import Viewer from './Viewer.svelte';
@@ -236,7 +236,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	// inside the app (chat -> list, settings or safety number -> chat) and answers false only on the conversation list,
 	// where the app may close. Browser history is not used: entries made without a tap are skipped by WebView.
 	function stepBack(): boolean {
-		if (msgMenu || ctx || menuOpen || emojiOpen || gifOpen || viewer) {
+		if (confirmOpen() || msgMenu || ctx || menuOpen || emojiOpen || gifOpen || viewer) {
+			dismissConfirm();
 			viewer = null;
 			msgMenu = null;
 			ctx = null;
@@ -331,7 +332,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 
 	// Navigation layers: sheet/picker/menu (1) > settings or other sub screen (1) > open chat (1) > list. One count drives the
 	// browser history (web at phone width), the native back state (Android) and the screen transitions.
-	const overlayOpen = $derived(!!(msgMenu || ctx || menuOpen || emojiOpen || gifOpen || viewer));
+	const overlayOpen = $derived(!!(confirmOpen() || msgMenu || ctx || menuOpen || emojiOpen || gifOpen || viewer));
 	const depth = $derived((active ? 1 : 0) + (view !== 'chat' ? 1 : 0) + (view === 'settings' && phoneLayout && setPage ? 1 : 0) + (overlayOpen ? 1 : 0));
 	const screen = $derived(view !== 'chat' ? 'sub' : active ? 'chat' : 'list');
 

@@ -20,6 +20,14 @@
 		});
 	}
 
+	/** True while a dialog is open (Messenger counts it as a navigation layer so Back closes it). */
+	export const confirmOpen = (): boolean => pending !== null;
+	/** Closes the open dialog as cancelled (system Back). */
+	export function dismissConfirm(): void {
+		pending?.resolve(false, '');
+		pending = null;
+	}
+
 	/** Same dialog with a text field. Resolves the typed text, or null on cancel or Esc. */
 	export function askText(options: AskOptions & { placeholder: string }): Promise<string | null> {
 		pending?.resolve(false, '');
@@ -54,7 +62,7 @@
 			if (!opener && document.activeElement instanceof HTMLElement && document.activeElement !== document.body) {
 				opener = document.activeElement;
 			}
-			(field ?? cancelButton)?.focus();
+			(field ?? (pending.options.danger ? cancelButton : confirmButton))?.focus();
 		}
 	});
 
@@ -63,6 +71,9 @@
 		if (event.key === 'Escape') {
 			event.preventDefault();
 			close(false);
+		} else if (event.key === 'Enter' && !event.isComposing && !(event.target instanceof HTMLButtonElement)) {
+			event.preventDefault();
+			close(true);
 		} else if (event.key === 'Tab') {
 			// Keep focus inside the dialog.
 			event.preventDefault();
@@ -79,7 +90,8 @@
 {#if pending}
 	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 	<div class="backdrop" onclick={(e) => e.target === e.currentTarget && close(false)}>
-		<div class="panel" class:desktop={platform.target === 'desktop'} role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+		<div class="panel" class:danger={pending.options.danger} class:desktop={platform.target === 'desktop'} role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+			<span class="grip"></span>
 			<h2 id="confirm-title">{pending.options.title ?? t('confirm_title')}</h2>
 			<p id="confirm-body">{pending.options.body}</p>
 			{#if pending.options.placeholder !== undefined}
@@ -116,13 +128,15 @@
 		display: grid;
 		place-items: center;
 		padding: 1rem;
-		background: color-mix(in srgb, var(--bg) 70%, transparent);
+		background: rgba(0, 0, 0, 0.5);
+		animation: fade 0.15s ease-out;
 	}
 	.panel {
 		display: grid;
 		gap: 0.8rem;
 		width: 100%;
-		max-width: 26rem;
+		max-width: 28rem;
+		min-width: min(25rem, 100%);
 		padding: 1.25rem;
 		border: 0.5px solid var(--line-strong);
 		border-radius: var(--radius-lg);
@@ -189,13 +203,17 @@
 		border-color: var(--danger);
 		color: var(--danger);
 	}
-	button.danger:hover {
+	button.danger:hover,
+	.panel.danger button.danger {
 		background: var(--danger);
 		color: var(--bg);
 	}
+	.grip {
+		display: none;
+	}
 	.panel.desktop {
 		gap: 0.6rem;
-		max-width: 24rem;
+		max-width: 28rem;
 		padding: 1rem;
 		border-radius: var(--radius-lg);
 	}
@@ -217,6 +235,72 @@
 		height: 32px;
 		padding: 0 0.65rem;
 		border-radius: var(--radius);
+	}
+	@keyframes fade {
+		from {
+			opacity: 0;
+		}
+	}
+	@keyframes rise {
+		from {
+			transform: translateY(100%);
+		}
+	}
+	/* Touch: the same dialog as a bottom sheet (matches MessageSheet), full-width actions with the confirm on top. */
+	@media (hover: none), (pointer: coarse) {
+		.backdrop {
+			place-items: end stretch;
+			padding: 0;
+		}
+		.panel,
+		.panel.desktop {
+			gap: 0.7rem;
+			max-width: none;
+			min-width: 0;
+			padding: 0.55rem 1.1rem calc(1rem + env(safe-area-inset-bottom));
+			border-width: 0.5px 0 0;
+			border-radius: 12px 12px 0 0;
+			background: var(--panel);
+			animation: rise 0.2s ease-out;
+		}
+		.grip {
+			display: block;
+			justify-self: center;
+			width: 2rem;
+			height: 4px;
+			border-radius: 2px;
+			background: var(--line-strong);
+		}
+		.panel h2,
+		.panel.desktop h2 {
+			font-size: 1.05rem;
+		}
+		.panel p,
+		.panel.desktop p {
+			font-size: 0.9rem;
+		}
+		.actions {
+			flex-direction: column-reverse;
+			margin-top: 0.3rem;
+		}
+		.panel button,
+		.panel.desktop button {
+			width: 100%;
+			height: auto;
+			min-height: 3rem;
+			font-size: 0.95rem;
+		}
+		.panel input,
+		.panel.desktop input {
+			height: auto;
+			font-size: 16px;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.backdrop,
+		.panel {
+			animation: none !important;
+		}
 	}
 	@media (max-width: 760px) {
 		button {
