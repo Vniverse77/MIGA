@@ -13,6 +13,12 @@ export const platform: Platform = {
 	publicOrigin: () => PUBLIC_ORIGIN,
 	openExternal: (url) => void window.open(url, '_blank', 'noopener,noreferrer'),
 	setupWindow: () => {},
+	// The native shell does the tick when it can (MainActivity.kt), the Vibration API is the fallback.
+	haptic: () => {
+		const n = (window as unknown as { MigaNative?: { haptic?(): void } }).MigaNative;
+		if (n?.haptic) n.haptic();
+		else void navigator.vibrate?.(12);
+	},
 	appHistory: true,
 	setChrome: (color, light) => {
 		// MainActivity.kt registers this object; it is absent in a plain browser.

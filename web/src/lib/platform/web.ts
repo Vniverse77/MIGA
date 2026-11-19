@@ -12,5 +12,7 @@ export const platform: Platform = {
 	relayUrl: () => (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws',
 	publicOrigin: () => location.origin,
 	openExternal: (url) => void window.open(url, '_blank', 'noopener,noreferrer'),
-	setupWindow: () => {}
+	setupWindow: () => {},
+	// Chrome on Android only; other browsers have no vibration API and ignore the call.
+	haptic: () => void navigator.vibrate?.(12)
 };

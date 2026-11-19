@@ -73,6 +73,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	import Logo from '../Logo.svelte';
 	import Icon from './Icon.svelte';
 	import Shortcuts from './Shortcuts.svelte';
+	import MessageSheet from './MessageSheet.svelte';
 	import { closeTopLayer, onShortcutKey, shortcutsOn, type ShortcutActions } from './shortcuts.svelte';
 	import { getTheme, setTheme, type Theme } from '../theme.svelte';
 	import { getLanguage, t } from '../i18n.svelte';
@@ -153,8 +154,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	/** Result of the last scan on the safety number screen. */
 	let verifyResult = $state<'match' | 'mismatch' | null>(null);
 	let menuOpen = $state(false);
-	/** Action menu of one message (button, long-press). */
-	let msgMenu = $state<{ x: number; y: number; message: Message; at: number } | null>(null);
+	/** Actions of one message: a bottom sheet after a long-press on touch, a small menu at the cursor or the button for a mouse. */
+	let msgMenu = $state<{ kind: 'sheet' | 'menu'; x: number; y: number; message: Message; at: number } | null>(null);
 	let msgMenuEl = $state<HTMLElement | null>(null);
 	/** Desktop right-click menu on a conversation row. */
 	let ctx = $state<{ x: number; y: number; address: string } | null>(null);
@@ -1981,9 +1982,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		if (active === address) active = null;
 	}
 
-	function openMsgMenu(x: number, y: number, message: Message): void {
-		// Keep the menu inside the window.
-		msgMenu = { x, y, message, at: Date.now() };
+	function openMsgMenu(x: number, y: number, message: Message, kind: 'sheet' | 'menu' = 'menu'): void {
+		msgMenu = { kind, x, y, message, at: Date.now() };
+		if (kind === 'sheet') return;
 		// Clamp with the menu's real size, measured once it is on screen.
 		tick().then(() => {
 			const el = msgMenuEl;
@@ -1991,8 +1992,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			const { width, height } = el.getBoundingClientRect();
 			const vw = document.documentElement.clientWidth;
 			const vh = document.documentElement.clientHeight;
+			// Keep the menu inside the window, and open upwards when there is no room below the anchor.
 			const nx = Math.max(8, Math.min(x, vw - width - 8));
-			// Open upwards when there is no room below the anchor.
 			const ny = y + height + 8 > vh ? Math.max(8, y - height - 8) : y;
 			msgMenu = { ...msgMenu, x: nx, y: Math.max(8, Math.min(ny, vh - height - 8)) };
 			el.querySelector<HTMLElement>('button')?.focus();
@@ -2067,15 +2068,53 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		setTimeout(() => highlighted === key && (highlighted = ''), 1500);
 	}
 
-	// Phones: holding a bubble opens its action menu.
+	// Touch: holding a bubble gives a light tick and opens the action sheet. Scrolling or a drag of more than a few pixels cancels it.
 	let pressTimer: ReturnType<typeof setTimeout> | undefined;
+	let pressAt = { x: 0, y: 0 };
 	function pressStart(event: PointerEvent, message: Message): void {
 		if (event.pointerType !== 'touch') return;
 		clearTimeout(pressTimer);
-		const { clientX, clientY } = event;
-		pressTimer = setTimeout(() => openMsgMenu(clientX, clientY, message), 500);
+		pressAt = { x: event.clientX, y: event.clientY };
+		pressTimer = setTimeout(() => {
+			platform.haptic?.();
+			openMsgMenu(pressAt.x, pressAt.y, message, 'sheet');
+		}, 450);
 	}
 	const pressEnd = () => clearTimeout(pressTimer);
+	function pressMove(event: PointerEvent): void {
+		if (Math.hypot(event.clientX - pressAt.x, event.clientY - pressAt.y) > 10) pressEnd();
+	}
+
+	/** Right-click with a mouse opens the same actions at the cursor. Touch is handled by the long-press; inputs, links and selected text keep the browser's own menu. */
+	function msgContext(e: MouseEvent, message: Message): void {
+		const type = (e as PointerEvent).pointerType;
+		if (type === 'touch' || (!type && matchMedia('(pointer: coarse)').matches)) {
+			e.preventDefault();
+			return;
+		}
+		if (getSelection()?.toString() || (e.target as Element | null)?.closest?.('a, input, textarea, [contenteditable]')) return;
+		e.preventDefault();
+		openMsgMenu(e.clientX, e.clientY, message, 'menu');
+	}
+
+	async function copyMessage(message: Message): Promise<void> {
+		msgMenu = null;
+		try {
+			await navigator.clipboard.writeText(message.text);
+			notice = t('dl_copied');
+		} catch {
+			// Clipboard blocked: nothing to say, the text stays selectable on a mouse device.
+		}
+	}
+
+	/** Arrow keys move inside the open message menu. */
+	function menuKey(e: KeyboardEvent): void {
+		if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+		const items = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('button')];
+		const i = items.indexOf(document.activeElement as HTMLElement);
+		items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+		e.preventDefault();
+	}
 
 	const initial = (name: string) => [...name.trim()][0] ?? '?';
 	const shortAddress = (a: string) => a.slice(0, 8) + '…' + a.slice(-6);
@@ -2182,10 +2221,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	{#if notifyPerm === 'default' && !bannerDismissed && identity}
 		<div class="notify-banner" role="region" aria-label={t('notif_title')}>
 			<p>{t('notif_banner')}</p>
-			<div class="row">
-				<button type="button" class="primary" onclick={enableNotifications}>{t('notif_enable')}</button>
-				<button type="button" onclick={dismissBanner}>{t('notif_not_now')}</button>
-			</div>
+			<button type="button" class="primary" onclick={enableNotifications}>{t('notif_on')}</button>
+			<button type="button" class="quiet" onclick={dismissBanner}>{t('notif_not_now')}</button>
 		</div>
 	{/if}
 {/snippet}
@@ -2755,18 +2792,14 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							class:failed={message.state === 'failed'}
 							class:emoji-only={isEmojiOnly(message.text)}
 							class:flash={highlighted === (message.mine ? 'm' : 't') + message.id}
+							class:sel={msgMenu?.message.id === message.id && msgMenu.message.mine === message.mine}
 							data-key={(message.mine ? 'm' : 't') + message.id}
 							role="group"
-							oncontextmenu={(e) => {
-								// Mouse right-click opens the action menu (but keeps the browser's copy menu on a selection).
-								if ((e as unknown as PointerEvent).pointerType === 'touch' || getSelection()?.toString()) return;
-								e.preventDefault();
-								openMsgMenu(e.clientX, e.clientY, message);
-							}}
+							oncontextmenu={(e) => msgContext(e, message)}
 							onpointerdown={(e) => pressStart(e, message)}
 							onpointerup={pressEnd}
 							onpointercancel={pressEnd}
-							onpointermove={pressEnd}
+							onpointermove={pressMove}
 						>
 							{#if message.reply}
 								<button type="button" class="quote" onclick={() => message.reply && jumpTo(message.reply)}>
@@ -2795,31 +2828,25 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 										</svg>
 									</span>{:else}{stateLabel(message.state)}{/if}{/if}
 							</small>
-							<span class="acts">
-							<button
-								type="button"
-								class="reply-btn"
-								aria-label={t('reply')}
-								title={t('reply')}
-								onclick={() => startReply(message)}
-							>
-								<Icon name="reply" size={14} />
+							</div>
+						<div class="cluster" role="toolbar" aria-label={t('msg_actions')}>
+							<button type="button" aria-label={t('reply')} title={t('reply')} onclick={() => startReply(message)}>
+								<Icon name="reply" size={16} />
 							</button>
 							<button
 								type="button"
-								class="reply-btn act-btn"
+								class="act-btn"
 								aria-label={t('msg_actions')}
 								aria-haspopup="menu"
 								title={t('msg_actions')}
 								onclick={(e) => {
 									const r = e.currentTarget.getBoundingClientRect();
-									openMsgMenu(r.left, r.bottom + 4, message);
+									openMsgMenu(r.left, r.bottom + 4, message, 'menu');
 								}}
 							>
-								<Icon name="more" size={14} />
+								<Icon name="more" size={16} />
 							</button>
-							</span>
-							</div>
+						</div>
 						</div>
 					{:else}
 						{#if !uploads.some((u) => u.peer === active)}<p class="empty-box">{t('no_messages')}</p>{/if}
@@ -2974,18 +3001,38 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	</div>
 {/if}
 
-{#if msgMenu}
+{#if msgMenu?.kind === 'sheet'}
+	{@const target = msgMenu.message}
+	<MessageSheet
+		preview={previewOf(target)}
+		onclose={() => (msgMenu = null)}
+		actions={[
+			{ icon: 'reply', label: t('reply'), run: () => reply(target) },
+			...(target.text ? [{ icon: 'copy' as const, label: t('msg_copy'), run: () => void copyMessage(target) }] : []),
+			...(target.mine && target.state === 'sent' ? [{ icon: 'edit' as const, label: t('edit_msg'), run: () => startEdit(target) }] : []),
+			{ icon: 'trash', label: t('delete_msg_me'), danger: true, run: () => void deleteForMe(target) },
+			...(target.mine ? [{ icon: 'trash' as const, label: t('delete_msg_all'), danger: true, run: () => void deleteForEveryone(target) }] : [])
+		]}
+	/>
+{:else if msgMenu}
 	{@const target = msgMenu.message}
 	<div
 		class="menu ctx msg-menu"
 		role="menu"
+		tabindex="-1"
 		bind:this={msgMenuEl}
 		style:left="{msgMenu.x}px"
 		style:top="{msgMenu.y}px"
+		onkeydown={menuKey}
 	>
 		<button type="button" role="menuitem" onclick={() => reply(target)}>
 			<Icon name="reply" size={16} />{t('reply')}
 		</button>
+		{#if target.text}
+			<button type="button" role="menuitem" onclick={() => void copyMessage(target)}>
+				<Icon name="copy" size={16} />{t('msg_copy')}
+			</button>
+		{/if}
 		{#if target.mine && target.state === 'sent'}
 			<button type="button" role="menuitem" onclick={() => startEdit(target)}>
 				<Icon name="edit" size={16} />{t('edit_msg')}
@@ -3629,10 +3676,11 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		line-height: calc(1.2rem - 1px);
 	}
 	.notify-banner {
-		display: grid;
-		gap: 0.6rem;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
 		margin: 0 0 0.6rem;
-		padding: 0.75rem;
+		padding: 0.5rem 0.5rem 0.5rem 0.75rem;
 		border: 0.5px solid var(--line-strong);
 		border-radius: var(--radius-lg);
 		background: var(--panel);
@@ -3664,14 +3712,24 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		transition: width 0.3s ease;
 	}
 	.notify-banner p {
+		flex: 1;
+		min-width: 0;
 		margin: 0;
 		color: var(--text);
-		font-size: 0.82rem;
+		font-size: 0.78rem;
+		line-height: 1.35;
 	}
-	.notify-banner .row {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.4rem;
+	.notify-banner button {
+		flex: none;
+		width: auto;
+		min-height: 2.25rem;
+		padding: 0 0.7rem;
+		font-size: 0.8rem;
+	}
+	.notify-banner button.quiet {
+		border-color: transparent;
+		background: transparent;
+		color: var(--muted);
 	}
 	.verified-mark {
 		display: inline-flex;
@@ -3835,28 +3893,6 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-	}
-	.reply-btn {
-		position: absolute;
-		top: 0.2rem;
-		right: 0.3rem;
-		display: grid;
-		place-items: center;
-		min-height: 0;
-		padding: 0.25rem;
-		border: 0;
-		border-radius: var(--radius);
-		background: var(--panel);
-		color: var(--muted);
-		opacity: 0;
-		cursor: pointer;
-	}
-	.act-btn {
-		right: 1.9rem;
-	}
-	.bubble:hover .reply-btn,
-	.reply-btn:focus-visible {
-		opacity: 1;
 	}
 	.msg-menu {
 		position: fixed;
@@ -4402,10 +4438,6 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		padding: 0;
 		border-color: transparent;
 	}
-	.shell .reply-btn {
-		min-width: 2rem;
-		min-height: 2rem;
-	}
 
 	/* v0.8 consistency pass: one button, one icon size, one heading style, one spacing rhythm. */
 	.with-icon {
@@ -4448,7 +4480,6 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	/* Buttons in a row are equal in width, the last odd one spans. Same on every platform. */
 	.row,
 	.shell.desktop .row,
-	.notify-banner .row,
 	.safety-banner .row,
 	.safety .row {
 		display: grid;
@@ -4488,24 +4519,71 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		gap: 0.5rem;
 		min-height: 1.1rem;
 	}
-	.acts {
-		display: inline-flex;
-		gap: 0.1rem;
-		margin: -0.5rem -0.4rem -0.5rem 0;
+	/* Message actions. Touch has the long-press sheet; with a mouse the cluster sits just outside the bubble, never on its text. */
+	.cluster {
+		display: none;
 	}
-	.shell .bubble .reply-btn {
-		position: static;
-		min-width: 1.75rem;
-		min-height: 1.75rem;
-		padding: 0.25rem;
-		background: transparent;
+	.bubble.sel {
+		border-color: var(--accent);
 	}
-	.shell .bubble .reply-btn:hover {
-		background: var(--panel-2);
-		color: var(--heading);
+	@media (hover: hover) and (pointer: fine) {
+		.bubble {
+			max-width: min(36rem, 85%, calc(100% - 5.5rem));
+		}
+		.cluster {
+			position: absolute;
+			top: 0;
+			right: calc(100% + 0.3rem);
+			z-index: 2;
+			display: flex;
+			padding: 2px;
+			border: 0.5px solid var(--line-strong);
+			border-radius: var(--radius);
+			background: var(--panel);
+			opacity: 0;
+			pointer-events: none;
+			transition: opacity 0.12s;
+		}
+		.bubble:not(.mine) .cluster {
+			right: auto;
+			left: calc(100% + 0.3rem);
+		}
+		.bubble:hover .cluster,
+		.bubble:focus-within .cluster,
+		.bubble.sel .cluster {
+			opacity: 1;
+			pointer-events: auto;
+		}
+		.cluster button {
+			display: grid;
+			place-items: center;
+			width: 1.75rem;
+			height: 1.75rem;
+			min-height: 0;
+			padding: 0;
+			border: 0;
+			border-radius: 4px;
+			background: transparent;
+			color: var(--muted);
+			cursor: pointer;
+		}
+		.cluster button:hover,
+		.cluster button:focus-visible {
+			background: var(--panel-2);
+			color: var(--heading);
+		}
 	}
-	.bubble:focus-within .reply-btn {
-		opacity: 1;
+	/* Touch: no text selection menu fighting the long-press sheet. */
+	@media (hover: none), (pointer: coarse) {
+		.bubble {
+			-webkit-touch-callout: none;
+			-webkit-user-select: none;
+			user-select: none;
+		}
+		.bubble :global(.selectable) {
+			-webkit-user-select: none;
+			user-select: none;
+		}
 	}
 	.bubble.mine small,
 	.bubble.mine .ticks {
@@ -4564,13 +4642,6 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	.shell.desktop .composer .emoji-btn {
 		height: 32px;
 		min-height: 32px;
-	}
-	.notify-banner button {
-		width: 100%;
-	}
-	.notify-banner .row,
-	.shell.desktop .notify-banner .row {
-		grid-template-columns: minmax(0, 1fr);
 	}
 	.composer {
 		gap: 0.3rem;

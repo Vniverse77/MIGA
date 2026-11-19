@@ -48,6 +48,12 @@ class MainActivity : TauriActivity() {
 
   // Called by the page (platform/mobile.ts) whenever the app theme changes.
   inner class Chrome {
+    // A light tick for a long-press (platform.haptic). View haptics need no permission, unlike the Vibration API.
+    @JavascriptInterface
+    fun haptic() {
+      runOnUiThread { window.decorView.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK) }
+    }
+
     @JavascriptInterface
     fun setChrome(color: String, light: Boolean) {
       runOnUiThread {

@@ -44,6 +44,8 @@ export interface Platform {
 	setupWindow(): void;
 	/** Android only: tells the native shell the page colour and whether the theme is light, so the status and navigation bars match. */
 	setChrome?(color: string, light: boolean): void;
+	/** A light tick when a long-press starts a menu. Absent where the device has no way to do it. */
+	haptic?(): void;
 	/** Android only: in-app screens take part in the system history, so the Back gesture steps back inside the app. */
 	readonly appHistory?: boolean;
 }
