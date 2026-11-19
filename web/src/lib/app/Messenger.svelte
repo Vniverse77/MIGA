@@ -3129,7 +3129,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		align-items: center;
 		gap: 0.4rem;
 	}
-	.hidden {
+	.hidden,
+	.contacts.hidden {
 		display: none;
 	}
 	.searchbar,
