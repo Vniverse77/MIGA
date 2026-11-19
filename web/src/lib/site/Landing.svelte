@@ -137,6 +137,9 @@
 				<p class="note">{t('dl_android_beta')}</p>
 				<p class="note">{t('dl_android_note')}</p>
 			</article>
+			<article class="card dl dl-soon">
+				<h3>Windows <span class="soon" aria-disabled="true">{t('dl_soon')}</span></h3>
+			</article>
 		</div>
 	</section>
 
@@ -465,6 +468,25 @@
 	}
 	.dl.disabled {
 		opacity: 0.8;
+	}
+	.dl-soon {
+		pointer-events: none;
+		user-select: none;
+	}
+	.dl-soon h3 {
+		color: var(--muted);
+	}
+	.soon {
+		display: inline-block;
+		vertical-align: middle;
+		margin-left: 0.4rem;
+		padding: 0.1rem 0.5rem;
+		border: 0.5px solid var(--line-strong);
+		border-radius: var(--radius);
+		color: var(--muted);
+		font-size: 0.7rem;
+		font-weight: 500;
+		letter-spacing: 0.02em;
 	}
 
 	/* Footer */
