@@ -12,3 +12,10 @@ if ! grep -q enableOnBackInvokedCallback "$manifest"; then
   sed -i '0,/<application/s//<application android:enableOnBackInvokedCallback="true"/' "$manifest"
 fi
 echo "patched $manifest"
+# Launcher icon: adaptive icon (background + foreground + monochrome for themed icons) and legacy PNG fallbacks.
+resdir="$here/../src-tauri/gen/android/app/src/main/res"
+cp -r "$here/res/." "$resdir/"
+# the generated webp/png launcher icons would shadow ours; drop leftovers
+find "$resdir" -name 'ic_launcher*.webp' -delete
+rm -f "$resdir/drawable/ic_launcher_background.xml" "$resdir/drawable-v24/ic_launcher_foreground.xml"
+echo "patched $resdir (launcher icons)"
