@@ -71,12 +71,12 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		type Tomb
 	} from '../sync';
 	import Logo from '../Logo.svelte';
-	import Icon from './Icon.svelte';
+	import Icon, { type IconName } from './Icon.svelte';
 	import Shortcuts from './Shortcuts.svelte';
 	import MessageSheet from './MessageSheet.svelte';
 	import { closeTopLayer, onShortcutKey, shortcutsOn, type ShortcutActions } from './shortcuts.svelte';
 	import { getTheme, setTheme, type Theme } from '../theme.svelte';
-	import { getLanguage, t } from '../i18n.svelte';
+	import { getLanguage, t, type MessageKey } from '../i18n.svelte';
 	import { isEmojiOnly } from '../emoji';
 	import type { Component } from 'svelte';
 	import type { NotifyPermission } from '../platform/types';
@@ -160,6 +160,72 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	/** Desktop right-click menu on a conversation row. */
 	let ctx = $state<{ x: number; y: number; address: string } | null>(null);
 	const isDesktop = platform.target === 'desktop';
+	type SettingsPage = 'profile' | 'address' | 'appearance' | 'notifications' | 'privacy' | 'devices' | 'key' | 'about' | 'erase';
+	/** Phone layout: the settings list is one screen and each row opens a sub screen. Wide layout: list and page side by side. */
+	let setPage = $state<SettingsPage | ''>('');
+	let narrow = $state(false);
+	$effect(() => {
+		const mq = matchMedia('(max-width: 760px)');
+		narrow = mq.matches;
+		const on = (): void => void (narrow = mq.matches);
+		mq.addEventListener('change', on);
+		return () => mq.removeEventListener('change', on);
+	});
+	const phoneLayout = $derived(!isDesktop && narrow);
+	const curPage = $derived<SettingsPage | ''>(phoneLayout ? setPage : setPage || 'profile');
+	$effect(() => {
+		if (view !== 'settings') setPage = '';
+	});
+	const setGroups: { id: string; title?: MessageKey; pages: SettingsPage[] }[] = [
+		{ id: 'account', title: 'set_g_account', pages: ['profile', 'address'] },
+		{ id: 'prefs', title: 'set_g_prefs', pages: ['appearance', 'notifications', 'privacy'] },
+		{ id: 'security', title: 'set_g_security', pages: ['devices', 'key'] },
+		{ id: 'about', pages: ['about'] },
+		{ id: 'danger', pages: ['erase'] }
+	];
+	const setTitle: Record<SettingsPage, MessageKey> = {
+		profile: 'set_profile',
+		address: 'your_address',
+		appearance: 'set_theme',
+		notifications: 'notif_title',
+		privacy: 'set_privacy',
+		devices: 'set_devices',
+		key: 'set_key',
+		about: 'set_about',
+		erase: 'set_erase'
+	};
+	const setIcon: Record<SettingsPage, IconName> = {
+		profile: 'user',
+		address: 'scan',
+		appearance: 'sun',
+		notifications: 'bell',
+		privacy: 'eye',
+		devices: 'laptop',
+		key: 'key',
+		about: 'info',
+		erase: 'trash'
+	};
+	function setSummary(p: SettingsPage): string {
+		if (p === 'appearance') return t(`theme_${getTheme()}`);
+		if (p === 'notifications') return t(notifyPerm === 'granted' ? 'set_on' : 'set_off');
+		if (p === 'devices') return String(devices.length + 1);
+		return '';
+	}
+	function settingsBack(): void {
+		if (phoneLayout && setPage) setPage = '';
+		else view = 'chat';
+	}
+	/** Arrow keys move through the section list on wide layouts. */
+	function setNavKeys(e: KeyboardEvent): void {
+		if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+		const rows = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button.set-row')];
+		const i = rows.indexOf(document.activeElement as HTMLButtonElement);
+		if (i < 0) return;
+		e.preventDefault();
+		const next = rows[(i + (e.key === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length];
+		next.focus();
+		if (!phoneLayout) setPage = next.dataset.set as SettingsPage;
+	}
 	function toggleSettings(): void {
 		view = view === 'settings' ? 'chat' : 'settings';
 	}
@@ -177,6 +243,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			menuOpen = false;
 			emojiOpen = false;
 			gifOpen = false;
+			return true;
+		}
+		if (view === 'settings' && phoneLayout && setPage) {
+			setPage = '';
 			return true;
 		}
 		if (view !== 'chat') {
@@ -262,7 +332,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	// Navigation layers: sheet/picker/menu (1) > settings or other sub screen (1) > open chat (1) > list. One count drives the
 	// browser history (web at phone width), the native back state (Android) and the screen transitions.
 	const overlayOpen = $derived(!!(msgMenu || ctx || menuOpen || emojiOpen || gifOpen || viewer));
-	const depth = $derived((active ? 1 : 0) + (view !== 'chat' ? 1 : 0) + (overlayOpen ? 1 : 0));
+	const depth = $derived((active ? 1 : 0) + (view !== 'chat' ? 1 : 0) + (view === 'settings' && phoneLayout && setPage ? 1 : 0) + (overlayOpen ? 1 : 0));
 	const screen = $derived(view !== 'chat' ? 'sub' : active ? 'chat' : 'list');
 
 	// Web at phone width: every layer is a history entry, so the browser/gesture Back steps sheet > picker > chat > list and
@@ -2554,14 +2624,45 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		<main ondragover={onDragOver} ondragleave={() => (dragging = false)} ondrop={onDrop} class:dragging>
 			{#if view === 'settings'}
 				<header class="chat-head">
-					<button type="button" class="ibtn back" title={t('back')} aria-label={t('back')} onclick={() => (view = 'chat')}><Icon name="back" /></button>
-					<div class="who title"><Icon name="settings" size={18} /><strong>{t('settings')}</strong></div>
+					<button type="button" class="ibtn back" title={t('back')} aria-label={t('back')} onclick={settingsBack}><Icon name="back" /></button>
+					<div class="who title">{#if !phoneLayout}<Icon name="settings" size={18} />{/if}<strong>{phoneLayout && setPage ? t(setTitle[setPage]) : t('settings')}</strong></div>
 					<button type="button" class="ibtn close" aria-label={t('close')} title={t('close')} onclick={() => (view = 'chat')}>
 						<Icon name="close" />
 					</button>
 				</header>
 
-				<div class="settings">
+				<div class="set" class:two={!phoneLayout}>
+					{#if !phoneLayout || !setPage}
+						<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+						<nav class="set-nav" aria-label={t('settings')} onkeydown={setNavKeys}>
+							{#each setGroups as group (group.id)}
+								<div class="set-group" class:danger={group.id === 'danger'}>
+									{#if group.title}<h3 class="set-gh">{t(group.title)}</h3>{/if}
+									<div class="set-rows">
+										{#each group.pages as p (p)}
+											<button type="button" class="set-row" class:on={curPage === p} data-set={p} aria-current={curPage === p ? 'page' : undefined} onclick={() => (setPage = p)}>
+												<Icon name={setIcon[p]} size={20} />
+												<span class="set-label">{t(setTitle[p])}</span>
+												{#if setSummary(p)}<span class="set-sum">{setSummary(p)}</span>{/if}
+												<Icon name="chevron-right" size={18} />
+											</button>
+										{/each}
+									</div>
+								</div>
+							{/each}
+						</nav>
+					{/if}
+					{#if !phoneLayout || setPage}
+						{#key curPage}
+						<div class="settings set-body" data-page={curPage}>
+							{#if curPage === 'profile'}
+					<form class="card" onsubmit={saveProfileForm}>
+						<h2>{t('set_profile')}</h2>
+						{@render profileFields()}
+						<button type="submit" class="primary">{t('save')}</button>
+					</form>
+
+							{:else if curPage === 'address'}
 					<section class="card">
 						<h2>{t('your_address')}</h2>
 						<code class="selectable">{identity?.address ?? '…'}</code>
@@ -2574,12 +2675,43 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						{#if notice}<p class="notice" role="status">{notice}</p>{/if}
 					</section>
 
-					<form class="card" onsubmit={saveProfileForm}>
-						<h2>{t('set_profile')}</h2>
-						{@render profileFields()}
-						<button type="submit" class="primary">{t('save')}</button>
-					</form>
+							{:else if curPage === 'appearance'}
+					<section class="card">
+						<h2>{t('set_theme')}</h2>
+						<div class="seg" role="group" aria-label={t('set_theme')}>
+							{#each ['dark', 'light', 'system'] as const as choice (choice)}
+								<button type="button" aria-pressed={getTheme() === choice} onclick={() => setTheme(choice as Theme)}>
+									{t(`theme_${choice}`)}
+								</button>
+							{/each}
+						</div>
+					</section>
 
+					<section class="card">
+						<h2>{t('language')}</h2>
+						<div class="lang-row"><LangSelect /></div>
+					</section>
+
+							{:else if curPage === 'notifications'}
+					<section class="card">
+						<h2>{t('notif_title')}</h2>
+						<p class="hint" data-notif-state={notifyPerm}>{t(`notif_state_${notifyPerm === 'granted' ? 'on' : notifyPerm}`)}</p>
+						{#if notifyPerm === 'default'}
+							<button type="button" class="primary" onclick={enableNotifications}>{t('notif_enable')}</button>
+						{/if}
+						<h3>{t('notif_content')}</h3>
+						<div class="seg seg-wide" role="group" aria-label={t('notif_content')}>
+							{#each ['full', 'name', 'generic'] as const as mode (mode)}
+								<button type="button" aria-pressed={notifyMode === mode} onclick={() => setNotifyMode(mode)}>
+									{t(`notif_${mode}`)}
+								</button>
+							{/each}
+						</div>
+						<p class="hint">{t('notif_privacy')}</p>
+						<p class="hint">{t('notif_note')}</p>
+					</section>
+
+							{:else if curPage === 'privacy'}
 					<section class="card">
 						<h2>{t('receipts_title')}</h2>
 						<label class="check">
@@ -2606,24 +2738,26 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						<p class="hint">{t('live_note')}</p>
 					</section>
 
-					<section class="card" id="notifications">
-						<h2>{t('notif_title')}</h2>
-						<p class="hint" data-notif-state={notifyPerm}>{t(`notif_state_${notifyPerm === 'granted' ? 'on' : notifyPerm}`)}</p>
-						{#if notifyPerm === 'default'}
-							<button type="button" class="primary" onclick={enableNotifications}>{t('notif_enable')}</button>
-						{/if}
-						<h3>{t('notif_content')}</h3>
-						<div class="seg seg-wide" role="group" aria-label={t('notif_content')}>
-							{#each ['full', 'name', 'generic'] as const as mode (mode)}
-								<button type="button" aria-pressed={notifyMode === mode} onclick={() => setNotifyMode(mode)}>
-									{t(`notif_${mode}`)}
-								</button>
+					<section class="card">
+						<h2>{t('set_blocked')}</h2>
+						<ul class="devices blocked-list">
+							{#each blocked as address (address)}
+								{@const known = contacts.find((c) => c.address === address)}
+								<li>
+									<span class="who">
+										<strong>{known?.name ?? shortAddress(address)}</strong>
+										{#if known}<small>{shortAddress(address)}</small>{/if}
+									</span>
+									<button type="button" onclick={() => toggleBlock(address)}>{t('unblock')}</button>
+								</li>
+							{:else}
+								<li class="empty">{t('blocked_none')}</li>
 							{/each}
-						</div>
-						<p class="hint">{t('notif_privacy')}</p>
-						<p class="hint">{t('notif_note')}</p>
+						</ul>
+						<p class="hint">{t('blocked_help')}</p>
 					</section>
 
+							{:else if curPage === 'devices'}
 					<section class="card">
 						<h2>{t('set_devices')}</h2>
 						<ul class="devices">
@@ -2667,25 +2801,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						<p class="hint">{t('dev_hint')}</p>
 					</section>
 
-					<section class="card">
-						<h2>{t('set_blocked')}</h2>
-						<ul class="devices blocked-list">
-							{#each blocked as address (address)}
-								{@const known = contacts.find((c) => c.address === address)}
-								<li>
-									<span class="who">
-										<strong>{known?.name ?? shortAddress(address)}</strong>
-										{#if known}<small>{shortAddress(address)}</small>{/if}
-									</span>
-									<button type="button" onclick={() => toggleBlock(address)}>{t('unblock')}</button>
-								</li>
-							{:else}
-								<li class="empty">{t('blocked_none')}</li>
-							{/each}
-						</ul>
-						<p class="hint">{t('blocked_help')}</p>
-					</section>
-
+							{:else if curPage === 'key'}
 					<section class="card">
 						<h2>{t('set_key')}</h2>
 						<p class="hint">{t('set_key_help')}</p>
@@ -2693,29 +2809,10 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							<button type="button" onclick={backupKey}>{t('backup_key')}</button>
 							<button type="button" onclick={restoreKey}>{t('restore')}</button>
 						</div>
+						{#if notice}<p class="notice" role="status">{notice}</p>{/if}
 					</section>
 
-					<section class="card">
-						<h2>{t('set_theme')}</h2>
-						<div class="seg" role="group" aria-label={t('set_theme')}>
-							{#each ['dark', 'light', 'system'] as const as choice (choice)}
-								<button type="button" aria-pressed={getTheme() === choice} onclick={() => setTheme(choice as Theme)}>
-									{t(`theme_${choice}`)}
-								</button>
-							{/each}
-						</div>
-					</section>
-
-<section class="card">
-						<h2>{t('language')}</h2>
-						<div class="lang-row"><LangSelect /></div>
-					</section>
-
-					<section class="card">
-						<h2>{t('set_erase')}</h2>
-						<p class="hint">{t('set_erase_help')}</p>
-						<button type="button" class="danger" onclick={eraseThisDevice}>{t('erase')}</button>
-					</section>
+							{:else if curPage === 'about'}
 						<section class="card">
 							<h2>{t('set_about')}</h2>
 							<p class="about-name"><strong>MIGA</strong> <span class="ver selectable" title={VERSION_TITLE}>{VERSION_LABEL}</span></p>
@@ -2726,6 +2823,16 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 								<button type="button" onclick={() => platform.openExternal('https://vniverse77.com/')}>Vniverse77</button>
 							</div>
 						</section>
+							{:else if curPage === 'erase'}
+					<section class="card">
+						<h2>{t('set_erase')}</h2>
+						<p class="hint">{t('set_erase_help')}</p>
+						<button type="button" class="danger" onclick={eraseThisDevice}>{t('erase')}</button>
+					</section>
+							{/if}
+						</div>
+						{/key}
+					{/if}
 				</div>
 			{:else if view === 'new'}
 				<header class="chat-head">
@@ -3530,6 +3637,158 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	}
 	.code-input::placeholder {
 		font-weight: 400;
+	}
+
+	/* Settings v0.8.x: grouped list that opens pages (phone) or a two-column panel (wide). */
+	.set {
+		display: grid;
+		flex: 1;
+		grid-template-columns: minmax(0, 1fr);
+		min-height: 0;
+		overflow: hidden;
+	}
+	.set.two {
+		grid-template-columns: 15rem minmax(0, 1fr);
+	}
+	.set-nav {
+		display: grid;
+		align-content: start;
+		gap: 0.9rem;
+		min-height: 0;
+		padding: 1rem 0.75rem;
+		overflow-y: auto;
+	}
+	.set.two .set-nav {
+		gap: 0.5rem;
+		padding: 0.9rem 0.6rem;
+		border-right: 0.5px solid var(--line);
+		background: var(--panel);
+	}
+	.set-gh {
+		margin: 0 0 0.4rem 0.35rem;
+	}
+	.set.two .set-gh {
+		display: none;
+	}
+	.set-rows {
+		display: grid;
+		overflow: hidden;
+		border: 0.5px solid var(--line);
+		border-radius: var(--radius-lg);
+		background: var(--panel);
+	}
+	.set.two .set-rows {
+		gap: 2px;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+	}
+	.shell .set-nav button.set-row {
+		display: flex;
+		align-items: center;
+		gap: 0.85rem;
+		width: 100%;
+		min-height: 3.5rem;
+		height: auto;
+		padding: 0 1rem;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		color: var(--text);
+		font-size: var(--fs-body);
+		font-weight: 400;
+		text-align: left;
+	}
+	.shell .set:not(.two) .set-nav .set-rows > button.set-row + button.set-row {
+		border-top: 0.5px solid var(--line);
+	}
+	.set-row > :global(.icon) {
+		color: var(--muted);
+	}
+	.set-row > :global(.icon:last-child) {
+		color: var(--dim);
+		opacity: 0.7;
+	}
+	.set-label {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.set-sum {
+		color: var(--muted);
+		font-size: var(--fs-small);
+	}
+	.shell .set-nav button.set-row:hover:not(:disabled) {
+		background: var(--panel-2);
+		color: var(--text);
+	}
+	.shell .set-nav button.set-row:focus-visible {
+		outline: 2px solid var(--accent-2);
+		outline-offset: -2px;
+	}
+	.set-group.danger .set-row,
+	.set-group.danger .set-row > :global(.icon) {
+		color: var(--danger);
+	}
+	.set.two .set-nav {
+		grid-auto-rows: max-content;
+	}
+	.set.two .set-group.danger {
+		margin-top: auto;
+		padding-top: 0.5rem;
+		border-top: 0.5px solid var(--line);
+	}
+	.set.two .set-nav {
+		align-content: start;
+		grid-template-rows: none;
+	}
+	.set.two .set-group:last-child {
+		position: sticky;
+		bottom: 0;
+	}
+	.shell .set.two .set-nav button.set-row {
+		min-height: 34px;
+		padding: 0 0.7rem;
+		border-radius: var(--radius);
+		font-size: 13px;
+		gap: 0.65rem;
+	}
+	.shell .set.two .set-nav button.set-row.on {
+		background: var(--panel-2);
+		color: var(--heading);
+	}
+	.shell .set.two .set-nav button.set-row.on > :global(.icon:first-child) {
+		color: var(--accent-2);
+	}
+	.set.two .set-row > :global(.icon:last-child),
+	.set.two .set-sum {
+		display: none;
+	}
+	.set:not(.two) .set-body:not([data-page='privacy']) > :global(.card:first-child > h2) {
+		display: none;
+	}
+	.set-body {
+		min-height: 0;
+		animation: set-in 0.18s ease-out;
+	}
+	.set.two .set-body {
+		justify-items: start;
+		padding: 1.25rem 1.5rem;
+	}
+	.set.two .set-body .card {
+		max-width: 38rem;
+	}
+	@keyframes set-in {
+		from {
+			opacity: 0;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.set-body {
+			animation: none;
+		}
 	}
 
 	/* Settings */

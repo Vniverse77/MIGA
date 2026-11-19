@@ -26,7 +26,14 @@
 		| 'more-v'
 		| 'search'
 		| 'chevron-up'
-		| 'chevron-down';
+		| 'chevron-down'
+		| 'chevron-right'
+		| 'user'
+		| 'sun'
+		| 'eye'
+		| 'key'
+		| 'info'
+		| 'laptop';
 
 	let { name, size = 20 }: { name: IconName; size?: number } = $props();
 </script>
@@ -106,6 +113,26 @@
 		<path d="M6 15l6-6 6 6" />
 	{:else if name === 'chevron-down'}
 		<path d="M6 9l6 6 6-6" />
+	{:else if name === 'chevron-right'}
+		<path d="M9 6l6 6-6 6" />
+	{:else if name === 'user'}
+		<circle cx="12" cy="8" r="4" />
+		<path d="M4 20a8 8 0 0 1 16 0" />
+	{:else if name === 'sun'}
+		<circle cx="12" cy="12" r="4" />
+		<path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4" />
+	{:else if name === 'eye'}
+		<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" />
+		<circle cx="12" cy="12" r="3" />
+	{:else if name === 'key'}
+		<circle cx="8" cy="15" r="4" />
+		<path d="M11 12l9-9M16 7l3 3M14 9l2 2" />
+	{:else if name === 'info'}
+		<circle cx="12" cy="12" r="9" />
+		<path d="M12 11v5M12 8h.01" />
+	{:else if name === 'laptop'}
+		<rect x="4" y="5" width="16" height="11" rx="2" />
+		<path d="M2 19h20" />
 	{/if}
 </svg>
 
