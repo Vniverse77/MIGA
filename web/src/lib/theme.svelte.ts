@@ -15,8 +15,7 @@ function apply(): void {
 		current === 'light' ||
 		(current === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
 	const root = document.documentElement;
-	if (light) root.dataset.theme = 'light';
-	else delete root.dataset.theme;
+	root.dataset.theme = light ? 'light' : 'dark';
 	// The system bars take the header colour (--panel), so the status bar and the top bar read as one surface.
 	const color = light ? '#ffffff' : '#0d1525';
 	document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color);

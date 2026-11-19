@@ -13,10 +13,9 @@
 			// Apply the saved theme before first paint (dark unless the user chose light or system).
 			try {
 				var t = localStorage.getItem('miga.theme');
-				if (t === 'light' || (t === 'system' && matchMedia('(prefers-color-scheme: light)').matches)) {
-					document.documentElement.dataset.theme = 'light';
-					document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f0f4ff');
-				}
+				var light = t === 'light' || (t === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
+				document.documentElement.dataset.theme = light ? 'light' : 'dark';
+				document.querySelector('meta[name="theme-color"]').setAttribute('content', light ? '#ffffff' : '#0d1525');
 			} catch (e) {}
 		</script>
 		%sveltekit.head%

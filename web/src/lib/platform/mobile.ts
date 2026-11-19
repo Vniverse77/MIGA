@@ -4,6 +4,10 @@
 import { PUBLIC_ORIGIN, PUBLIC_RELAY, type Platform } from './types';
 import { webNotifier } from './webnotify';
 
+type Native = { setChrome(c: string, l: boolean): void; setBottom(c: string): void; setCanGoBack(can: boolean): void };
+// MainActivity.kt registers this object; it is absent in a plain browser.
+const native = () => (window as unknown as { MigaNative?: Native }).MigaNative;
+
 export const platform: Platform = {
 	target: 'mobile',
 	label: 'beta',
@@ -20,8 +24,9 @@ export const platform: Platform = {
 		else void navigator.vibrate?.(12);
 	},
 	appHistory: true,
+	setBottom: (color) => native()?.setBottom(color),
+	setCanGoBack: (can) => native()?.setCanGoBack(can),
 	setChrome: (color, light) => {
-		// MainActivity.kt registers this object; it is absent in a plain browser.
-		(window as unknown as { MigaNative?: { setChrome(c: string, l: boolean): void } }).MigaNative?.setChrome(color, light);
+		native()?.setChrome(color, light);
 	}
 };

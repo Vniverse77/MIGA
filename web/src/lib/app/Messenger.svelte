@@ -170,7 +170,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	// inside the app (chat -> list, settings or safety number -> chat) and answers false only on the conversation list,
 	// where the app may close. Browser history is not used: entries made without a tap are skipped by WebView.
 	function stepBack(): boolean {
-		if (msgMenu || ctx || menuOpen || emojiOpen || gifOpen) {
+		if (msgMenu || ctx || menuOpen || emojiOpen || gifOpen || viewer) {
+			viewer = null;
 			msgMenu = null;
 			ctx = null;
 			menuOpen = false;
@@ -257,6 +258,98 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	let attError = $state('');
 	let attErrorTimer: ReturnType<typeof setTimeout> | undefined;
 	let viewer = $state<{ url: string; mime: string } | null>(null);
+
+	// Navigation layers: sheet/picker/menu (1) > settings or other sub screen (1) > open chat (1) > list. One count drives the
+	// browser history (web at phone width), the native back state (Android) and the screen transitions.
+	const overlayOpen = $derived(!!(msgMenu || ctx || menuOpen || emojiOpen || gifOpen || viewer));
+	const depth = $derived((active ? 1 : 0) + (view !== 'chat' ? 1 : 0) + (overlayOpen ? 1 : 0));
+	const screen = $derived(view !== 'chat' ? 'sub' : active ? 'chat' : 'list');
+
+	// Web at phone width: every layer is a history entry, so the browser/gesture Back steps sheet > picker > chat > list and
+	// only leaves MIGA from the list. Wide windows get no entries (Back keeps leaving the page there).
+	let histDepth = 0;
+	const phoneWidth = () => matchMedia('(max-width: 760px)').matches;
+	$effect(() => {
+		if (platform.target !== 'web') return;
+		try {
+			history.replaceState({ miga: 0 }, '');
+		} catch {
+			return;
+		}
+		const onPop = (e: PopStateEvent): void => {
+			const target = (e.state as { miga?: number } | null)?.miga ?? 0;
+			histDepth = target;
+			for (let i = 0; i < 4 && depth > target && stepBack(); i++);
+			if (target > depth) {
+				// Forward into an entry that no longer matches the screen: drop back to where the screen is.
+				histDepth = depth;
+				history.go(depth - target);
+			}
+		};
+		addEventListener('popstate', onPop);
+		return () => removeEventListener('popstate', onPop);
+	});
+	$effect(() => {
+		const d = depth;
+		if (platform.target !== 'web' || (histDepth === 0 && !phoneWidth())) return;
+		if (d > histDepth) {
+			for (let i = histDepth + 1; i <= d; i++) history.pushState({ miga: i }, '');
+			histDepth = d;
+		} else if (d < histDepth) {
+			const n = histDepth - d;
+			histDepth = d;
+			history.go(-n);
+		}
+	});
+	// Android: while a layer is open the page handles Back; at the list the system does (so its back-to-home preview plays).
+	$effect(() => {
+		platform.setCanGoBack?.(depth > 0);
+	});
+
+	// Screen transitions (phone layout only, see the CSS): list <-> chat slides, everything else fades.
+	let nav = $state<'' | 'fwd' | 'back' | 'fade'>('');
+	/** Called before the DOM changes: the chat that is about to disappear leaves as a snapshot sliding to the right. */
+	function slideChatOut(): void {
+		const shell = document.querySelector('.shell:not(.desktop)');
+		const main = shell?.querySelector(':scope > main');
+		if (!shell || !main || !matchMedia('(max-width: 760px) and (prefers-reduced-motion: no-preference)').matches) return;
+		const ghost = main.cloneNode(true) as HTMLElement;
+		const from = main.querySelectorAll('*');
+		const to = ghost.querySelectorAll('*');
+		ghost.inert = true;
+		ghost.setAttribute('aria-hidden', 'true');
+		Object.assign(ghost.style, { position: 'absolute', inset: '0', zIndex: '2', background: 'var(--bg)', pointerEvents: 'none', display: 'flex' });
+		shell.appendChild(ghost);
+		from.forEach((el, i) => {
+			if (el.scrollTop) to[i].scrollTop = el.scrollTop;
+		});
+		const run = ghost.animate([{ transform: 'none' }, { transform: 'translateX(100%)' }], { duration: 250, easing: 'cubic-bezier(0.3, 0, 0, 1)', fill: 'forwards' });
+		run.onfinish = run.oncancel = () => ghost.remove();
+	}
+	let prevScreen: string | undefined;
+	let navTimer: ReturnType<typeof setTimeout> | undefined;
+	$effect.pre(() => {
+		const s = screen;
+		if (prevScreen !== undefined && s !== prevScreen && ready) {
+			nav = prevScreen === 'list' && s === 'chat' ? 'fwd' : prevScreen === 'chat' && s === 'list' ? 'back' : 'fade';
+			if (nav === 'back') slideChatOut();
+			clearTimeout(navTimer);
+			navTimer = setTimeout(() => (nav = ''), 320);
+		}
+		prevScreen = s;
+	});
+	// Android: the navigation bar takes the colour of what is at the bottom of this screen (composer panel in a chat, page elsewhere).
+	$effect(() => {
+		void screen;
+		void getTheme();
+		if (!platform.setBottom) return;
+		tick().then(() => {
+			const el = document.querySelector('.composer');
+			const bg = screen === 'chat' && el ? getComputedStyle(el).backgroundColor : getComputedStyle(document.body).backgroundColor;
+			const m = bg.match(/\d+/g);
+			if (m && m.length >= 3) platform.setBottom?.('#' + m.slice(0, 3).map((n) => Number(n).toString(16).padStart(2, '0')).join(''));
+		});
+	});
 	/** The picker is a separate chunk, fetched the first time it is opened. */
 	let EmojiPicker = $state.raw<Component<{ onpick: (emoji: string) => void }> | null>(null);
 	let GifPanel = $state.raw<Component<{ onsend: (file: File) => void; onnotice: (text: string) => void }> | null>(null);
@@ -2239,7 +2332,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	<p class="hint">{t('profile_note')}</p>
 {/snippet}
 
-<div class="shell" class:desktop={isDesktop} class:sub={view !== 'chat' && !!identity} class:chat-open={active !== null || view !== 'chat'}>
+<div class="shell" class:desktop={isDesktop} class:sub={view !== 'chat' && !!identity} class:chat-open={active !== null || view !== 'chat'} class:nav-fwd={nav === 'fwd'} class:nav-back={nav === 'back'} class:nav-fade={nav === 'fade'}>
 	{#if !isDesktop}
 	<header class="top">
 		{#if platform.target === 'web'}
@@ -4696,6 +4789,28 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		opacity: 0.4;
 	}
 
+	@keyframes nav-in-right {
+		from {
+			transform: translateX(100%);
+		}
+	}
+	@keyframes nav-in-left {
+		from {
+			transform: translateX(-24%);
+			opacity: 0.4;
+		}
+	}
+	@keyframes nav-out-left {
+		to {
+			transform: translateX(-24%);
+			opacity: 0.4;
+		}
+	}
+	@keyframes nav-fade {
+		from {
+			opacity: 0;
+		}
+	}
 	@media (max-width: 760px) {
 		.shell:not(.desktop) {
 			grid-template-columns: minmax(0, 1fr);
@@ -4804,6 +4919,36 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		.shell.chat-open:not(.desktop) aside,
 		.shell:not(.chat-open):not(.desktop) main {
 			display: none;
+		}
+		/* Screen transitions on phones: list <-> chat slide for 250ms, other screens fade. Both panes stay on screen
+		   (stacked in one grid cell) while the animation runs; reduced motion gets none. */
+		@media (prefers-reduced-motion: no-preference) {
+			.shell.nav-fwd:not(.desktop),
+			.shell.nav-back:not(.desktop) {
+				position: relative;
+				overflow: hidden;
+			}
+			.shell.nav-fwd:not(.desktop) aside,
+			.shell.nav-fwd:not(.desktop) main {
+				display: flex;
+				grid-area: 1 / 1;
+				background: var(--bg);
+			}
+			.shell.nav-fwd:not(.desktop) main {
+				z-index: 1;
+				animation: nav-in-right 250ms cubic-bezier(0.3, 0, 0, 1) both;
+			}
+			.shell.nav-fwd:not(.desktop) aside {
+				animation: nav-out-left 250ms cubic-bezier(0.3, 0, 0, 1) both;
+			}
+			/* Going back, the chat that leaves is a snapshot (see goBackGhost) sliding off over the incoming list. */
+			.shell.nav-back:not(.desktop) aside {
+				animation: nav-in-left 250ms cubic-bezier(0.3, 0, 0, 1) both;
+			}
+			.shell.nav-fade:not(.desktop) main,
+			.shell.nav-fade:not(.desktop) aside {
+				animation: nav-fade 180ms ease-out both;
+			}
 		}
 		.shell:not(.desktop) button.ibtn.ibtn.back {
 			display: inline-grid;

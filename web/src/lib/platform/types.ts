@@ -44,6 +44,10 @@ export interface Platform {
 	setupWindow(): void;
 	/** Android only: tells the native shell the page colour and whether the theme is light, so the status and navigation bars match. */
 	setChrome?(color: string, light: boolean): void;
+	/** Android only: the colour behind the bottom navigation bar for the current screen. */
+	setBottom?(color: string): void;
+	/** Android only: true while a layer is open that the page closes on Back; false at the list, where the system handles Back. */
+	setCanGoBack?(can: boolean): void;
 	/** A light tick when a long-press starts a menu. Absent where the device has no way to do it. */
 	haptic?(): void;
 	/** Android only: in-app screens take part in the system history, so the Back gesture steps back inside the app. */
