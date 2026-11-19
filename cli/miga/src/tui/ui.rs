@@ -918,7 +918,7 @@ fn confirm(f: &mut Frame, app: &App, area: Rect, title: &str, q: &str, detail: &
 
 fn draw_help(f: &mut Frame, app: &App, area: Rect, scroll: usize) {
     let t = &app.theme;
-    let w = 72.min(area.width);
+    let w = 78.min(area.width);
     let h = area.height.saturating_sub(2).min(38);
     let mut r = centered(area, w, h);
     r.y = area.y + (area.height - r.height) / 2;
@@ -959,7 +959,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect, scroll: usize) {
             ],
         ),
     ];
-    let key_w = 27usize;
+    let key_w = 33usize;
     let mut lines: Vec<Line> = Vec::new();
     for (title, actions) in sections {
         lines.push(Line::from(""));
