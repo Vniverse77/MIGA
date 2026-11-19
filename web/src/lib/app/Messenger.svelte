@@ -9,7 +9,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	import Scanner from './Scanner.svelte';
 	import { appUrl, type Scanned } from '../qr';
 	import { VERSION_LABEL, VERSION_TITLE } from '../version';
-	import { onMount, tick } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import {
 		bytesToHex,
 		applyEdit,
@@ -19,6 +19,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		encrypt,
 		encryptDelete,
 		encryptEdit,
+		encryptLive,
 		encryptReceipt,
 		MAX_TEXT,
 		MAX_DELETE,
@@ -68,6 +69,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		createIdentity,
 		eraseAll,
 		loadData,
+		loadLive,
+		saveLive,
 		loadDevice,
 		loadDevices,
 		loadIdentity,
@@ -111,6 +114,12 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	let blocked = $state<string[]>([]);
 	/** Read receipts: send mine and show theirs. Off by default (anonymity first). */
 	let receipts = $state(false);
+	/** Send what I type live (ephemeral frames). This device only, off by default. */
+	let liveOn = $state(false);
+	/** What the open chat's other side is typing right now (never stored, never a message). */
+	let liveIn = $state<{ peer: string; text: string } | null>(null);
+	let liveInTimer: ReturnType<typeof setTimeout> | undefined;
+	let composerFocused = $state(false);
 	/** Unread incoming messages per chat; persisted with the chats. Control messages never count. */
 	let unread = $state<Unread>({});
 	/** Muted chats still count unread messages but never notify. Synced to linked devices. */
@@ -262,6 +271,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 			chats = data.chats;
 			blocked = data.blocked;
 			receipts = loadReceipts();
+			liveOn = loadLive();
 			unread = data.unread;
 			muted = data.muted;
 			notifyMode = loadNotifyMode();
@@ -317,12 +327,31 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				flushAcks();
 				checkSeen();
 			},
+			onLive: (f) => {
+				// Receiving does not depend on my own setting: the sender chooses. Only the open chat shows it.
+				if (blocked.includes(f.from) || f.from !== active) return;
+				const plain = decrypt(me, f.from, f.body);
+				if (!plain || plain.live === undefined) return;
+				clearTimeout(liveInTimer);
+				if (!plain.live) {
+					liveIn = null;
+					return;
+				}
+				liveIn = { peer: f.from, text: plain.live };
+				liveInTimer = setTimeout(() => (liveIn = null), 5000);
+				void tick().then(() => {
+					const el = scroller;
+					if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight;
+				});
+			},
 			onMessage: (m) => {
 				// Blocked: acknowledged (the relay deletes it) and dropped without a trace.
 				if (blocked.includes(m.from)) return true;
 				const plain = decrypt(me, m.from, m.body);
 				// Anything we cannot open is acknowledged too, so it does not clog the queue.
 				if (!plain) return true;
+				// Live typing is ephemeral; one that still came as a normal message (old relay) is dropped.
+				if (plain.live !== undefined) return true;
 				// A delete request: only messages that came from this very sender can go.
 				if (plain.del) {
 					const items = plain.del.map((id) => ({ id, mine: false }));
@@ -350,6 +379,11 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					// Like Signal: with read receipts off I do not show anyone else's either.
 					if (plain.seen && receipts) applyStatus(m.from, plain.seen, 'read', true);
 					return true;
+				}
+				// The real message replaces the live line (control messages such as receipts do not).
+				if (liveIn?.peer === m.from) {
+					clearTimeout(liveInTimer);
+					liveIn = null;
 				}
 				// A shared name is only a label chosen by the sender; the address stays the identity.
 				ensureContact(m.from, plain.name);
@@ -784,6 +818,61 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		void view;
 		void receipts;
 		void tick().then(checkSeen);
+	});
+
+	function setLive(on: boolean): void {
+		liveOn = on;
+		saveLive(on);
+	}
+
+	// ── Live typing (sender side) ───────────────────────────────────────────────────────
+	let livePeer: string | null = null;
+	let liveLast = '';
+	let liveLatest = '';
+	let liveTimer: ReturnType<typeof setTimeout> | undefined;
+
+	function liveFlush(): void {
+		liveTimer = undefined;
+		if (!livePeer || !identity || liveLatest === liveLast) return;
+		if (relay?.sendLive(livePeer, encryptLive(identity, livePeer, liveLatest))) liveLast = liveLatest;
+	}
+
+	/** peer = null: nothing may be sent right now (setting off, no focus, other chat ...). */
+	function liveUpdate(peer: string | null, text: string): void {
+		if (livePeer && livePeer !== peer) {
+			// Chat switch, blur or setting off: clear what the other side still sees.
+			clearTimeout(liveTimer);
+			liveTimer = undefined;
+			if (liveLast && identity) relay?.sendLive(livePeer, encryptLive(identity, livePeer, ''));
+			liveLast = '';
+		}
+		livePeer = peer;
+		if (!peer) return;
+		liveLatest = text;
+		if (!text) {
+			clearTimeout(liveTimer);
+			liveTimer = undefined;
+			if (liveLast) liveFlush();
+		} else if (text !== liveLast && liveTimer === undefined) {
+			liveTimer = setTimeout(liveFlush, 300); // throttled, trailing edge
+		}
+	}
+
+	$effect(() => {
+		const peer =
+			liveOn && composerFocused && visible && view === 'chat' && !editing && active && !blocked.includes(active)
+				? active
+				: null;
+		const text = draft.slice(0, MAX_TEXT);
+		untrack(() => liveUpdate(peer, text));
+	});
+
+	// A live line belongs to the chat that is open.
+	$effect(() => {
+		if (liveIn && liveIn.peer !== active) {
+			clearTimeout(liveInTimer);
+			liveIn = null;
+		}
 	});
 
 	function setReceipts(on: boolean): void {
@@ -1786,6 +1875,19 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 						<p class="hint">{t('receipts_note')}</p>
 					</section>
 
+					<section class="card" id="live-typing">
+						<h2>{t('live_title')}</h2>
+						<label class="check">
+							<input
+								type="checkbox"
+								checked={liveOn}
+								onchange={(e) => setLive(e.currentTarget.checked)}
+							/>
+							<span>{t('live_label')}</span>
+						</label>
+						<p class="hint">{t('live_note')}</p>
+					</section>
+
 					<section class="card" id="notifications">
 						<h2>{t('notif_title')}</h2>
 						<p class="hint" data-notif-state={notifyPerm}>{t(`notif_state_${notifyPerm === 'granted' ? 'on' : notifyPerm}`)}</p>
@@ -2132,6 +2234,12 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							{#if u.caption}<p class="selectable">{u.caption}</p>{/if}
 						</div>
 					{/each}
+					{#if liveIn && liveIn.peer === active}
+						<div class="live-line" data-live aria-live="off">
+							<span class="live-tag">{t('live_tag')}</span>
+							<span class="live-text">{liveIn.text}</span>
+						</div>
+					{/if}
 				</div>
 
 				{#if replyTo}
@@ -2183,7 +2291,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 							<path d="M9 9.5h.01M15 9.5h.01" />
 						</svg>
 					</button>
-					<input bind:this={composerInput} bind:value={draft} onpaste={onPaste} placeholder={t('ph_message')} autocomplete="off" maxlength={MAX_TEXT} />
+					<input bind:this={composerInput} bind:value={draft} onfocus={() => (composerFocused = true)} onblur={() => (composerFocused = false)} onpaste={onPaste} placeholder={t('ph_message')} autocomplete="off" maxlength={MAX_TEXT} />
 					<button
 						type="submit"
 						class="ibtn primary send-btn"
@@ -2891,6 +2999,25 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		min-height: 0;
 		padding: 1.25rem;
 		overflow-y: auto;
+	}
+	.live-line {
+		align-self: flex-start;
+		max-width: min(36rem, 85%);
+		padding: 0.2rem 0.2rem 0.2rem 0.6rem;
+		border-left: 2px solid var(--line);
+		color: var(--dim);
+		font-size: 0.9rem;
+		font-style: italic;
+		overflow-wrap: anywhere;
+		white-space: pre-wrap;
+	}
+	.live-tag {
+		display: block;
+		font-size: 0.68rem;
+		font-style: normal;
+		letter-spacing: 0.02em;
+		text-transform: uppercase;
+		opacity: 0.8;
 	}
 	.bubble {
 		align-self: flex-start;

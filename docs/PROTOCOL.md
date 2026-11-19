@@ -59,6 +59,8 @@ JSON text frames over one WebSocket at `/ws`. Field `t` is the frame type.
 | relay → client | `{"t":"sent","id":"<id>"}` | relay stored the message |
 | relay → client | `{"t":"msg","from":"<addr>","id":"<id>","body":"<base64>","ts":<unix ms>}` | delivery |
 | client → relay | `{"t":"ack","from":"<addr>","id":"<id>"}` | recipient has it; relay deletes its copy |
+| client → relay | `{"t":"send","to":"<addr>","eph":true,"body":"<base64>"}` | ephemeral frame (live typing): no `id`, no `sent` reply, never stored; see [Live typing](#live-typing) |
+| relay → client | `{"t":"msg","from":"<addr>","eph":true,"body":"<base64>","ts":<unix ms>}` | ephemeral delivery; do not acknowledge |
 | client → relay | `{"t":"unsend","to":"<addr>","id":"<id>"}` | sender takes back a message that is still queued |
 | relay → client | `{"t":"unsent","id":"<id>","found":true\|false}` | `found` is false if it was already delivered, acknowledged or never existed |
 | client → relay | `{"t":"ping"}` → `{"t":"pong"}` | keep-alive (send at least every 60 s) |
@@ -73,6 +75,8 @@ Rules enforced by the relay:
 - A message stays stored until the recipient acknowledges it or 30 days pass.
 - At most 1 000 undelivered messages are kept per recipient.
 - At most 30 `send` frames per 10 seconds per connection.
+- Ephemeral frames (`eph: true`) have their own budget of 10 per second per connection; frames over
+  it are dropped silently. They do not count against the `send` limit above.
 - A connection that sends nothing for 90 seconds is closed.
 
 Clients must de-duplicate deliveries by `(from, id)`: a message is re-sent on every
@@ -225,6 +229,32 @@ acknowledge it to the relay); they keep showing the old text. Receiving rules:
   sync message. Only messages in state `sent` can be edited, and only while connected to the
   relay (like deleting for everyone).
 
+## Live typing
+
+Optional, off by default (setting "Show what I type live", per device). While it is on, the
+composer has focus and the chat is open, the sender transmits what is in the message box:
+
+- `{"v":0,"ts":<ms>,"live":{"text":"<current draft>"}}`, at most 4000 characters, throttled to
+  one frame per ~300 ms (trailing edge). `{"live":{"text":""}}` is sent when the draft is empty
+  (sent, cleared), on blur, on chat switch, when the app is hidden and when the setting is turned off.
+- There is no top-level `text`, so v0.5.0 clients drop it like any other control message.
+- It travels as an **ephemeral frame**: `{"t":"send","to":"<addr>","eph":true,"body":"..."}`.
+  The relay cannot read the payload, so the flag is on the outer frame. The relay forwards it
+  as `{"t":"msg","from":...,"eph":true,...}` only to devices of the recipient that are connected
+  at that moment; otherwise it is dropped. It is never written to the queue or the database, never
+  gets a `sent` reply or an error, and is limited to 10 per second per connection (separate from
+  the `send` limit).
+- Receiver: shows one dim, italic "typing live" line under the messages of that chat, updated in
+  place. It is cleared by an empty live text, by the real message from that sender, when the chat
+  is closed, or after 5 seconds without updates. It is never a bubble, never unread, never a
+  notification, never acknowledged, never stored and never synced to the receiver's other devices.
+  Live frames from blocked contacts are ignored. Receiving does not depend on the receiver's own
+  setting: the sender decides whether to send.
+- Old relays: a relay without `eph` support rejects the id-less `send` with `bad_frame` (nothing is
+  queued); the client then stops sending live text until it reconnects. Such a relay still counts
+  the rejected frames against its `send` limit, so update the relay before using the feature.
+  A live payload that reaches a client as a normal queued message is dropped.
+
 ## Attachments (photos, GIFs, video)
 
 Files never travel inside the relay's message queue. The sender encrypts the file, uploads the
@@ -323,4 +353,4 @@ until it is dismissed or the contact is verified again.
 ## What the relay can see
 
 Sender address, recipient address, time, approximate size, and the IP addresses of both
-sides. For attachments: the size and upload time of an opaque blob, and the IP that fetched it. It cannot read message content. Hiding this metadata is future work.
+sides. For attachments: the size and upload time of an opaque blob, and the IP that fetched it. Live typing frames add timing only: the relay sees that an ephemeral frame passed, not its content, and keeps nothing. It cannot read message content. Hiding this metadata is future work.

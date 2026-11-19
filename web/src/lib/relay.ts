@@ -4,6 +4,7 @@ import { signAuth, type Identity } from './crypto';
 
 export type Status = 'connecting' | 'online' | 'offline';
 export type Incoming = { from: string; id: string; body: string; ts: number };
+export type LiveIncoming = { from: string; body: string };
 
 export type RelayEvents = {
 	onStatus(status: Status): void;
@@ -12,6 +13,8 @@ export type RelayEvents = {
 	/** Return true once the message is safely stored locally (it is then acknowledged). */
 	onMessage(message: Incoming): boolean;
 	onSent(id: string): void;
+	/** Ephemeral frame (live typing). Never acknowledged, never stored. */
+	onLive?(frame: LiveIncoming): void;
 	onError(code: string, id?: string): void;
 };
 
@@ -24,6 +27,9 @@ export class RelayClient {
 	private closed = false;
 	private backoff = 1000;
 	private pingTimer: ReturnType<typeof setInterval> | undefined;
+	/** Set when an old relay refused an ephemeral frame (it does not know `eph`). */
+	private ephUnsupported = false;
+	private lastLiveAt = 0;
 	private retryTimer: ReturnType<typeof setTimeout> | undefined;
 
 	constructor(
@@ -74,6 +80,17 @@ export class RelayClient {
 	}
 
 	/**
+	 * Ephemeral frame: delivered only to devices of `to` that are online right now, never queued.
+	 * Fire and forget; false when offline or when the relay is too old to know `eph`.
+	 */
+	sendLive(to: string, body: string): boolean {
+		if (!this.ready || !this.ws || this.ephUnsupported) return false;
+		this.lastLiveAt = Date.now();
+		this.ws.send(JSON.stringify({ t: 'send', to, eph: true, body }));
+		return true;
+	}
+
+	/**
 	 * Asks the relay to drop a message of ours that is still waiting for `to`. Fire and forget:
 	 * a relay that does not know the frame answers `bad_frame`, which the caller ignores.
 	 */
@@ -94,12 +111,17 @@ export class RelayClient {
 				break;
 			case 'ready':
 				this.ready = true;
+				this.ephUnsupported = false;
 				this.backoff = 1000;
 				this.pingTimer = setInterval(() => ws.send('{"t":"ping"}'), PING_MS);
 				this.events.onStatus('online');
 				this.events.onReady();
 				break;
 			case 'msg': {
+				if (frame.eph === true) {
+					this.events.onLive?.({ from: String(frame.from), body: String(frame.body) });
+					break;
+				}
 				const message: Incoming = {
 					from: String(frame.from),
 					id: String(frame.id),
@@ -115,6 +137,10 @@ export class RelayClient {
 				this.events.onSent(String(frame.id));
 				break;
 			case 'error':
+				// A relay without `eph` support rejects the frame (no id); stop sending live text.
+				if (frame.err === 'bad_frame' && typeof frame.id !== 'string' && Date.now() - this.lastLiveAt < 1500) {
+					this.ephUnsupported = true;
+				}
 				this.events.onError(
 					String(frame.err),
 					typeof frame.id === 'string' ? frame.id : undefined

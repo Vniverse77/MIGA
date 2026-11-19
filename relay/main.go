@@ -33,6 +33,7 @@ const (
 	writeTimeout  = 5 * time.Second
 	rateWindow    = 10 * time.Second
 	rateLimit     = 30
+	ephLimit      = 10 // ephemeral frames per connection per second
 )
 
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -49,6 +50,9 @@ type frame struct {
 	TS    int64  `json:"ts,omitempty"`
 	Err   string `json:"err,omitempty"`
 	Found *bool  `json:"found,omitempty"`
+	// Eph marks an ephemeral frame (live typing): forwarded only to devices that are online right
+	// now, never queued or stored, never acknowledged.
+	Eph bool `json:"eph,omitempty"`
 }
 
 type server struct {
@@ -183,6 +187,7 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	windowStart, sent := time.Now(), 0
+	ephStart, ephSent := time.Now(), 0
 	for {
 		var f frame
 		if read(ctx, c, &f, idleTimeout) != nil {
@@ -209,6 +214,17 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 				s.unsend(c, me, f)
 			}
 		case "send":
+			if f.Eph {
+				// Separate, per-second budget so live typing cannot use up the message limit.
+				if now := time.Now(); now.Sub(ephStart) > time.Second {
+					ephStart, ephSent = now, 0
+				}
+				ephSent++
+				if ephSent <= ephLimit && isAddr(f.To) && f.Body != "" && len(f.Body) <= maxBody {
+					s.forwardEphemeral(me, f)
+				}
+				continue // silent: no "sent", no errors, nothing stored
+			}
 			if now := time.Now(); now.Sub(windowStart) > rateWindow {
 				windowStart, sent = now, 0
 			}
@@ -258,6 +274,16 @@ func (s *server) accept(c *websocket.Conn, from string, f frame) {
 		go send(rc, out)
 	}
 	s.mu.RUnlock()
+}
+
+// forwardEphemeral pushes a frame to the recipient's connected devices and forgets it.
+func (s *server) forwardEphemeral(from string, f frame) {
+	out := frame{T: "msg", From: from, Body: f.Body, TS: time.Now().UnixMilli(), Eph: true}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for rc := range s.clients[f.To] {
+		go send(rc, out)
+	}
 }
 
 // unsend deletes a message that is still queued. Only its original sender can do that:

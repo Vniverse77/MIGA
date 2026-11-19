@@ -33,6 +33,8 @@ export type Plain = {
 	edit?: Edit;
 	/** Attachment (photo, GIF, video). `text` is then the caption, possibly empty. */
 	att?: Att;
+	/** Live typing (ephemeral, no bubble): the sender's unfinished text; empty = cleared. */
+	live?: string;
 };
 /**
  * Shown by clients that predate attachments (v0.5.0 needs a string `text` or it drops the message).
@@ -209,6 +211,14 @@ export function encryptReceipt(
 	return seal(id, peer, JSON.stringify({ v: 0, ts: Date.now(), [kind]: cleanIds(ids) }));
 }
 
+/**
+ * Live typing control message: the sender's current unfinished text (empty = cleared). Sent as an
+ * ephemeral relay frame only. No top-level `text`, so v0.5.0 clients drop it.
+ */
+export function encryptLive(id: Identity, peer: string, text: string): string {
+	return seal(id, peer, JSON.stringify({ v: 0, ts: Date.now(), live: { text: text.slice(0, MAX_TEXT) } }));
+}
+
 function seal(id: Identity, peer: string, plaintext: string): string {
 	const json = utf8ToBytes(plaintext);
 	const padded = new Uint8Array(Math.ceil(json.length / PAD) * PAD).fill(0x20);
@@ -236,6 +246,9 @@ export function decrypt(id: Identity, peer: string, body: string): Plain | null 
 			if (del.length) return { text: '', ts, del };
 			const edit = cleanEdit(parsed.edit);
 			if (edit) return { text: '', ts, edit };
+			if (typeof parsed.live?.text === 'string') {
+				return { text: '', ts, live: parsed.live.text.slice(0, MAX_TEXT) };
+			}
 			const ack = cleanIds(parsed.ack);
 			const seen = cleanIds(parsed.seen);
 			return ack.length || seen.length

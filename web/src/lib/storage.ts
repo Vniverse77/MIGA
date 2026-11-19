@@ -53,6 +53,7 @@ const KEY_DEVICES = 'miga.devices';
 const KEY_LINK = 'miga.link';
 const KEY_BLOCKED = 'miga.blocked';
 const KEY_RECEIPTS = 'miga.receipts';
+const KEY_LIVE = 'miga.live';
 const KEY_UNREAD = 'miga.unread';
 const KEY_MUTED = 'miga.muted';
 const KEY_NOTIFY = 'miga.notify';
@@ -92,6 +93,23 @@ export function loadReceipts(): boolean {
 		return localStorage.getItem(KEY_RECEIPTS) === '1';
 	} catch {
 		return false;
+	}
+}
+
+/** Show what I type live (this device only). Off by default: the other side sees unfinished words. */
+export function loadLive(): boolean {
+	try {
+		return localStorage.getItem(KEY_LIVE) === '1';
+	} catch {
+		return false;
+	}
+}
+
+export function saveLive(on: boolean): void {
+	try {
+		localStorage.setItem(KEY_LIVE, on ? '1' : '0');
+	} catch {
+		// Ignored: the setting just does not persist.
 	}
 }
 
