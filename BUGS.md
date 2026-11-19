@@ -9,7 +9,7 @@ Open items to fix in a later release. Newest first.
 
 ## Fixed
 - **Deleted messages can come back** through a later history sync from a linked device that was offline during
-  the delete - fixed in v0.6.0 P9: deletes are kept as tombstones (90 days) and filter history, `msg` copies and
+  the delete - fixed in v0.7.0 P9: deletes are kept as tombstones (90 days) and filter history, `msg` copies and
   re-deliveries.
 - **Delete contact / delete conversation do not sync** to linked devices - fixed in P9 (tombstones sync as `tomb`).
 - **New device got only the last 200 messages per chat** - fixed in P9: full resumable history transfer with progress.
