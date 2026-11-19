@@ -170,3 +170,23 @@ func TestOrigins(t *testing.T) {
 		t.Fatalf("allowed origin preflight: %d %v", rec.Code, rec.Header())
 	}
 }
+
+func TestOriginsWithScheme(t *testing.T) {
+	b, mux := testStore(t, 1<<30)
+	b.origins = []string{"tauri://localhost", "http://tauri.localhost"}
+	for _, o := range []string{"tauri://localhost", "http://tauri.localhost"} {
+		rec := do(mux, "OPTIONS", "/blob", nil, map[string]string{"Origin": o})
+		if rec.Code != http.StatusNoContent || rec.Header().Get("Access-Control-Allow-Origin") != o {
+			t.Fatalf("preflight %s: %d %v", o, rec.Code, rec.Header())
+		}
+		rec = do(mux, "PUT", "/blob", []byte("x"), map[string]string{"Origin": o})
+		if rec.Code != http.StatusCreated || rec.Header().Get("Access-Control-Allow-Origin") != o {
+			t.Fatalf("upload %s: %d", o, rec.Code)
+		}
+	}
+	for _, o := range []string{"https://tauri.localhost", "http://localhost", "tauri://evil", "https://evil.example", "null"} {
+		if rec := do(mux, "OPTIONS", "/blob", nil, map[string]string{"Origin": o}); rec.Code != http.StatusForbidden {
+			t.Fatalf("origin %s should be refused: %d", o, rec.Code)
+		}
+	}
+}

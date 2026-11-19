@@ -98,7 +98,7 @@ func (b *blobStore) cors(next http.HandlerFunc) http.HandlerFunc {
 		h.Set("Cache-Control", "no-store")
 		if origin := r.Header.Get("Origin"); origin != "" {
 			u, err := url.Parse(origin)
-			if err != nil || !b.originAllowed(u.Host, r.Host) {
+			if err != nil || !b.originAllowed(u, r.Host) {
 				http.Error(w, "origin not allowed", http.StatusForbidden)
 				return
 			}
@@ -116,12 +116,23 @@ func (b *blobStore) cors(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func (b *blobStore) originAllowed(originHost, requestHost string) bool {
-	if strings.EqualFold(originHost, requestHost) {
+// originAllowed mirrors the WebSocket library's rules: a pattern containing "://" (such as
+// tauri://localhost or http://tauri.localhost) is matched against scheme://host, any other
+// pattern against the host only.
+func (b *blobStore) originAllowed(u *url.URL, requestHost string) bool {
+	if u.Host == "" {
+		return false
+	}
+	if strings.EqualFold(u.Host, requestHost) {
 		return true
 	}
 	for _, p := range b.origins {
-		if ok, _ := path.Match(strings.ToLower(p), strings.ToLower(originHost)); ok {
+		p = strings.TrimSpace(p)
+		target := u.Host
+		if strings.Contains(p, "://") {
+			target = u.Scheme + "://" + u.Host
+		}
+		if ok, _ := path.Match(strings.ToLower(p), strings.ToLower(target)); ok {
 			return true
 		}
 	}
