@@ -45,7 +45,10 @@
 		return groups.find((g) => g.id === tab)?.e ?? [];
 	});
 
-	onMount(() => search?.focus());
+	// No auto-focus on touch screens: the keyboard would cover the panel.
+	onMount(() => {
+		if (matchMedia("(pointer: fine)").matches) search?.focus();
+	});
 
 	function pick(emoji: string): void {
 		recent = pushRecentEmoji(emoji);
@@ -115,7 +118,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.4rem;
-		height: min(18rem, 42dvh);
+		height: min(16rem, 38dvh);
 		padding: 0.6rem 1.25rem;
 		border-top: 0.5px solid var(--line);
 		background: var(--panel);

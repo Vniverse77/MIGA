@@ -222,6 +222,17 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	let editing = $state<{ peer: string; id: string; text: string } | null>(null);
 	let emojiOpen = $state(false);
 	let gifOpen = $state(false);
+	// One picker button, one panel: the last-used tab (emoji or GIF) is remembered on this device.
+	const PICKER_KEY = 'miga.picker';
+	let pickerTab = $state<'emoji' | 'gif'>(
+		(() => {
+			try {
+				return localStorage.getItem(PICKER_KEY) === 'gif' ? 'gif' : 'emoji';
+			} catch {
+				return 'emoji';
+			}
+		})()
+	);
 	// Attachments: uploads in progress (heavy bytes live in uploadData, not in reactive state).
 	type UploadItem = {
 		key: string;
@@ -1314,36 +1325,50 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		draft = '';
 	}
 
-	async function toggleEmoji(): Promise<void> {
-		if (emojiOpen) return closeEmoji();
-		if (!EmojiPicker) {
-			try {
-				EmojiPicker = (await import('./EmojiPicker.svelte')).default;
-			} catch {
-				return;
-			}
+	/** Opens the one panel on the given tab (loads its code on first use). */
+	async function showPicker(tab: 'emoji' | 'gif'): Promise<void> {
+		if (tab === 'gif' && editing) tab = 'emoji'; // a GIF cannot replace the text of an edited message
+		try {
+			if (tab === 'emoji' && !EmojiPicker) EmojiPicker = (await import('./EmojiPicker.svelte')).default;
+			if (tab === 'gif' && !GifPanel) GifPanel = (await import('./GifPanel.svelte')).default;
+		} catch {
+			return;
 		}
-		gifOpen = false;
-		emojiOpen = true;
+		pickerTab = tab;
+		try {
+			localStorage.setItem(PICKER_KEY, tab);
+		} catch {
+			// Not remembered; the tab still works.
+		}
+		emojiOpen = tab === 'emoji';
+		gifOpen = tab === 'gif';
 	}
 
-	async function toggleGif(): Promise<void> {
-		if (gifOpen) return closeGif();
-		if (!GifPanel) {
-			try {
-				GifPanel = (await import('./GifPanel.svelte')).default;
-			} catch {
-				return;
-			}
-		}
+	function togglePicker(): Promise<void> | void {
+		if (emojiOpen || gifOpen) return closePicker();
+		return showPicker(pickerTab);
+	}
+
+	function closePicker(): void {
+		if (!emojiOpen && !gifOpen) return;
 		emojiOpen = false;
-		gifOpen = true;
+		gifOpen = false;
+		composerInput?.focus();
+	}
+
+	/** Backspace key of the panel: removes the character (or emoji) before the caret of the composer. */
+	function pickerBackspace(): void {
+		const input = composerInput;
+		const to = input?.selectionEnd ?? draft.length;
+		const from = input?.selectionStart ?? to;
+		if (!to && from === to) return;
+		const cut = from === to ? [...draft.slice(0, to)].slice(0, -1).join('').length : from;
+		draft = draft.slice(0, cut) + draft.slice(to);
+		tick().then(() => input?.setSelectionRange(cut, cut));
 	}
 
 	function closeGif(): void {
-		if (!gifOpen) return;
-		gifOpen = false;
-		composerInput?.focus();
+		closePicker();
 	}
 
 	/** One tap in the GIF panel: the file goes through the normal encrypted attachment path. */
@@ -1359,9 +1384,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	}
 
 	function closeEmoji(): void {
-		if (!emojiOpen) return;
-		emojiOpen = false;
-		composerInput?.focus();
+		closePicker();
 	}
 
 	/** Inserts at the caret (or replaces the selection) of the composer. */
@@ -1391,7 +1414,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		const el = composerInput;
 		if (!el) return;
 		el.style.height = 'auto';
-		const max = 6 * 24;
+		const max = parseFloat(getComputedStyle(el).maxHeight) || 6 * 24;
 		el.style.height = Math.min(el.scrollHeight, max) + 'px';
 		el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
 	}
@@ -2818,6 +2841,27 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 				{#if gifOpen && GifPanel && !blocked.includes(activeContact.address)}
 					<GifPanel onsend={sendGif} onnotice={showGifNotice} />
 				{/if}
+				{#if (emojiOpen || gifOpen) && !blocked.includes(activeContact.address)}
+					<div class="picker-bar" role="tablist" aria-label={t('picker_btn')}>
+						<button type="button" role="tab" class="ptab" class:on={emojiOpen} aria-selected={emojiOpen} aria-label={t('emoji_btn')} title={t('emoji_btn')} onclick={() => showPicker('emoji')}>
+							<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<circle cx="12" cy="12" r="9" />
+								<path d="M8.5 14a4 4 0 0 0 7 0" />
+								<path d="M9 9.5h.01M15 9.5h.01" />
+							</svg>
+						</button>
+						<button type="button" role="tab" class="ptab gif" class:on={gifOpen} aria-selected={gifOpen} aria-label={t('gif_btn')} title={t('gif_btn')} disabled={!!editing} onclick={() => showPicker('gif')}>GIF</button>
+						<span class="grow"></span>
+						{#if emojiOpen}
+							<button type="button" class="ptab" aria-label={t('picker_backspace')} title={t('picker_backspace')} onclick={pickerBackspace}>
+								<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<path d="M21 5H9l-6 7 6 7h12z" />
+									<path d="M13 9.5l5 5M18 9.5l-5 5" />
+								</svg>
+							</button>
+						{/if}
+					</div>
+				{/if}
 				{#if blocked.includes(activeContact.address)}
 					<div class="replybar blocked-bar">
 						<div class="quote-text"><span>{t('blocked_banner')}</span></div>
@@ -2834,31 +2878,16 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 					<button
 						type="button"
 						class="emoji-btn"
-						aria-label={t('emoji_btn')}
-						title={t('emoji_btn')}
+						aria-label={t('picker_btn')}
+						title={t('picker_btn')}
 						aria-haspopup="dialog"
-						aria-expanded={emojiOpen}
-						onclick={toggleEmoji}
+						aria-expanded={emojiOpen || gifOpen}
+						onclick={togglePicker}
 					>
 						<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 							<circle cx="12" cy="12" r="9" />
 							<path d="M8.5 14a4 4 0 0 0 7 0" />
 							<path d="M9 9.5h.01M15 9.5h.01" />
-						</svg>
-					</button>
-					<button
-						type="button"
-						class="gif-btn"
-						aria-label={t('gif_btn')}
-						title={t('gif_btn')}
-						aria-haspopup="dialog"
-						aria-expanded={gifOpen}
-						disabled={!!editing}
-						onclick={toggleGif}
-					>
-						<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<rect x="3" y="6" width="18" height="12" rx="2" />
-							<path d="M10 10.5a1.8 1.8 0 1 0 0 3v-1.2H8.8M13 10v4M15.5 14v-4h2" />
 						</svg>
 					</button>
 					<textarea class="composer-input" rows="1" bind:this={composerInput} bind:value={draft} oninput={growComposer} onkeydown={onComposerKey} onfocus={() => (composerFocused = true)} onblur={() => (composerFocused = false)} onpaste={onPaste} placeholder={t('ph_message')} enterkeyhint="send" autocomplete="off" autocapitalize="sentences" maxlength={MAX_TEXT}></textarea>
@@ -2950,8 +2979,8 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 	onkeydown={(e) => e.key === 'Escape' && onEscape()}
 	onclick={(e) => {
 		ctx = null;
-		if (emojiOpen && !(e.target as Element | null)?.closest?.('.emoji-panel, .emoji-btn')) emojiOpen = false;
-		if (gifOpen && !(e.target as Element | null)?.closest?.('.gif-panel, .gif-btn')) gifOpen = false;
+		if (emojiOpen && !(e.target as Element | null)?.closest?.('.emoji-panel, .gif-panel, .picker-bar, .emoji-btn')) emojiOpen = false;
+		if (gifOpen && !(e.target as Element | null)?.closest?.('.emoji-panel, .gif-panel, .picker-bar, .emoji-btn')) gifOpen = false;
 		// A long-press may be followed by a click on touch screens; keep the menu it just opened.
 		if (msgMenu && Date.now() - msgMenu.at > 400 && !(e.target as Element | null)?.closest?.('.act-btn')) msgMenu = null;
 		if (!(e.target as Element | null)?.closest?.('.menu-wrap')) menuOpen = false;
@@ -3812,7 +3841,6 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		padding-inline: 1.4rem;
 	}
 	.composer .emoji-btn,
-	.composer .gif-btn,
 	.composer .attach-btn {
 		flex: none;
 		display: grid;
@@ -3887,8 +3915,6 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		gap: 0.4rem;
 	}
 	.composer .emoji-btn:hover:not(:disabled),
-	.composer .gif-btn:hover:not(:disabled),
-	.composer .gif-btn[aria-expanded='true'],
 	.composer .attach-btn:hover:not(:disabled),
 	.composer .emoji-btn[aria-expanded='true'] {
 		border: 0;
@@ -4459,8 +4485,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		outline: none;
 	}
 	.shell .composer .attach-btn,
-	.shell .composer .emoji-btn,
-	.shell .composer .gif-btn {
+	.shell .composer .emoji-btn {
 		height: 2.75rem;
 		min-height: 2.75rem;
 	}
@@ -4471,8 +4496,7 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		line-height: 20px;
 	}
 	.shell.desktop .composer .attach-btn,
-	.shell.desktop .composer .emoji-btn,
-	.shell.desktop .composer .gif-btn {
+	.shell.desktop .composer .emoji-btn {
 		height: 32px;
 		min-height: 32px;
 	}
@@ -4487,12 +4511,53 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		gap: 0.3rem;
 	}
 	.shell .composer .attach-btn,
-	.shell .composer .emoji-btn,
-	.shell .composer .gif-btn {
+	.shell .composer .emoji-btn {
 		padding: 0 0.4rem;
 	}
 	.composer-input {
 		overflow-y: hidden;
+	}
+
+	/* Bottom tab bar of the emoji / GIF panel (like a phone keyboard): the active tab is a filled pill. */
+	.picker-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		padding: 0.35rem 1.25rem;
+		border-top: 0.5px solid var(--line);
+		background: var(--panel);
+	}
+	.picker-bar .grow {
+		flex: 1;
+	}
+	.picker-bar .ptab {
+		display: inline-grid;
+		place-items: center;
+		min-width: 2.75rem;
+		height: 2.25rem;
+		min-height: 2.25rem;
+		padding: 0 0.7rem;
+		border: 0;
+		border-radius: 999px;
+		background: none;
+		color: var(--muted);
+		font: inherit;
+		font-size: 0.8rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		cursor: pointer;
+	}
+	.picker-bar .ptab:hover:not(:disabled) {
+		background: var(--panel-2);
+		color: var(--heading);
+	}
+	.picker-bar .ptab.on,
+	.picker-bar .ptab.on:hover:not(:disabled) {
+		background: var(--accent);
+		color: var(--accent-ink);
+	}
+	.picker-bar .ptab:disabled {
+		opacity: 0.4;
 	}
 
 	@media (max-width: 760px) {
@@ -4539,6 +4604,48 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		.shell:not(.desktop) .lock,
 		.shell:not(.desktop) .close {
 			display: none;
+		}
+		/* Compact, phone-native composer: attach + one picker icon + pill input + round send button. */
+		.shell:not(.desktop) .composer {
+			align-items: flex-end;
+			gap: 0.15rem;
+			padding: 0.4rem 0.5rem max(0.4rem, env(safe-area-inset-bottom));
+		}
+		.shell:not(.desktop) .composer .attach-btn,
+		.shell:not(.desktop) .composer .emoji-btn {
+			width: 2.5rem;
+			height: 2.5rem;
+			min-height: 2.5rem;
+			padding: 0;
+			border-radius: 50%;
+		}
+		.shell:not(.desktop) .composer .attach-btn :global(svg),
+		.shell:not(.desktop) .composer .emoji-btn :global(svg) {
+			width: 22px;
+			height: 22px;
+		}
+		.shell:not(.desktop) .composer .composer-input {
+			min-height: 2.5rem;
+			max-height: 6.7rem;
+			padding: 0.55rem 0.95rem;
+			border-radius: 1.25rem;
+			line-height: 1.4rem;
+		}
+		.shell:not(.desktop) .composer button.send-btn.send-btn {
+			width: 2.5rem;
+			height: 2.5rem;
+			min-height: 2.5rem;
+			border-radius: 50%;
+		}
+		.shell:not(.desktop) .picker-bar {
+			padding: 0.3rem 0.5rem;
+		}
+		.shell:not(.desktop) .picker-bar .ptab {
+			min-height: 2.25rem;
+		}
+		.shell:not(.desktop) :global(.emoji-panel),
+		.shell:not(.desktop) :global(.gif-panel) {
+			padding-inline: 0.6rem;
 		}
 	}
 </style>

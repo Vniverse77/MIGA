@@ -158,7 +158,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.4rem;
-		height: min(20rem, 46dvh);
+		height: min(18rem, 40dvh);
 		padding: 0.6rem 1.25rem;
 		border-top: 0.5px solid var(--line);
 		background: var(--panel);
