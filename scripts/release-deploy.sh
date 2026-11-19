@@ -117,7 +117,7 @@ s_verify() {
   code="$(http -o /dev/null -w '%{http_code}' -X OPTIONS -H 'Origin: http://tauri.localhost' \
         -H 'Access-Control-Request-Method: PUT' "$SITE/blob")"; echo "OPTIONS /blob: $code" >>"$LOG"
   [[ "$code" == 204 ]] || { echo "FAIL OPTIONS /blob -> $code (want 204)" | tee -a "$LOG" >&2; bad=1; }
-  code="$(curl -s -m 5 -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  code="$(curl -s -m 5 --http1.1 -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
         -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
         -H 'Origin: http://tauri.localhost' "$SITE/ws" || true)"; echo "/ws: $code" >>"$LOG"
   [[ "$code" == 101 ]] || { echo "FAIL /ws -> $code (want 101)" | tee -a "$LOG" >&2; bad=1; }
