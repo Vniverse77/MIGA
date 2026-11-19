@@ -3129,6 +3129,9 @@ import ConfirmDialog, { ask, askText } from './ConfirmDialog.svelte';
 		align-items: center;
 		gap: 0.4rem;
 	}
+	.blocked-bar .quote-text span {
+		white-space: normal;
+	}
 	.hidden,
 	.contacts.hidden {
 		display: none;
