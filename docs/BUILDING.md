@@ -19,6 +19,18 @@ One code base, three targets. Each build contains only its own platform code
 3. Commit, then build again so `version.json` carries the new commit. Tag `v<version>`.
 4. Web: copy `web/build/` to the relay's static folder; check `curl https://<host>/version.json`.
 
+## Release scripts (one command each)
+```sh
+scripts/release-build.sh 0.8.0 [notes.md]    # bump everywhere, check, commit "Release v0.8.0", build all, collect
+scripts/release-deploy.sh --dry-run 0.8.0    # print what the deploy would do
+scripts/release-deploy.sh 0.8.0              # push, tag, GitHub release, VDS relay+web, live checks, AUR
+```
+`release-build.sh` needs a clean `master`; it writes `~/Projects/MIGA-release-<version>/` (`.deb`, `.flatpak`,
+`-beta_android.apk`, `sha256sums.txt`, `NOTES.md`, `aur/`) and `build.log`; the console shows only step names and OK/FAIL.
+`MIGA_SKIP="flatpak android aur"` skips steps. Android versionCode is `major*10000 + minor*100 + patch` (0.8.0 -> 800).
+`release-deploy.sh` logs to `deploy.log` in the same folder, runs one stage at a time (`--only tag,release` to resume),
+and fails loudly if a live check (version.json, `/app/` 200, `OPTIONS /blob` 204, `/ws` 101) does not pass. Run both by hand only.
+
 ## Desktop (Linux)
 Needs: Rust stable (`rustup default stable`), Node with npm, WebKitGTK 4.1 development files
 (Arch `webkit2gtk-4.1`, Debian/Ubuntu `libwebkit2gtk-4.1-dev`).
