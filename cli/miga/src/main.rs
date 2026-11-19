@@ -1,6 +1,8 @@
 //! `miga`: headless MIGA client. Subcommands: init, address, add, contacts, send, listen, log.
 #![forbid(unsafe_code)]
 
+mod tui;
+
 use clap::{Parser, Subcommand};
 use miga_client::engine::{self, Handled};
 use miga_client::relay::{Event, Relay};
@@ -23,8 +25,11 @@ struct Cli {
     /// Use a separate account stored under this name
     #[arg(long, global = true)]
     profile: Option<String>,
+    /// Config file (default: ~/.config/miga/config.toml)
+    #[arg(long, global = true)]
+    config: Option<std::path::PathBuf>,
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -74,7 +79,10 @@ fn fail(message: &str) {
 
 async fn run(cli: Cli) -> Result<()> {
     let store = Store::open(cli.profile.as_deref())?;
-    match cli.command {
+    let Some(command) = cli.command else {
+        return tui::run(store, cli.relay, cli.config).await;
+    };
+    match command {
         Command::Init { name } => {
             let id = store.create_identity(name.as_deref())?;
             println!("{}", id.address());
@@ -103,6 +111,9 @@ async fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Command::Send { .. } | Command::Listen { .. } if store.ui_running() => Err(Error::Invalid(
+            "the miga chat UI is open for this profile; use it to send and receive (sending from another process while it runs arrives with a local socket in M3)".into(),
+        )),
         Command::Send { contact, text } => send(&store, &cli.relay, &contact, text).await,
         Command::Listen { timeout, count } => listen(&store, &cli.relay, timeout, count).await,
         Command::Log { contact } => {

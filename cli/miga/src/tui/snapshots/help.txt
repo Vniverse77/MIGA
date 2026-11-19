@@ -1,0 +1,36 @@
+ MIGA              ● online  Anna  aaaa…aaaa
+  Boris  ╭ Help ────────────────────────────────────────────────────────────────╮
+  ship it│                                                                      │
+▌ Anna   │  Anywhere                                                            │
+  You: se│  Ctrl+K / Ctrl+P       Quick switcher (fuzzy search chats)           │
+  Chen We│  Ctrl+N                New chat (add by address)                     │
+  You: th│  Alt+A                 Jump to the next unread chat                  │
+  ddddddd│  Alt+↑                 Previous chat                                 │
+  No mess│  Alt+↓                 Next chat                                     │
+         │  Tab                   Next pane (list, messages, composer)          │
+         │  Ctrl+B                Back to the chat list                         │
+         │  F2                    Show your address                             │
+         │  F1 / ?                This help                                     │
+         │  Ctrl+C / Ctrl+Q / q   Quit                                          │
+         │                                                                      │
+         │  Chat list and messages                                              │
+         │  j / ↓                 Move down                                     │
+         │  k / ↑                 Move up                                       │
+         │  g                     Go to the top                                 │
+         │  G                     Go to the bottom                              │
+         │  PgUp / Ctrl+U         Scroll up one page                            │
+         │  PgDn / Ctrl+D         Scroll down one page                          │
+         │  Enter / l             Open the chat                                 │
+         │  r                     Reply to the selected message                 │
+         │  e                     Edit your selected message                    │
+         │  d                     Delete your message for everyone              │
+         │  y                     Copy the message text (OSC 52)                │maps 🗺️
+         │  o                     Open the first link in the message            │1:47 ✓✓
+         │  Enter / i / Esc       Write a message                               │
+         │                                                                      │ace
+         │  Composer                                                            │21:49 ✓
+         │  Enter                 Send                                          │
+         │  Alt+Enter / Shift+En… New line in the message                       │1:52 ✓✓
+         │  Esc close   ↑↓ scroll                                               │
+         ╰──────────────────────────────────────────────────────────────────────╯
+ Enter send   Alt+Enter newline   Ctrl+K switch   Esc messages   F1 help           v0.1.0

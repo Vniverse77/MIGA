@@ -1,0 +1,20 @@
+ ‹ Boris  bbbb…bbbb                                ● online
+
+
+
+
+
+
+
+
+
+
+
+                 ────────── Today ──────────
+
+   build is green again  22:03
+
+   ship it?  22:04
+
+ › Message Boris
+ Enter send   Alt+Enter newline   Ctrl+K switch      v0.1.0
