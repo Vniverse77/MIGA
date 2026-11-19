@@ -86,11 +86,15 @@ f_flatpak() {
   command -v flatpak-builder >/dev/null
   local sm="$HOME/.cache/miga-flatpak/shared-modules"
   [[ -d "$sm" ]] || git clone --depth 1 https://github.com/flathub/shared-modules "$sm"
-  local t; t="$(mktemp -d "${TMPDIR:-/tmp}/miga-flatpak.XXXXXX")"
-  trap 'rm -rf "$t"' EXIT
+  # build dirs must be on the same filesystem as the state dir ($ROOT/.flatpak-builder), so not /tmp
+  mkdir -p "$HOME/.cache/miga-flatpak"
+  local t; t="$(mktemp -d "$HOME/.cache/miga-flatpak/build.XXXXXX")"
   cd "$ROOT"
-  flatpak-builder --user --force-clean --repo="$t/repo" "$t/build" packaging/flatpak/com.vniverse77.miga.yml
-  flatpak build-bundle "$t/repo" "$OUT/MIGA_${V}_x86_64.flatpak" com.vniverse77.miga
+  local rc=0
+  flatpak-builder --user --force-clean --repo="$t/repo" "$t/build" packaging/flatpak/com.vniverse77.miga.yml \
+    && flatpak build-bundle "$t/repo" "$OUT/MIGA_${V}_x86_64.flatpak" com.vniverse77.miga || rc=$?
+  rm -rf "$t"
+  return $rc
 }
 
 f_android() {
@@ -105,18 +109,20 @@ f_android() {
   npx tauri android build --apk --target aarch64 --target armv7
   local u="src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk"
   local t; t="$(mktemp -d "${TMPDIR:-/tmp}/miga-apk.XXXXXX")"
-  trap 'rm -rf "$t"' EXIT
-  zipalign -f -p 4 "$u" "$t/aligned.apk"
-  apksigner sign --ks "$HOME/.android/debug.keystore" --ks-pass pass:android --key-pass pass:android \
-    --ks-key-alias androiddebugkey --out "$OUT/MIGA_${V}-beta_android.apk" "$t/aligned.apk"
-  apksigner verify --print-certs "$OUT/MIGA_${V}-beta_android.apk" | head -3
+  local rc=0
+  { zipalign -f -p 4 "$u" "$t/aligned.apk" \
+    && apksigner sign --ks "$HOME/.android/debug.keystore" --ks-pass pass:android --key-pass pass:android \
+         --ks-key-alias androiddebugkey --out "$OUT/MIGA_${V}-beta_android.apk" "$t/aligned.apk" \
+    && rm -f "$OUT/MIGA_${V}-beta_android.apk.idsig" \
+    && apksigner verify --print-certs "$OUT/MIGA_${V}-beta_android.apk" | head -3; } || rc=$?
+  rm -rf "$t"
+  return $rc
 }
 
 f_aur() {
   [[ "$V" != *-* ]] || { echo "pre-release: AUR test skipped"; return; }
   command -v makepkg >/dev/null
   local t head; t="$(mktemp -d "${TMPDIR:-/tmp}/miga-aur.XXXXXX")"
-  trap 'rm -rf "$t"' EXIT
   head="$(git -C "$ROOT" rev-parse HEAD)"
   mkdir -p "$OUT/aur"
   cp "$ROOT/packaging/aur/PKGBUILD" "$t/PKGBUILD"
@@ -124,7 +130,10 @@ f_aur() {
   cp "$ROOT/packaging/aur/PKGBUILD" "$OUT/aur/PKGBUILD"
   # test build against the local repo at the release commit (the tag does not exist yet)
   perl -pi -e "s{^source=.*}{source=(\"miga::git+file://$ROOT#commit=$head\")}" "$t/PKGBUILD"
-  (cd "$t" && makepkg -f --nodeps --skipinteg --noconfirm && ls -l ./*.pkg.tar.*)
+  local rc=0
+  (cd "$t" && makepkg -f --nodeps --skipinteg --noconfirm && ls -l ./*.pkg.tar.*) || rc=$?
+  rm -rf "$t"
+  return $rc
 }
 
 f_collect() {
