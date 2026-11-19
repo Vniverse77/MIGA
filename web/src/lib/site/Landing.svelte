@@ -6,10 +6,10 @@
 
 	const YAY = 'yay -S miga-messenger';
 	// Bundle file of the current release; update the version with every release.
-	const FLATPAK_FILE = 'MIGA_0.8.0_x86_64.flatpak';
-	const FLATPAK_URL = `https://github.com/Vniverse77/MIGA/releases/download/v0.8.0/${FLATPAK_FILE}`;
+	const FLATPAK_FILE = 'MIGA_0.8.1_x86_64.flatpak';
+	const FLATPAK_URL = `https://github.com/Vniverse77/MIGA/releases/download/v0.8.1/${FLATPAK_FILE}`;
 	// Android beta APK (sideload; Play Store build comes later)
-	const APK_URL = 'https://github.com/Vniverse77/MIGA/releases/download/v0.8.0/MIGA_0.8.0-beta_android.apk';
+	const APK_URL = 'https://github.com/Vniverse77/MIGA/releases/download/v0.8.1/MIGA_0.8.1-beta_android.apk';
 	const FLATPAK_CMD = `flatpak install --user ./${FLATPAK_FILE}`;
 	let copied = $state('');
 	async function copy(text: string) {
