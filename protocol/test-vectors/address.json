@@ -1,0 +1,251 @@
+{
+  "note": "isAddress(input): 64 lowercase hex chars AND a successful X25519 key agreement with the converted key (rejects off-curve, low-order and non-canonical encodings in the way noble does). The relay accepts ANY 64 lowercase hex address; only clients check the curve.",
+  "cases": [
+    {
+      "kind": "derived_from_seed",
+      "name": "seed_0",
+      "input": "8d443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771",
+      "valid": true
+    },
+    {
+      "kind": "derived_from_seed",
+      "name": "seed_1",
+      "input": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+      "valid": true
+    },
+    {
+      "kind": "derived_from_seed",
+      "name": "seed_2",
+      "input": "05cf84c3dd15aa1d369f020ec4466dc265cf557e940d4200e51f253e1798a3ee",
+      "valid": true
+    },
+    {
+      "kind": "derived_from_seed",
+      "name": "seed_3",
+      "input": "b85943924477dcc90e1b36aa8a4ecfa08cb6a61183758ebfd813da8cb16d2f39",
+      "valid": true
+    },
+    {
+      "kind": "derived_from_seed",
+      "name": "seed_4",
+      "input": "14a0be988bace91652b070241b8496e0677468334a3175ae8e19e0d8b8a94637",
+      "valid": true
+    },
+    {
+      "kind": "special_point",
+      "name": "identity_y1",
+      "input": "0100000000000000000000000000000000000000000000000000000000000000",
+      "valid": false
+    },
+    {
+      "kind": "special_point",
+      "name": "order2_y_minus1",
+      "input": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "valid": false
+    },
+    {
+      "kind": "special_point",
+      "name": "order4_y0",
+      "input": "0000000000000000000000000000000000000000000000000000000000000000",
+      "valid": false
+    },
+    {
+      "kind": "special_point",
+      "name": "order4_y0_sign",
+      "input": "0000000000000000000000000000000000000000000000000000000000000080",
+      "valid": false
+    },
+    {
+      "kind": "special_point",
+      "name": "order8_a",
+      "input": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+      "valid": false
+    },
+    {
+      "kind": "special_point",
+      "name": "order8_a_sign",
+      "input": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+      "valid": false
+    },
+    {
+      "kind": "special_point",
+      "name": "order8_b",
+      "input": "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+      "valid": false
+    },
+    {
+      "kind": "special_point",
+      "name": "order8_b_sign",
+      "input": "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85",
+      "valid": false
+    },
+    {
+      "kind": "special_point",
+      "name": "noncanonical_y_eq_p",
+      "input": "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "valid": false
+    },
+    {
+      "kind": "special_point",
+      "name": "noncanonical_y_eq_p_plus_1",
+      "input": "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "valid": false
+    },
+    {
+      "kind": "special_point",
+      "name": "noncanonical_y_eq_p_plus_2",
+      "input": "efffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "valid": false
+    },
+    {
+      "kind": "special_point",
+      "name": "all_ff",
+      "input": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "valid": false
+    },
+    {
+      "kind": "special_point",
+      "name": "y_2",
+      "input": "0200000000000000000000000000000000000000000000000000000000000000",
+      "valid": false
+    },
+    {
+      "kind": "special_point",
+      "name": "y_3",
+      "input": "0300000000000000000000000000000000000000000000000000000000000000",
+      "valid": true
+    },
+    {
+      "kind": "special_point",
+      "name": "y_4",
+      "input": "0400000000000000000000000000000000000000000000000000000000000000",
+      "valid": true
+    },
+    {
+      "kind": "special_point",
+      "name": "y_5",
+      "input": "0500000000000000000000000000000000000000000000000000000000000000",
+      "valid": true
+    },
+    {
+      "kind": "special_point",
+      "name": "y_6",
+      "input": "0600000000000000000000000000000000000000000000000000000000000000",
+      "valid": true
+    },
+    {
+      "kind": "random_32_bytes",
+      "name": "random_0",
+      "input": "3d0259b26779faa93ea0acd0b0a76ab07a5cbd061409dcc889b65b10015f3063",
+      "valid": true
+    },
+    {
+      "kind": "random_32_bytes",
+      "name": "random_1",
+      "input": "1683a498d2ae23724d6b1f0895d80fa0e0af976b43b402afa7959b0c7ceb75a8",
+      "valid": true
+    },
+    {
+      "kind": "random_32_bytes",
+      "name": "random_2",
+      "input": "4e950ea201de007b5b4e94186a9099e0f20681924ea969e150e9af24eb34457e",
+      "valid": true
+    },
+    {
+      "kind": "random_32_bytes",
+      "name": "random_3",
+      "input": "b9bd12297eb875a0e33375b2ea4ec910c7c25bd915854f27d8f6c7f2ac739a34",
+      "valid": true
+    },
+    {
+      "kind": "random_32_bytes",
+      "name": "random_4",
+      "input": "2f249454911811c9138c7040b7b78ce00b5b5c444eb0b22c70d6c2f54e5fe97e",
+      "valid": true
+    },
+    {
+      "kind": "random_32_bytes",
+      "name": "random_5",
+      "input": "3f87922fdb4f78c647edbe867d812f927d37b6f383f319c0accd9db01bb6579f",
+      "valid": true
+    },
+    {
+      "kind": "random_32_bytes",
+      "name": "random_6",
+      "input": "0c3fad678a327f5147ee64e0f01ed8dd679eba67d824ed86f7910e2f6eac1f37",
+      "valid": true
+    },
+    {
+      "kind": "random_32_bytes",
+      "name": "random_7",
+      "input": "a7168bca4e5dc43cc2dc5b9ef8ad5da2b852e30197f8838963087adac716bc05",
+      "valid": false
+    },
+    {
+      "kind": "text_form",
+      "name": "uppercase",
+      "input": "8D443C4E4FE2C5BF8D250B1792A5B97816BF5F3791B2F7CC01A4BAD319191771",
+      "valid": false
+    },
+    {
+      "kind": "text_form",
+      "name": "mixed_case",
+      "input": "8D443C4E4FE2C5BF8D250B1792A5B97816bf5f3791b2f7cc01a4bad319191771",
+      "valid": false
+    },
+    {
+      "kind": "text_form",
+      "name": "63_chars",
+      "input": "d443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771",
+      "valid": false
+    },
+    {
+      "kind": "text_form",
+      "name": "65_chars",
+      "input": "8d443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad3191917710",
+      "valid": false
+    },
+    {
+      "kind": "text_form",
+      "name": "empty",
+      "input": "",
+      "valid": false
+    },
+    {
+      "kind": "text_form",
+      "name": "with_0x_prefix",
+      "input": "0x443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771",
+      "valid": false
+    },
+    {
+      "kind": "text_form",
+      "name": "trailing_space",
+      "input": "8d443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771 ",
+      "valid": false
+    },
+    {
+      "kind": "text_form",
+      "name": "leading_space",
+      "input": " 8d443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771",
+      "valid": false
+    },
+    {
+      "kind": "text_form",
+      "name": "non_hex_g",
+      "input": "gd443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771",
+      "valid": false
+    },
+    {
+      "kind": "text_form",
+      "name": "newline",
+      "input": "8d443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771\n",
+      "valid": false
+    },
+    {
+      "kind": "text_form",
+      "name": "fullwidth_digits",
+      "input": "００００００００００００００００００００００００００００００００００００００００００００００００００００００００００００００００",
+      "valid": false
+    }
+  ]
+}

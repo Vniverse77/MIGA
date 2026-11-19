@@ -1,0 +1,400 @@
+{
+  "note": "File = chunks of 65536 plaintext bytes, last chunk 0..65536 (empty file = one empty chunk). Chunk i: XChaCha20-Poly1305(key, nonce_i, aad = 0x01 if last else 0x00). Ciphertext = concatenated sealed chunks. Receiver checks cipher_len == size + count*16, then SHA-256(plain) == hash. cases[].chunks come from the real encryptFile and were cross-checked with an independent implementation.",
+  "chunk_nonce_table": {
+    "note": "nonce_i = base XOR (u64 big-endian i in the LAST 8 bytes). Verified against the real module up to i = 299; entries >= 2^32 come from the reference implementation (the real helper is private and would need a 256 TiB file).",
+    "base_nonce": "3c7c2dc16d9c7e4b2a3cd467d3ff71fc3ddd098bc5b90c2c",
+    "entries": [
+      {
+        "counter": "0",
+        "nonce": "3c7c2dc16d9c7e4b2a3cd467d3ff71fc3ddd098bc5b90c2c"
+      },
+      {
+        "counter": "1",
+        "nonce": "3c7c2dc16d9c7e4b2a3cd467d3ff71fc3ddd098bc5b90c2d"
+      },
+      {
+        "counter": "255",
+        "nonce": "3c7c2dc16d9c7e4b2a3cd467d3ff71fc3ddd098bc5b90cd3"
+      },
+      {
+        "counter": "256",
+        "nonce": "3c7c2dc16d9c7e4b2a3cd467d3ff71fc3ddd098bc5b90d2c"
+      },
+      {
+        "counter": "65535",
+        "nonce": "3c7c2dc16d9c7e4b2a3cd467d3ff71fc3ddd098bc5b9f3d3"
+      },
+      {
+        "counter": "65536",
+        "nonce": "3c7c2dc16d9c7e4b2a3cd467d3ff71fc3ddd098bc5b80c2c"
+      },
+      {
+        "counter": "4294967295",
+        "nonce": "3c7c2dc16d9c7e4b2a3cd467d3ff71fc3ddd098b3a46f3d3"
+      },
+      {
+        "counter": "4294967296",
+        "nonce": "3c7c2dc16d9c7e4b2a3cd467d3ff71fc3ddd098ac5b90c2c"
+      },
+      {
+        "counter": "4294967297",
+        "nonce": "3c7c2dc16d9c7e4b2a3cd467d3ff71fc3ddd098ac5b90c2d"
+      },
+      {
+        "counter": "1099511627781",
+        "nonce": "3c7c2dc16d9c7e4b2a3cd467d3ff71fc3ddd088bc5b90c29"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "size": 0,
+      "pattern": "plain[j] = (j * 131 + 17) % 251",
+      "key": "4328e7a21ebbc9657401682b25eb230a3174547c3a9b65c154068cad4dabd7ba",
+      "base_nonce": "fb5a2e92b990b3b081d35aa12e7e38ae633b6f19772f5eda",
+      "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "cipher_len": 16,
+      "chunk_count": 1,
+      "cipher_sha256": "9117827323decb06752ffbd7212e0845126459d95e3a32a9089d2e667157ca0f",
+      "chunks": [
+        {
+          "index": 0,
+          "nonce": "fb5a2e92b990b3b081d35aa12e7e38ae633b6f19772f5eda",
+          "aad": "01",
+          "plain_len": 0,
+          "cipher_len": 16,
+          "cipher_sha256": "9117827323decb06752ffbd7212e0845126459d95e3a32a9089d2e667157ca0f"
+        }
+      ],
+      "cipher": "796e8ceddbb88452b81320abad54181f",
+      "negative": [
+        {
+          "name": "flip_last_byte",
+          "result": "error",
+          "reason": "invalid tag"
+        },
+        {
+          "name": "wrong_hash",
+          "result": "error",
+          "reason": "hash mismatch"
+        },
+        {
+          "name": "wrong_size_plus_1",
+          "result": "error",
+          "reason": "size mismatch"
+        }
+      ]
+    },
+    {
+      "size": 1,
+      "pattern": "plain[j] = (j * 131 + 17) % 251",
+      "key": "bb834b977a27e924f067ae941927ffdb6411eb4291c4a0b5097045558e6494b1",
+      "base_nonce": "500421d23dbd6a74e55db85a2e4487cbf4c399e7ea68323a",
+      "hash": "4a64a107f0cb32536e5bce6c98c393db21cca7f4ea187ba8c4dca8b51d4ea80a",
+      "cipher_len": 17,
+      "chunk_count": 1,
+      "cipher_sha256": "41441dfb87b91367255ecb72e1560c2d32f3321a1d5b7a4f02d5e69f14515cdb",
+      "chunks": [
+        {
+          "index": 0,
+          "nonce": "500421d23dbd6a74e55db85a2e4487cbf4c399e7ea68323a",
+          "aad": "01",
+          "plain_len": 1,
+          "cipher_len": 17,
+          "cipher_sha256": "41441dfb87b91367255ecb72e1560c2d32f3321a1d5b7a4f02d5e69f14515cdb"
+        }
+      ],
+      "cipher": "2ec218e5d2cf1c8f22a2dbf5096ac2bc5d",
+      "negative": [
+        {
+          "name": "flip_last_byte",
+          "result": "error",
+          "reason": "invalid tag"
+        },
+        {
+          "name": "wrong_hash",
+          "result": "error",
+          "reason": "hash mismatch"
+        },
+        {
+          "name": "wrong_size_plus_1",
+          "result": "error",
+          "reason": "size mismatch"
+        }
+      ]
+    },
+    {
+      "size": 100,
+      "pattern": "plain[j] = (j * 131 + 17) % 251",
+      "key": "9cc7eac6748f8b04cc36195e2cd238c1aca0b1f7eac660e04b8b76bc2db5f767",
+      "base_nonce": "60f00e1b4857f7e94d945de5f76691f5a75b484a12df6008",
+      "hash": "68f375c333123393060f594e42e3db66663d26d963122af99deb8b14127ba09a",
+      "cipher_len": 116,
+      "chunk_count": 1,
+      "cipher_sha256": "d18b9e1c19823e5039d8c1bce850c1854fc11350b80e756bb31cc9d4bfa6f601",
+      "chunks": [
+        {
+          "index": 0,
+          "nonce": "60f00e1b4857f7e94d945de5f76691f5a75b484a12df6008",
+          "aad": "01",
+          "plain_len": 100,
+          "cipher_len": 116,
+          "cipher_sha256": "d18b9e1c19823e5039d8c1bce850c1854fc11350b80e756bb31cc9d4bfa6f601"
+        }
+      ],
+      "cipher": "470ad9025d032c31dc3ec0b05f424c78fa3087eaad2c14721f8e6b07d1748cce68a1ec9f51dc3008d5c6afd06a5625265e01d1facc18775d5c7768d8e37f8cf68fed3cf7e39adc5751b1267c01268b030523ed31b61dd0a1aff369a1bfc03cb50cf55ec1dae2b31d4fc0174e6c2d0d5de118e534",
+      "negative": [
+        {
+          "name": "flip_last_byte",
+          "result": "error",
+          "reason": "invalid tag"
+        },
+        {
+          "name": "wrong_hash",
+          "result": "error",
+          "reason": "hash mismatch"
+        },
+        {
+          "name": "wrong_size_plus_1",
+          "result": "error",
+          "reason": "size mismatch"
+        }
+      ]
+    },
+    {
+      "size": 65535,
+      "pattern": "plain[j] = (j * 131 + 17) % 251",
+      "key": "fc63cf604d2dd3d95fd0478b38d2dc5c9fefa4f3c3394d573cc0c564df0761d8",
+      "base_nonce": "21a39a38e608521df1bcda34cca519a211ca8e09df9ccb74",
+      "hash": "d057c9b9afb25b34a10f9177d47d20fe07e3236caa10cd375038565c0c21476b",
+      "cipher_len": 65551,
+      "chunk_count": 1,
+      "cipher_sha256": "4b874ccd026a774cc79ab67d63e91f6618ba16d2591914525f843c0683e99f4e",
+      "chunks": [
+        {
+          "index": 0,
+          "nonce": "21a39a38e608521df1bcda34cca519a211ca8e09df9ccb74",
+          "aad": "01",
+          "plain_len": 65535,
+          "cipher_len": 65551,
+          "cipher_sha256": "4b874ccd026a774cc79ab67d63e91f6618ba16d2591914525f843c0683e99f4e"
+        }
+      ],
+      "negative": [
+        {
+          "name": "flip_last_byte",
+          "result": "error",
+          "reason": "invalid tag"
+        },
+        {
+          "name": "wrong_hash",
+          "result": "error",
+          "reason": "hash mismatch"
+        },
+        {
+          "name": "wrong_size_plus_1",
+          "result": "error",
+          "reason": "size mismatch"
+        }
+      ]
+    },
+    {
+      "size": 65536,
+      "pattern": "plain[j] = (j * 131 + 17) % 251",
+      "key": "8d0fc116c14809ff30a9553ad4dcaf95e85e8502a813b1438085a744346580f6",
+      "base_nonce": "fed7f094c6b068d04ed11e60c37ee8dc37f4fbbd5ed04f8f",
+      "hash": "98df3b7d5ff66a49a367d7f116ee9f9766f1c3ae06b95e46ed9fd200e55e6ee0",
+      "cipher_len": 65552,
+      "chunk_count": 1,
+      "cipher_sha256": "ccfa0dab2c52bf2549e97cbb6195bbac3e397646ad34c267c939dc25fb297ce8",
+      "chunks": [
+        {
+          "index": 0,
+          "nonce": "fed7f094c6b068d04ed11e60c37ee8dc37f4fbbd5ed04f8f",
+          "aad": "01",
+          "plain_len": 65536,
+          "cipher_len": 65552,
+          "cipher_sha256": "ccfa0dab2c52bf2549e97cbb6195bbac3e397646ad34c267c939dc25fb297ce8"
+        }
+      ],
+      "negative": [
+        {
+          "name": "flip_last_byte",
+          "result": "error",
+          "reason": "invalid tag"
+        },
+        {
+          "name": "wrong_hash",
+          "result": "error",
+          "reason": "hash mismatch"
+        },
+        {
+          "name": "wrong_size_plus_1",
+          "result": "error",
+          "reason": "size mismatch"
+        }
+      ]
+    },
+    {
+      "size": 65537,
+      "pattern": "plain[j] = (j * 131 + 17) % 251",
+      "key": "8afa8eefe93b40da986cc734972ee7e87af75ba98a6e039551200039fe6dbf71",
+      "base_nonce": "6b9a4e90ad16d4653b2d07048e30487afc76b00a88989e9a",
+      "hash": "afb7efaf2b8d98e1a374dcb11ffcd4be0fb7950ab65d20c779ab81265a679076",
+      "cipher_len": 65569,
+      "chunk_count": 2,
+      "cipher_sha256": "f5ba0c5a0609aff823c7f0c17ec8b9829586c7398920708313f15de5adb4d5ee",
+      "chunks": [
+        {
+          "index": 0,
+          "nonce": "6b9a4e90ad16d4653b2d07048e30487afc76b00a88989e9a",
+          "aad": "00",
+          "plain_len": 65536,
+          "cipher_len": 65552,
+          "cipher_sha256": "04d2a594dd3134e5bf75d26c72e5da93b80137e29f4dcaf9e54dbb7da9e29931"
+        },
+        {
+          "index": 1,
+          "nonce": "6b9a4e90ad16d4653b2d07048e30487afc76b00a88989e9b",
+          "aad": "01",
+          "plain_len": 1,
+          "cipher_len": 17,
+          "cipher_sha256": "f17e95731999521172e84229c6621a4390650c24e6ec5c1d6a643b88018da303"
+        }
+      ],
+      "negative": [
+        {
+          "name": "drop_last_chunk",
+          "result": "error",
+          "reason": "size mismatch",
+          "note": "the final-chunk AAD makes truncation fail (or the size check does)"
+        },
+        {
+          "name": "flip_last_byte",
+          "result": "error",
+          "reason": "invalid tag"
+        },
+        {
+          "name": "wrong_hash",
+          "result": "error",
+          "reason": "hash mismatch"
+        },
+        {
+          "name": "wrong_size_plus_1",
+          "result": "error",
+          "reason": "size mismatch"
+        }
+      ]
+    },
+    {
+      "size": 131072,
+      "pattern": "plain[j] = (j * 131 + 17) % 251",
+      "key": "1a5c6413f144e77740feee17380d920ef375c58c4b54a879a4c4268c12f72e6b",
+      "base_nonce": "3115730081516392ae1cf4966226b2e3888a42e159906332",
+      "hash": "699e9062f691a65a8c8325ff2b9f6b478e45769d3783d54ae3abf26b017a25a8",
+      "cipher_len": 131104,
+      "chunk_count": 2,
+      "cipher_sha256": "fc702c954149c33c6e4c3109225491b01019e78c716e37fe5d18311b8679c2f5",
+      "chunks": [
+        {
+          "index": 0,
+          "nonce": "3115730081516392ae1cf4966226b2e3888a42e159906332",
+          "aad": "00",
+          "plain_len": 65536,
+          "cipher_len": 65552,
+          "cipher_sha256": "b96fab3594dae7cf2de4837deeca6fbc01a3158c0c87eea195795f745b0fdd7e"
+        },
+        {
+          "index": 1,
+          "nonce": "3115730081516392ae1cf4966226b2e3888a42e159906333",
+          "aad": "01",
+          "plain_len": 65536,
+          "cipher_len": 65552,
+          "cipher_sha256": "8b382c163a119c66aecf3824bd53825c7855413a100059846934ab860a876b81"
+        }
+      ],
+      "negative": [
+        {
+          "name": "drop_last_chunk",
+          "result": "error",
+          "reason": "size mismatch",
+          "note": "the final-chunk AAD makes truncation fail (or the size check does)"
+        },
+        {
+          "name": "flip_last_byte",
+          "result": "error",
+          "reason": "invalid tag"
+        },
+        {
+          "name": "wrong_hash",
+          "result": "error",
+          "reason": "hash mismatch"
+        },
+        {
+          "name": "wrong_size_plus_1",
+          "result": "error",
+          "reason": "size mismatch"
+        }
+      ]
+    },
+    {
+      "size": 131073,
+      "pattern": "plain[j] = (j * 131 + 17) % 251",
+      "key": "86d9dd451e585ffb7b699b67c8b657e08aed0c014193d86ac816ff177c2d5364",
+      "base_nonce": "37824e81e78498d2dfcd402e7a0e0fae880bb4271308a268",
+      "hash": "64b90d1dd7bfe7a6085a9e00f388a569872db0121b822b9e50a8e448c30cd543",
+      "cipher_len": 131121,
+      "chunk_count": 3,
+      "cipher_sha256": "c06cd9e4e3ad84b04d6874e3f3fb90d498ab689310c8e988e1540cb22decc09f",
+      "chunks": [
+        {
+          "index": 0,
+          "nonce": "37824e81e78498d2dfcd402e7a0e0fae880bb4271308a268",
+          "aad": "00",
+          "plain_len": 65536,
+          "cipher_len": 65552,
+          "cipher_sha256": "1d39ef78e4e9052a6dad5f40a0010ebb59c0e0c39a18c017fec85b67aee9777d"
+        },
+        {
+          "index": 1,
+          "nonce": "37824e81e78498d2dfcd402e7a0e0fae880bb4271308a269",
+          "aad": "00",
+          "plain_len": 65536,
+          "cipher_len": 65552,
+          "cipher_sha256": "c5ee703f9bba4146addec28d3f98e1c82ee3af60c99287cc966d45fc0a7a957f"
+        },
+        {
+          "index": 2,
+          "nonce": "37824e81e78498d2dfcd402e7a0e0fae880bb4271308a26a",
+          "aad": "01",
+          "plain_len": 1,
+          "cipher_len": 17,
+          "cipher_sha256": "3699eb97b5f9886540f529fb3d19fa9e1acc394d922811934dc7bb5daf6b835d"
+        }
+      ],
+      "negative": [
+        {
+          "name": "drop_last_chunk",
+          "result": "error",
+          "reason": "size mismatch",
+          "note": "the final-chunk AAD makes truncation fail (or the size check does)"
+        },
+        {
+          "name": "flip_last_byte",
+          "result": "error",
+          "reason": "invalid tag"
+        },
+        {
+          "name": "wrong_hash",
+          "result": "error",
+          "reason": "hash mismatch"
+        },
+        {
+          "name": "wrong_size_plus_1",
+          "result": "error",
+          "reason": "size mismatch"
+        }
+      ]
+    }
+  ]
+}

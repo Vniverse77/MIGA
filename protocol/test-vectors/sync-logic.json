@@ -1,0 +1,933 @@
+{
+  "note": "Pure helpers from sync.ts/devices.ts. history_pages uses maxBytes = 250 so a tiny chat splits into several pages; each page starts strictly after the previous cursor. Page size rule: bytes = UTF-8 length of JSON.stringify(message) + 20; a page always holds at least one message.",
+  "merge_messages": [
+    {
+      "name": "add_new_sorted",
+      "list": [
+        {
+          "id": "a",
+          "mine": false,
+          "text": "a",
+          "ts": 10,
+          "state": "received"
+        },
+        {
+          "id": "c",
+          "mine": false,
+          "text": "c",
+          "ts": 30,
+          "state": "received"
+        }
+      ],
+      "incoming": [
+        {
+          "id": "b",
+          "mine": true,
+          "text": "b",
+          "ts": 20,
+          "state": "sent"
+        }
+      ],
+      "returns_added": true,
+      "list_after": [
+        {
+          "id": "a",
+          "mine": false,
+          "text": "a",
+          "ts": 10,
+          "state": "received"
+        },
+        {
+          "id": "b",
+          "mine": true,
+          "text": "b",
+          "ts": 20,
+          "state": "sent"
+        },
+        {
+          "id": "c",
+          "mine": false,
+          "text": "c",
+          "ts": 30,
+          "state": "received"
+        }
+      ]
+    },
+    {
+      "name": "same_id_different_side_are_two",
+      "list": [
+        {
+          "id": "a",
+          "mine": false,
+          "text": "a",
+          "ts": 10,
+          "state": "received"
+        }
+      ],
+      "incoming": [
+        {
+          "id": "a",
+          "mine": true,
+          "text": "a",
+          "ts": 10,
+          "state": "sent"
+        }
+      ],
+      "returns_added": true,
+      "list_after": [
+        {
+          "id": "a",
+          "mine": false,
+          "text": "a",
+          "ts": 10,
+          "state": "received"
+        },
+        {
+          "id": "a",
+          "mine": true,
+          "text": "a",
+          "ts": 10,
+          "state": "sent"
+        }
+      ]
+    },
+    {
+      "name": "newer_edit_wins",
+      "list": [
+        {
+          "id": "a",
+          "mine": false,
+          "text": "old",
+          "ts": 10,
+          "state": "received",
+          "edited": 5
+        }
+      ],
+      "incoming": [
+        {
+          "id": "a",
+          "mine": false,
+          "text": "new",
+          "ts": 10,
+          "state": "received",
+          "edited": 9
+        }
+      ],
+      "returns_added": false,
+      "list_after": [
+        {
+          "id": "a",
+          "mine": false,
+          "text": "new",
+          "ts": 10,
+          "state": "received",
+          "edited": 9
+        }
+      ]
+    },
+    {
+      "name": "older_edit_ignored",
+      "list": [
+        {
+          "id": "a",
+          "mine": false,
+          "text": "new",
+          "ts": 10,
+          "state": "received",
+          "edited": 9
+        }
+      ],
+      "incoming": [
+        {
+          "id": "a",
+          "mine": false,
+          "text": "old",
+          "ts": 10,
+          "state": "received",
+          "edited": 5
+        }
+      ],
+      "returns_added": false,
+      "list_after": [
+        {
+          "id": "a",
+          "mine": false,
+          "text": "new",
+          "ts": 10,
+          "state": "received",
+          "edited": 9
+        }
+      ]
+    },
+    {
+      "name": "delivery_only_forward",
+      "list": [
+        {
+          "id": "a",
+          "mine": true,
+          "text": "a",
+          "ts": 10,
+          "state": "sent",
+          "delivery": "read"
+        }
+      ],
+      "incoming": [
+        {
+          "id": "a",
+          "mine": true,
+          "text": "a",
+          "ts": 10,
+          "state": "sent",
+          "delivery": "delivered"
+        }
+      ],
+      "returns_added": false,
+      "list_after": [
+        {
+          "id": "a",
+          "mine": true,
+          "text": "a",
+          "ts": 10,
+          "state": "sent",
+          "delivery": "read"
+        }
+      ]
+    },
+    {
+      "name": "delivery_advances",
+      "list": [
+        {
+          "id": "a",
+          "mine": true,
+          "text": "a",
+          "ts": 10,
+          "state": "sent"
+        }
+      ],
+      "incoming": [
+        {
+          "id": "a",
+          "mine": true,
+          "text": "a",
+          "ts": 10,
+          "state": "sent",
+          "delivery": "delivered"
+        }
+      ],
+      "returns_added": false,
+      "list_after": [
+        {
+          "id": "a",
+          "mine": true,
+          "text": "a",
+          "ts": 10,
+          "state": "sent",
+          "delivery": "delivered"
+        }
+      ]
+    },
+    {
+      "name": "delivery_ignored_for_received",
+      "list": [
+        {
+          "id": "a",
+          "mine": false,
+          "text": "a",
+          "ts": 10,
+          "state": "received"
+        }
+      ],
+      "incoming": [
+        {
+          "id": "a",
+          "mine": false,
+          "text": "a",
+          "ts": 10,
+          "state": "received",
+          "delivery": "read"
+        }
+      ],
+      "returns_added": false,
+      "list_after": [
+        {
+          "id": "a",
+          "mine": false,
+          "text": "a",
+          "ts": 10,
+          "state": "received"
+        }
+      ]
+    }
+  ],
+  "history_pages": {
+    "chats": {
+      "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4": [
+        {
+          "id": "b3",
+          "mine": false,
+          "text": "b3",
+          "ts": 30,
+          "state": "received"
+        },
+        {
+          "id": "b1",
+          "mine": true,
+          "text": "b1",
+          "ts": 10,
+          "state": "sent"
+        },
+        {
+          "id": "b2",
+          "mine": false,
+          "text": "b2",
+          "ts": 10,
+          "state": "received"
+        },
+        {
+          "id": "b2",
+          "mine": true,
+          "text": "b2",
+          "ts": 10,
+          "state": "sent"
+        }
+      ],
+      "05cf84c3dd15aa1d369f020ec4466dc265cf557e940d4200e51f253e1798a3ee": [
+        {
+          "id": "c1",
+          "mine": false,
+          "text": "c1",
+          "ts": 5,
+          "state": "received"
+        },
+        {
+          "id": "c2",
+          "mine": true,
+          "text": "c2",
+          "ts": 6,
+          "state": "sent"
+        }
+      ]
+    },
+    "max_bytes": 250,
+    "pages": [
+      {
+        "after": null,
+        "chats": {
+          "05cf84c3dd15aa1d369f020ec4466dc265cf557e940d4200e51f253e1798a3ee": [
+            {
+              "id": "c1",
+              "mine": false,
+              "text": "c1",
+              "ts": 5,
+              "state": "received"
+            },
+            {
+              "id": "c2",
+              "mine": true,
+              "text": "c2",
+              "ts": 6,
+              "state": "sent"
+            }
+          ],
+          "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4": [
+            {
+              "id": "b1",
+              "mine": true,
+              "text": "b1",
+              "ts": 10,
+              "state": "sent"
+            }
+          ]
+        },
+        "next": {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "t": 10,
+          "i": "b1"
+        },
+        "count": 3
+      },
+      {
+        "after": {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "t": 10,
+          "i": "b1"
+        },
+        "chats": {
+          "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4": [
+            {
+              "id": "b2",
+              "mine": true,
+              "text": "b2",
+              "ts": 10,
+              "state": "sent"
+            },
+            {
+              "id": "b2",
+              "mine": false,
+              "text": "b2",
+              "ts": 10,
+              "state": "received"
+            },
+            {
+              "id": "b3",
+              "mine": false,
+              "text": "b3",
+              "ts": 30,
+              "state": "received"
+            }
+          ]
+        },
+        "next": null,
+        "count": 3
+      }
+    ]
+  },
+  "add_tombs": [
+    {
+      "incoming": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "x",
+          "mine": false,
+          "ts": 100
+        }
+      ],
+      "returns_added": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "x",
+          "mine": false,
+          "ts": 100
+        }
+      ],
+      "tombs_after": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "x",
+          "mine": false,
+          "ts": 100
+        }
+      ]
+    },
+    {
+      "incoming": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "x",
+          "mine": false,
+          "ts": 90
+        }
+      ],
+      "returns_added": [],
+      "tombs_after": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "x",
+          "mine": false,
+          "ts": 100
+        }
+      ]
+    },
+    {
+      "incoming": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "x",
+          "mine": false,
+          "ts": 110
+        },
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "y",
+          "mine": true,
+          "ts": 105
+        }
+      ],
+      "returns_added": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "x",
+          "mine": false,
+          "ts": 110
+        },
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "y",
+          "mine": true,
+          "ts": 105
+        }
+      ],
+      "tombs_after": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "x",
+          "mine": false,
+          "ts": 110
+        },
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "y",
+          "mine": true,
+          "ts": 105
+        }
+      ]
+    },
+    {
+      "incoming": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "c",
+          "ts": 108
+        }
+      ],
+      "returns_added": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "c",
+          "ts": 108
+        }
+      ],
+      "tombs_after": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "x",
+          "mine": false,
+          "ts": 110
+        },
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "c",
+          "ts": 108
+        }
+      ]
+    },
+    {
+      "incoming": [
+        {
+          "c": "05cf84c3dd15aa1d369f020ec4466dc265cf557e940d4200e51f253e1798a3ee",
+          "s": "k",
+          "ts": 50
+        }
+      ],
+      "returns_added": [
+        {
+          "c": "05cf84c3dd15aa1d369f020ec4466dc265cf557e940d4200e51f253e1798a3ee",
+          "s": "k",
+          "ts": 50
+        }
+      ],
+      "tombs_after": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "x",
+          "mine": false,
+          "ts": 110
+        },
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "c",
+          "ts": 108
+        },
+        {
+          "c": "05cf84c3dd15aa1d369f020ec4466dc265cf557e940d4200e51f253e1798a3ee",
+          "s": "k",
+          "ts": 50
+        }
+      ]
+    }
+  ],
+  "tomb_filter_checks": [
+    {
+      "chat": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+      "message": {
+        "id": "x",
+        "mine": false,
+        "ts": 200
+      },
+      "deleted": true
+    },
+    {
+      "chat": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+      "message": {
+        "id": "y",
+        "mine": true,
+        "ts": 200
+      },
+      "deleted": false
+    },
+    {
+      "chat": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+      "message": {
+        "id": "z",
+        "mine": false,
+        "ts": 108
+      },
+      "deleted": true
+    },
+    {
+      "chat": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+      "message": {
+        "id": "z",
+        "mine": false,
+        "ts": 109
+      },
+      "deleted": false
+    },
+    {
+      "chat": "05cf84c3dd15aa1d369f020ec4466dc265cf557e940d4200e51f253e1798a3ee",
+      "message": {
+        "id": "q",
+        "mine": false,
+        "ts": 50
+      },
+      "deleted": true
+    },
+    {
+      "chat": "05cf84c3dd15aa1d369f020ec4466dc265cf557e940d4200e51f253e1798a3ee",
+      "message": {
+        "id": "q",
+        "mine": false,
+        "ts": 51
+      },
+      "deleted": false
+    }
+  ],
+  "clean_message": [
+    {
+      "input": {
+        "id": "ok",
+        "mine": false,
+        "text": "ok",
+        "ts": 5,
+        "state": "received"
+      },
+      "output": {
+        "id": "ok",
+        "mine": false,
+        "text": "ok",
+        "ts": 5,
+        "state": "received"
+      }
+    },
+    {
+      "input": {
+        "id": "ok",
+        "mine": true,
+        "text": "ok",
+        "ts": 5,
+        "state": "pending"
+      },
+      "output": {
+        "id": "ok",
+        "mine": true,
+        "text": "ok",
+        "ts": 5,
+        "state": "sent"
+      }
+    },
+    {
+      "input": {
+        "id": "ok",
+        "mine": true,
+        "text": "ok",
+        "ts": 5,
+        "state": "failed"
+      },
+      "output": {
+        "id": "ok",
+        "mine": true,
+        "text": "ok",
+        "ts": 5,
+        "state": "failed"
+      }
+    },
+    {
+      "input": {
+        "id": "ok",
+        "mine": false,
+        "text": "ok",
+        "ts": 5,
+        "state": "failed"
+      },
+      "output": {
+        "id": "ok",
+        "mine": false,
+        "text": "ok",
+        "ts": 5,
+        "state": "received"
+      }
+    },
+    {
+      "input": {
+        "id": "bad id",
+        "mine": false,
+        "text": "bad id",
+        "ts": 5,
+        "state": "received"
+      },
+      "output": null
+    },
+    {
+      "input": {
+        "id": "ok",
+        "mine": false,
+        "text": "ok",
+        "ts": "x",
+        "state": "received"
+      },
+      "output": null
+    },
+    {
+      "input": {
+        "id": "ok",
+        "mine": false,
+        "text": 5,
+        "ts": 5,
+        "state": "received"
+      },
+      "output": null
+    },
+    {
+      "input": {
+        "id": "ok",
+        "mine": "yes",
+        "text": "ok",
+        "ts": 5,
+        "state": "sent"
+      },
+      "output": null
+    },
+    {
+      "input": {
+        "id": "ok",
+        "mine": false,
+        "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "ts": 5,
+        "state": "received"
+      },
+      "output": {
+        "id": "ok",
+        "mine": false,
+        "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "ts": 5,
+        "state": "received"
+      }
+    },
+    {
+      "input": {
+        "id": "ok",
+        "mine": true,
+        "text": "ok",
+        "ts": 5,
+        "state": "sent",
+        "delivery": "delivered",
+        "edited": 7,
+        "reply": {
+          "id": "r",
+          "from": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "text": "q"
+        }
+      },
+      "output": {
+        "id": "ok",
+        "mine": true,
+        "text": "ok",
+        "ts": 5,
+        "state": "sent",
+        "reply": {
+          "id": "r",
+          "from": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "text": "q"
+        },
+        "edited": 7,
+        "delivery": "delivered"
+      }
+    },
+    {
+      "input": {
+        "id": "ok",
+        "mine": true,
+        "text": "ok",
+        "ts": 5,
+        "state": "sent",
+        "delivery": "weird"
+      },
+      "output": {
+        "id": "ok",
+        "mine": true,
+        "text": "ok",
+        "ts": 5,
+        "state": "sent"
+      }
+    },
+    {
+      "input": {
+        "id": "ok",
+        "mine": false,
+        "text": "ok",
+        "ts": 5,
+        "state": "received",
+        "att": {
+          "nope": 1
+        }
+      },
+      "output": null
+    }
+  ],
+  "clean_tombs": [
+    {
+      "input": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "c",
+          "ts": 5.9
+        }
+      ],
+      "now": 1700000000000,
+      "output": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "c",
+          "ts": 5
+        }
+      ]
+    },
+    {
+      "input": [
+        {
+          "c": "zz",
+          "s": "c",
+          "ts": 5
+        }
+      ],
+      "now": 1700000000000,
+      "output": []
+    },
+    {
+      "input": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "a",
+          "mine": true,
+          "ts": 5
+        }
+      ],
+      "now": 1700000000000,
+      "output": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "a",
+          "mine": true,
+          "ts": 5
+        }
+      ]
+    },
+    {
+      "input": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "m",
+          "id": "a",
+          "ts": 5
+        }
+      ],
+      "now": 1700000000000,
+      "output": []
+    },
+    {
+      "input": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "c",
+          "ts": 1700090000000
+        }
+      ],
+      "now": 1700000000000,
+      "output": []
+    },
+    {
+      "input": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "c",
+          "ts": -1
+        }
+      ],
+      "now": 1700000000000,
+      "output": []
+    },
+    {
+      "input": [
+        {
+          "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+          "s": "q",
+          "ts": 5
+        }
+      ],
+      "now": 1700000000000,
+      "output": []
+    },
+    {
+      "input": "x",
+      "now": 1700000000000,
+      "output": []
+    }
+  ],
+  "clean_cursor": [
+    {
+      "input": {
+        "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+        "t": 5,
+        "i": "a"
+      },
+      "output": {
+        "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+        "t": 5,
+        "i": "a"
+      }
+    },
+    {
+      "input": {
+        "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+        "t": "5",
+        "i": "a"
+      },
+      "output": null
+    },
+    {
+      "input": {
+        "c": "4077007e26599d201e1a563426c872206bb2322a3f3a2c76fd770ea085338ac4",
+        "t": 5,
+        "i": "bad id"
+      },
+      "output": null
+    },
+    {
+      "input": {
+        "c": "zz",
+        "t": 5,
+        "i": "a"
+      },
+      "output": null
+    },
+    {
+      "input": null,
+      "output": null
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "tasks": {
+    "vectors": "deno run --config deno.json --allow-read --allow-write=../protocol/test-vectors --unstable-sloppy-imports ../protocol/gen-vectors.ts",
+    "vectors:check": "deno run --config deno.json --allow-read --unstable-sloppy-imports ../protocol/check-vectors.ts"
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "note": "decrypt(me = recipient, peer = claimed sender, body). A wrong peer changes the pair key, so it fails. `recipient` says which seed opens it.",
+  "cases": [
+    {
+      "name": "valid_control",
+      "body": "UqdehtNXsd2/pTRA7J3T0wIf/WRybxcQ9Shl/tqiQpB3eoj0I3/e9+vXocYJlps5MQJ25e266rAwK0aNuwrx9HpvQ2rX+kC6bohap4qdv7j5h1oJJuSE2BDObNhEDqcqebCB/5f26q/eDY6SoaHTjO00BPMxHSfHxyoX+A72ZFfSBDco2AxntfMUQeefTcd3wLLbqZM99CLheaIblmtiHHwD6GWjVmqxkpdCLCRUsGmxT8q9hbJRRI7BrB4NEvqT4WXdqNsRZRhhOKXxGiifUNdcGCshHgU8llvQO0JMidypiaNvsX/vlX+mvF12q3GKDwH4dn0c/ij3/Z52TUbiQNb9RsDehcS69z78veHK65MDTfzjvkny0jdzMGT+zAXq0GVpMvMlCm8=",
+      "claimed_sender": "8d443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771",
+      "recipient_seed": "cf71455dedd35d9f99b15447e1522919a6faf084017d4dca0cec7b4ee2d6a7a7",
+      "expect": {
+        "text": "secret",
+        "ts": 1700000000000
+      }
+    },
+    {
+      "name": "flip_nonce_bit",
+      "body": "U6dehtNXsd2/pTRA7J3T0wIf/WRybxcQ9Shl/tqiQpB3eoj0I3/e9+vXocYJlps5MQJ25e266rAwK0aNuwrx9HpvQ2rX+kC6bohap4qdv7j5h1oJJuSE2BDObNhEDqcqebCB/5f26q/eDY6SoaHTjO00BPMxHSfHxyoX+A72ZFfSBDco2AxntfMUQeefTcd3wLLbqZM99CLheaIblmtiHHwD6GWjVmqxkpdCLCRUsGmxT8q9hbJRRI7BrB4NEvqT4WXdqNsRZRhhOKXxGiifUNdcGCshHgU8llvQO0JMidypiaNvsX/vlX+mvF12q3GKDwH4dn0c/ij3/Z52TUbiQNb9RsDehcS69z78veHK65MDTfzjvkny0jdzMGT+zAXq0GVpMvMlCm8=",
+      "claimed_sender": "8d443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771",
+      "recipient_seed": "cf71455dedd35d9f99b15447e1522919a6faf084017d4dca0cec7b4ee2d6a7a7",
+      "expect": null
+    },
+    {
+      "name": "flip_ciphertext_bit",
+      "body": "UqdehtNXsd2/pTRA7J3T0wIf/WRybxcQ9Shl/tqiQ5B3eoj0I3/e9+vXocYJlps5MQJ25e266rAwK0aNuwrx9HpvQ2rX+kC6bohap4qdv7j5h1oJJuSE2BDObNhEDqcqebCB/5f26q/eDY6SoaHTjO00BPMxHSfHxyoX+A72ZFfSBDco2AxntfMUQeefTcd3wLLbqZM99CLheaIblmtiHHwD6GWjVmqxkpdCLCRUsGmxT8q9hbJRRI7BrB4NEvqT4WXdqNsRZRhhOKXxGiifUNdcGCshHgU8llvQO0JMidypiaNvsX/vlX+mvF12q3GKDwH4dn0c/ij3/Z52TUbiQNb9RsDehcS69z78veHK65MDTfzjvkny0jdzMGT+zAXq0GVpMvMlCm8=",
+      "claimed_sender": "8d443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771",
+      "recipient_seed": "cf71455dedd35d9f99b15447e1522919a6faf084017d4dca0cec7b4ee2d6a7a7",
+      "expect": null
+    },
+    {
+      "name": "flip_tag_bit",
+      "body": "UqdehtNXsd2/pTRA7J3T0wIf/WRybxcQ9Shl/tqiQpB3eoj0I3/e9+vXocYJlps5MQJ25e266rAwK0aNuwrx9HpvQ2rX+kC6bohap4qdv7j5h1oJJuSE2BDObNhEDqcqebCB/5f26q/eDY6SoaHTjO00BPMxHSfHxyoX+A72ZFfSBDco2AxntfMUQeefTcd3wLLbqZM99CLheaIblmtiHHwD6GWjVmqxkpdCLCRUsGmxT8q9hbJRRI7BrB4NEvqT4WXdqNsRZRhhOKXxGiifUNdcGCshHgU8llvQO0JMidypiaNvsX/vlX+mvF12q3GKDwH4dn0c/ij3/Z52TUbiQNb9RsDehcS69z78veHK65MDTfzjvkny0jdzMGT+zAXq0GVpMvMlCm4=",
+      "claimed_sender": "8d443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771",
+      "recipient_seed": "cf71455dedd35d9f99b15447e1522919a6faf084017d4dca0cec7b4ee2d6a7a7",
+      "expect": null
+    },
+    {
+      "name": "truncated_tag",
+      "body": "UqdehtNXsd2/pTRA7J3T0wIf/WRybxcQ9Shl/tqiQpB3eoj0I3/e9+vXocYJlps5MQJ25e266rAwK0aNuwrx9HpvQ2rX+kC6bohap4qdv7j5h1oJJuSE2BDObNhEDqcqebCB/5f26q/eDY6SoaHTjO00BPMxHSfHxyoX+A72ZFfSBDco2AxntfMUQeefTcd3wLLbqZM99CLheaIblmtiHHwD6GWjVmqxkpdCLCRUsGmxT8q9hbJRRI7BrB4NEvqT4WXdqNsRZRhhOKXxGiifUNdcGCshHgU8llvQO0JMidypiaNvsX/vlX+mvF12q3GKDwH4dn0c/ij3/Z52TUbiQNb9RsDehcS69z78veHK65MDTfzjvkny0jdzMGT+zAXq0GVpMvMlCg==",
+      "claimed_sender": "8d443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771",
+      "recipient_seed": "cf71455dedd35d9f99b15447e1522919a6faf084017d4dca0cec7b4ee2d6a7a7",
+      "expect": null
+    },
+    {
+      "name": "too_short_for_nonce",
+      "body": "UqdehtNXsd2/pQ==",
+      "claimed_sender": "8d443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771",
+      "recipient_seed": "cf71455dedd35d9f99b15447e1522919a6faf084017d4dca0cec7b4ee2d6a7a7",
+      "expect": null
+    },
+    {
+      "name": "empty_body",
+      "body": "",
+      "claimed_sender": "8d443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771",
+      "recipient_seed": "cf71455dedd35d9f99b15447e1522919a6faf084017d4dca0cec7b4ee2d6a7a7",
+      "expect": null
+    },
+    {
+      "name": "not_base64",
+      "body": "!!!not base64!!!",
+      "claimed_sender": "8d443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771",
+      "recipient_seed": "cf71455dedd35d9f99b15447e1522919a6faf084017d4dca0cec7b4ee2d6a7a7",
+      "expect": null
+    },
+    {
+      "name": "wrong_claimed_sender",
+      "body": "UqdehtNXsd2/pTRA7J3T0wIf/WRybxcQ9Shl/tqiQpB3eoj0I3/e9+vXocYJlps5MQJ25e266rAwK0aNuwrx9HpvQ2rX+kC6bohap4qdv7j5h1oJJuSE2BDObNhEDqcqebCB/5f26q/eDY6SoaHTjO00BPMxHSfHxyoX+A72ZFfSBDco2AxntfMUQeefTcd3wLLbqZM99CLheaIblmtiHHwD6GWjVmqxkpdCLCRUsGmxT8q9hbJRRI7BrB4NEvqT4WXdqNsRZRhhOKXxGiifUNdcGCshHgU8llvQO0JMidypiaNvsX/vlX+mvF12q3GKDwH4dn0c/ij3/Z52TUbiQNb9RsDehcS69z78veHK65MDTfzjvkny0jdzMGT+zAXq0GVpMvMlCm8=",
+      "claimed_sender": "05cf84c3dd15aa1d369f020ec4466dc265cf557e940d4200e51f253e1798a3ee",
+      "recipient_seed": "cf71455dedd35d9f99b15447e1522919a6faf084017d4dca0cec7b4ee2d6a7a7",
+      "expect": null
+    },
+    {
+      "name": "wrong_recipient",
+      "body": "UqdehtNXsd2/pTRA7J3T0wIf/WRybxcQ9Shl/tqiQpB3eoj0I3/e9+vXocYJlps5MQJ25e266rAwK0aNuwrx9HpvQ2rX+kC6bohap4qdv7j5h1oJJuSE2BDObNhEDqcqebCB/5f26q/eDY6SoaHTjO00BPMxHSfHxyoX+A72ZFfSBDco2AxntfMUQeefTcd3wLLbqZM99CLheaIblmtiHHwD6GWjVmqxkpdCLCRUsGmxT8q9hbJRRI7BrB4NEvqT4WXdqNsRZRhhOKXxGiifUNdcGCshHgU8llvQO0JMidypiaNvsX/vlX+mvF12q3GKDwH4dn0c/ij3/Z52TUbiQNb9RsDehcS69z78veHK65MDTfzjvkny0jdzMGT+zAXq0GVpMvMlCm8=",
+      "claimed_sender": "8d443c4e4fe2c5bf8d250b1792a5b97816bf5f3791b2f7cc01a4bad319191771",
+      "recipient_seed": "5ecf614ad3316c965ccf43f7fd46a6644661b56c108735df2cade73147789644",
+      "expect": null
+    }
+  ]
+}
