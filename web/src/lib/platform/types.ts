@@ -24,7 +24,22 @@ export interface ShortcutProfile {
 	readonly find: boolean;
 }
 
+/** Keeping MIGA connected while its window is closed or the app is in the background. */
+export interface BackgroundControl {
+	/** `tray`: the desktop window hides to the tray icon. `service`: an Android foreground service. */
+	readonly kind: 'tray' | 'service';
+	/** Current state; `available` is false when this system cannot do it (desktop without a status area). */
+	state(): Promise<{ available: boolean; on: boolean }>;
+	set(on: boolean): Promise<void>;
+	/** Android only: opens the system prompt that exempts MIGA from battery optimisation. */
+	batteryExemption?(): Promise<void>;
+}
+
 export interface Platform {
+	/** Background connection setting; absent in the browser, where a closed tab cannot keep a connection. */
+	readonly background?: BackgroundControl;
+	/** Desktop: the unread total (muted chats left out) for the tray icon. */
+	setUnread?(count: number): void;
 	/** Keyboard shortcuts; undefined on builds that have no keyboard layer (mobile). */
 	readonly shortcuts?: ShortcutProfile;
 	/** Native notifications on desktop, the Notification API elsewhere. */

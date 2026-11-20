@@ -5,12 +5,44 @@ import {
 	requestPermission,
 	sendNotification
 } from '@tauri-apps/plugin-notification';
-import { PUBLIC_ORIGIN, PUBLIC_RELAY, type Notifier, type NotifyPermission, type Platform } from './types';
+import {
+	PUBLIC_ORIGIN,
+	PUBLIC_RELAY,
+	type BackgroundControl,
+	type Notifier,
+	type NotifyPermission,
+	type Platform
+} from './types';
 import { browserDownload } from './download';
 import { webNotifier } from './webnotify';
 
 /** True inside the Tauri shell; false when this build is opened in an ordinary browser. */
 const inTauri = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+// The four small commands of the shell (src-tauri/src/lib.rs). Called through the core bridge directly,
+// which keeps the page free of extra packages.
+type TrayState = { tray: boolean; keep: boolean; notify: boolean };
+function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+	const internals = (window as unknown as { __TAURI_INTERNALS__?: { invoke(c: string, a?: unknown): Promise<T> } })
+		.__TAURI_INTERNALS__;
+	if (!internals) return Promise.reject(new Error('not in the app'));
+	return internals.invoke(cmd, args);
+}
+
+const background: BackgroundControl = {
+	kind: 'tray',
+	async state() {
+		try {
+			const s = await call<TrayState>('tray_state');
+			return { available: s.tray, on: s.tray && s.keep };
+		} catch {
+			return { available: false, on: false };
+		}
+	},
+	async set(on) {
+		await call('set_keep_in_tray', { keep: on });
+	}
+};
 
 /**
  * Native notifications through the official Tauri plugin (libnotify on Linux). The desktop plugin
@@ -33,11 +65,15 @@ const nativeNotifier: Notifier = {
 		}
 	},
 	show({ title, body }) {
-		try {
-			sendNotification({ title, body });
-		} catch {
-			// A failed notification must never break message handling.
-		}
+		// "Disable notifications" in the tray menu is kept by the shell; ask it each time (it is a cheap local call).
+		call<TrayState>('tray_state')
+			.catch(() => ({ notify: true }))
+			.then((s) => {
+				if (s.notify) sendNotification({ title, body });
+			})
+			.catch(() => {
+				// A failed notification must never break message handling.
+			});
 	},
 	close() {}
 };
@@ -68,6 +104,10 @@ export const platform: Platform = {
 		request: () => (inTauri() ? nativeNotifier : webNotifier).request(),
 		show: (n) => (inTauri() ? nativeNotifier : webNotifier).show(n),
 		close: (tag) => (inTauri() ? nativeNotifier : webNotifier).close(tag)
+	},
+	background: inTauri() ? background : undefined,
+	setUnread: (count) => {
+		if (inTauri()) void call('set_unread', { count }).catch(() => {});
 	},
 	shortcuts: { newChat: 'Ctrl+N', find: true },
 	packaged: true,
