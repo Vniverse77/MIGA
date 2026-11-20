@@ -1,7 +1,14 @@
 // Mobile (Android first). Files come from inside the package.
 // Mobile-only features go here: push wake-ups, share sheet, QR scanning for addresses and link codes,
 // and the native transports from the censorship-resistance plan (DNS and low-volume UDP).
-import { PUBLIC_ORIGIN, PUBLIC_RELAY, type Platform } from './types';
+import {
+	PUBLIC_ORIGIN,
+	PUBLIC_RELAY,
+	type BackgroundControl,
+	type Notifier,
+	type NotifyPermission,
+	type Platform
+} from './types';
 import { browserDownload } from './download';
 import { webNotifier } from './webnotify';
 
@@ -10,6 +17,13 @@ type Native = {
 	setBottom(c: string): void;
 	setCanGoBack(can: boolean): void;
 	saveFile?(name: string, base64: string, mime: string): void;
+	notifyPermission?(): string;
+	requestNotifyPermission?(): void;
+	notify?(tag: string, title: string, body: string): void;
+	cancel?(tag: string): void;
+	getBackground?(): boolean;
+	setBackground?(on: boolean): void;
+	batteryExemption?(): void;
 };
 // MainActivity.kt registers this object; it is absent in a plain browser.
 const native = () => (window as unknown as { MigaNative?: Native }).MigaNative;
@@ -35,10 +49,74 @@ function saveFile(name: string, data: Uint8Array, mime: string): Promise<'saved'
 	});
 }
 
+// Notifications go through the native shell (MainActivity.kt): the Notification API does not work in an Android
+// web view. The page still decides when to notify, so privacy settings and mute apply unchanged. A tap comes back
+// through window.__migaTap(tag) and runs the click handler of the latest notification with that tag.
+const taps = new Map<string, () => void>();
+let asking: ((p: NotifyPermission) => void) | null = null;
+if (typeof window !== 'undefined') {
+	const w = window as unknown as { __migaTap?: (tag: string) => void; __migaPerm?: (p: string) => void };
+	w.__migaTap = (tag) => {
+		const run = taps.get(tag);
+		taps.delete(tag);
+		run?.();
+	};
+	w.__migaPerm = (p) => {
+		const done = asking;
+		asking = null;
+		done?.(p === 'granted' ? 'granted' : 'denied');
+	};
+}
+
+const nativeNotifier: Notifier = {
+	async permission() {
+		const n = native();
+		if (!n?.notifyPermission) return webNotifier.permission();
+		const p = n.notifyPermission();
+		return p === 'granted' || p === 'default' ? p : 'denied';
+	},
+	request() {
+		const n = native();
+		if (!n?.requestNotifyPermission) return webNotifier.request();
+		return new Promise((resolve) => {
+			asking = resolve;
+			n.requestNotifyPermission!();
+		});
+	},
+	show(n) {
+		const shell = native();
+		if (!shell?.notify) return webNotifier.show(n);
+		taps.set(n.tag, n.onClick);
+		shell.notify(n.tag, n.title, n.body);
+	},
+	close(tag) {
+		taps.delete(tag);
+		const shell = native();
+		if (shell?.cancel) shell.cancel(tag);
+		else webNotifier.close(tag);
+	}
+};
+
+// A foreground service keeps the connection alive while the app is in the background (docs/NOTIFICATIONS.md).
+const background: BackgroundControl = {
+	kind: 'service',
+	async state() {
+		const n = native();
+		return { available: !!n?.setBackground, on: !!n?.getBackground?.() };
+	},
+	async set(on) {
+		native()?.setBackground?.(on);
+	},
+	async batteryExemption() {
+		native()?.batteryExemption?.();
+	}
+};
+
 export const platform: Platform = {
+	background,
 	target: 'mobile',
 	label: 'beta',
-	notifier: webNotifier,
+	notifier: nativeNotifier,
 	packaged: true,
 	relayUrl: () => PUBLIC_RELAY,
 	publicOrigin: () => PUBLIC_ORIGIN,
