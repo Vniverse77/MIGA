@@ -10,6 +10,7 @@ export const MAX_MEMBERS = 5;
 export const MAX_BANNED = 50;
 export const MAX_GROUP_NAME = 40;
 export const MAX_GROUP_DELETE = 50;
+export const MAX_GONE = 300;
 const SIG_DOMAIN = 'miga-group-v1\0';
 const GID = /^[0-9a-f]{32}$/;
 const MSG_ID = /^[0-9a-f]{32}$/;
@@ -30,8 +31,9 @@ export type GroupStatus = 'invited' | 'active' | 'removed' | 'banned' | 'left';
 /** Everything this device knows about one group. `accepted`, `left`, `muted` and `status` are local, never signed. */
 export type GroupRecord = {
 	state: GroupState;
-	/** Admin signature over `state`. */
+	/** Signature over `state`, and the address that made it (the admin before a transfer, else `state.admin`). */
 	sig: string;
+	signer: string;
 	status: GroupStatus;
 	/** The invite came from someone who is not my contact: it sits in Requests until accepted. */
 	request?: boolean;
@@ -42,6 +44,8 @@ export type GroupRecord = {
 	left: string[];
 	muted?: boolean;
 	since: number;
+	/** Ids of messages deleted here (newest last, at most MAX_GONE): a redelivery or a sync copy must not bring them back. */
+	gone?: string[];
 	/** Highest epoch for which I already asked the admin for the state. */
 	wanted?: number;
 };
@@ -112,9 +116,10 @@ export function canonicalState(st: GroupState): string {
 	});
 }
 
-export function signState(admin: Identity, st: GroupState): string {
-	if (admin.address !== st.admin) throw new GroupError('not_admin');
-	return bytesToHex(ed25519.sign(utf8ToBytes(SIG_DOMAIN + canonicalState(st)), admin.secret));
+/** `signer` must be the admin the receivers know: for a transfer that is the OLD admin, not `st.admin`. */
+export function signState(signer: Identity, st: GroupState, expected: string = st.admin): string {
+	if (signer.address !== expected) throw new GroupError('not_admin');
+	return bytesToHex(ed25519.sign(utf8ToBytes(SIG_DOMAIN + canonicalState(st)), signer.secret));
 }
 
 /** True when `sig` is `signer`'s signature over `st`. */
@@ -221,6 +226,8 @@ export function cleanMentions(value: unknown, members: string[]): string[] {
 export const cleanMsgIds = (value: unknown): string[] =>
 	Array.isArray(value) ? [...new Set(value.filter(isMsgId))].slice(0, MAX_GROUP_DELETE) : [];
 
+const cleanMsgIds2 = (v: unknown[]): string[] => v.filter(isMsgId).slice(-MAX_GONE);
+
 /** Per-recipient relay id: the relay's `sent` frame carries only an id, so every copy needs its own. */
 export function wireId(gid: string, key: string, recipient: string): string {
 	return bytesToHex(sha256(utf8ToBytes(`${gid}:${key}:${recipient}`))).slice(0, 32);
@@ -230,7 +237,7 @@ export function wireId(gid: string, key: string, recipient: string): string {
 export function cleanRecord(value: unknown): GroupRecord | null {
 	const r = (value ?? {}) as Partial<GroupRecord>;
 	const state = cleanState(r.state);
-	if (!state || !verifyState(state, r.sig, state.admin)) return null;
+	if (!state || typeof r.signer !== 'string' || !isAddress(r.signer) || !verifyState(state, r.sig, r.signer)) return null;
 	const statuses: GroupStatus[] = ['invited', 'active', 'removed', 'banned', 'left'];
 	if (!statuses.includes(r.status as GroupStatus)) return null;
 	const inState = (list: unknown) =>
@@ -238,6 +245,7 @@ export function cleanRecord(value: unknown): GroupRecord | null {
 	return {
 		state,
 		sig: r.sig as string,
+		signer: r.signer,
 		status: r.status as GroupStatus,
 		...(r.request === true ? { request: true } : {}),
 		...(r.request === true && r.unverified === true ? { unverified: true } : {}),
@@ -245,6 +253,7 @@ export function cleanRecord(value: unknown): GroupRecord | null {
 		left: inState(r.left),
 		...(r.muted === true ? { muted: true } : {}),
 		since: Number(r.since) || 0,
+		...(Array.isArray(r.gone) && r.gone.length ? { gone: cleanMsgIds2(r.gone) } : {}),
 		...(Number.isInteger(r.wanted) ? { wanted: r.wanted } : {})
 	};
 }

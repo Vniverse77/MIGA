@@ -4,7 +4,7 @@
 import type { Att } from './attach';
 import { cleanAtt } from './attach';
 import { cleanReply, encryptGroup, MAX_TEXT, randomId, type Identity, type Plain, type Reply } from './crypto';
-import { cleanGroupMessage, cleanGroupName, cleanMentions, cleanMsgIds, cleanRecord, cleanState, GroupError, isGid, isMsgId, judgeState, newState, renamed, signState, transferred, verifyState, wireId, withMember, withoutMember, type GroupMessage, type GroupRecord, type GroupState, type GroupSync } from './groups';
+import { cleanGroupMessage, cleanGroupName, MAX_GONE, cleanMentions, cleanMsgIds, cleanRecord, GroupError, isGid, isMsgId, judgeState, newState, renamed, signState, transferred, wireId, withMember, withoutMember, type GroupMessage, type GroupRecord, type GroupState, type GroupSync } from './groups';
 import type { GroupStore, OutItem } from './group-store';
 import { afterSend, FAIL_AFTER_MS, nextStep, type Track } from './outbox';
 import type { Pow } from './pow';
@@ -191,11 +191,12 @@ export class GroupEngine {
 
 	/** Signs `next`, stores it and sends it to its members and to `also` (removed addresses). */
 	private async publish(rec: GroupRecord, next: GroupState, op: string, also: string[] = [], pows: Record<string, Pow> = {}): Promise<GroupRecord> {
-		const sig = signState(this.d.me, next);
+		const sig = signState(this.d.me, next, rec.state.admin);
 		const updated: GroupRecord = {
 			...rec,
 			state: next,
 			sig,
+			signer: this.me,
 			accepted: rec.accepted.filter((a) => next.members.includes(a)),
 			left: rec.left.filter((a) => next.members.includes(a))
 		};
@@ -216,7 +217,7 @@ export class GroupEngine {
 			let st = newState(this.me, name, this.now(), gid);
 			for (const a of new Set(invitees)) st = withMember(st, a);
 			st = { ...st, epoch: 1 };
-			const rec: GroupRecord = { state: st, sig: signState(this.d.me, st), status: 'active', accepted: [this.me], left: [], since: this.now() };
+			const rec: GroupRecord = { state: st, sig: signState(this.d.me, st), signer: this.me, status: 'active', accepted: [this.me], left: [], since: this.now() };
 			await this.save(rec);
 			const payload = { group: { op: 'invite', st, sig: rec.sig } };
 			for (const to of st.members.filter((m) => m !== this.me)) await this.enqueue(to, gid, payload, pows[to] ? { pow: pows[to] } : {});
@@ -288,20 +289,22 @@ export class GroupEngine {
 			const payload = { group: { op: 'leave', gid, epoch: rec.state.epoch } };
 			for (const to of others) await this.enqueue(to, gid, payload);
 			if (!others.length) {
-				await this.deleteLocal(gid);
+				await this.dropGroup(gid);
 				return;
 			}
 			await this.save({ ...rec, status: 'left' });
 		});
 	}
 
-	/** Forgets a group that is over (alone, or left/removed and no longer wanted). Keeps nothing, not even the replay guard. */
+	/** Forgets a group that is over (alone, or left/removed and no longer wanted). Keeps nothing, not even the replay guard and not copies still queued (wait for `pendingCount()` to drop after a leave). */
 	deleteLocal(gid: string): Promise<void> {
-		return this.run(async () => {
-			this.groups.delete(gid);
-			for (const [w, o] of this.out) if (o.gid === gid) (this.out.delete(w), this.track.delete(w));
-			await this.d.store.deleteGroup(gid);
-		});
+		return this.run(() => this.dropGroup(gid));
+	}
+
+	private async dropGroup(gid: string): Promise<void> {
+		this.groups.delete(gid);
+		for (const [w, o] of this.out) if (o.gid === gid) (this.out.delete(w), this.track.delete(w));
+		await this.d.store.deleteGroup(gid);
 	}
 
 	setMuted(gid: string, muted: boolean): Promise<void> {
@@ -393,6 +396,7 @@ export class GroupEngine {
 			}
 			if (gone.length) {
 				const list = gone.map((m) => m.id);
+				await this.remember(gid, list);
 				this.d.transport.syncAll({ k: 'gdel', gid, ids: list });
 				await this.fanOut(rec, 'del', { ids: list });
 				// Copies of the deleted messages that never left must not leave now.
@@ -407,6 +411,7 @@ export class GroupEngine {
 		return this.run(async () => {
 			const list = cleanMsgIds(ids);
 			for (const id of list) await this.d.store.deleteMessage(gid, id);
+			await this.remember(gid, list);
 			if (list.length) this.d.transport.syncAll({ k: 'gdel', gid, ids: list });
 		});
 	}
@@ -491,13 +496,13 @@ export class GroupEngine {
 		if (!st.members.includes(this.me)) {
 			// Removed or banned. An unknown group I was never in is not stored.
 			if (!known) return;
-			await this.save({ ...known, state: st, sig, status: st.banned.includes(this.me) ? 'banned' : 'removed', accepted: [], left: [] }, !viaSync);
+			await this.save({ ...known, state: st, sig, signer: known.state.admin, status: known.status === 'left' ? 'left' : st.banned.includes(this.me) ? 'banned' : 'removed', accepted: [], left: [] }, !viaSync);
 			return;
 		}
 		if (known) {
 			const back = known.status === 'removed' || known.status === 'banned' || known.status === 'left';
 			await this.save({
-				...known, state: st, sig,
+				...known, state: st, sig, signer: known.state.admin,
 				status: back ? 'invited' : known.status,
 				accepted: known.accepted.filter((a) => st.members.includes(a)),
 				left: known.left.filter((a) => st.members.includes(a))
@@ -511,7 +516,7 @@ export class GroupEngine {
 			return;
 		}
 		const rec: GroupRecord = {
-			state: st, sig, status: 'invited', accepted: [st.admin], left: [], since: this.now(),
+			state: st, sig, signer: st.admin, status: 'invited', accepted: [st.admin], left: [], since: this.now(),
 			...(verdictReq !== 'contact' ? { request: true } : {}), ...(verdictReq === 'unverified' ? { unverified: true } : {})
 		};
 		await this.save(rec, !viaSync);
@@ -531,7 +536,7 @@ export class GroupEngine {
 		}
 		if (g.t === 'msg') {
 			if (!isMsgId(g.id) || typeof g.text !== 'string' || g.text.length > MAX_TEXT) return;
-			if (await this.d.store.getMessage(gid, g.id)) return;
+			if (rec.gone?.includes(g.id) || (await this.d.store.getMessage(gid, g.id))) return;
 			const att = g.att === undefined ? null : cleanAtt(g.att);
 			if (g.att !== undefined && !att) return;
 			if (!g.text.trim() && !att) return;
@@ -559,13 +564,25 @@ export class GroupEngine {
 				if (m && !m.mine && m.from === from) {
 					await this.d.store.deleteMessage(gid, id);
 					gone.push(id);
+				} else if (!m) {
+					await this.remember(gid, [id]); // the delete overtook the message
 				}
 			}
+			await this.remember(gid, gone);
 			if (gone.length) {
 				this.d.transport.syncAll({ k: 'gdel', gid, ids: gone });
 				this.onEvent({ type: 'deleted', gid, ids: gone });
 			}
 		}
+	}
+
+	/** Remembers deleted ids so a late copy of the message cannot come back. */
+	private async remember(gid: string, ids: string[]): Promise<void> {
+		const rec = this.groups.get(gid);
+		if (!rec || !ids.length) return;
+		const gone = [...new Set([...(rec.gone ?? []), ...ids])].slice(-MAX_GONE);
+		this.groups.set(gid, { ...rec, gone });
+		await this.d.store.putGroup({ ...rec, gone });
 	}
 
 	private async applyEdit(gid: string, id: string, author: string, text: string, ts: number, sync: boolean): Promise<void> {
@@ -589,9 +606,8 @@ export class GroupEngine {
 				const known = this.groups.get(rec.state.id);
 				if (!known) return void (await this.save(rec, false));
 				if (rec.state.epoch > known.state.epoch) {
-					// The signature was checked by cleanRecord against the admin named in the state; for a
-					// known group it must also chain from the admin we know (a transfer is signed by the old one).
-					if (!verifyState(rec.state, rec.sig, rec.state.admin) || !cleanState(rec.state)) return;
+					// A newer state must chain from the admin this device already knows (own device: sender check skipped).
+					if (!judgeState(known, { st: rec.state, sig: rec.sig }, this.me, true).ok) return;
 					return void (await this.save({ ...rec, muted: known.muted ?? rec.muted }, false));
 				}
 				if (rec.state.epoch < known.state.epoch) return;
@@ -611,6 +627,7 @@ export class GroupEngine {
 				if (!rec) return;
 				const msg = cleanGroupMessage(m.message, rec.state.id, [...rec.state.members, ...rec.state.banned, ...(m.message?.from ? [String(m.message.from)] : [])]);
 				if (!msg) return;
+				if (rec.gone?.includes(msg.id)) return;
 				const have = await this.d.store.getMessage(rec.state.id, msg.id);
 				// A duplicate is dropped, except that an own message gains delivery ticks from the other device.
 				if (have) {
@@ -626,6 +643,7 @@ export class GroupEngine {
 				if (!isGid(m.gid)) return;
 				const ids = cleanMsgIds(m.ids);
 				for (const id of ids) await this.d.store.deleteMessage(m.gid, id);
+				await this.remember(m.gid, ids);
 				if (ids.length) this.onEvent({ type: 'deleted', gid: m.gid, ids });
 			} else if (m.k === 'gedit') {
 				if (!isGid(m.gid) || !isMsgId(m.id) || typeof m.text !== 'string') return;
