@@ -12,7 +12,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	import { AttachError, deleteMedia, deleteRemote, fetchMedia, mediaIds, prepare, saveMedia, upload, type Prepared } from '../media';
 	import PhotoCrop from './PhotoCrop.svelte';
 	import { avatarUrl } from '../avatar';
-	import { PHOTO_SIZE, clearOwnPhoto, clearPeerPhoto, loadOwnPhoto, loadPeerPhoto, loadPhotoSent, openImage, saveOwnPhoto, savePeerPhoto, savePhotoSent, type OwnPhoto } from '../photo';
+	import { PHOTO_SIZE, hashBytes, clearOwnPhoto, clearPeerPhoto, loadOwnPhoto, loadPeerPhoto, loadPhotoSent, openImage, saveOwnPhoto, savePeerPhoto, savePhotoSent, type OwnPhoto } from '../photo';
 	import Scanner from './Scanner.svelte';
 	import { GLOBAL_LIMIT, messageKey, searchAll, searchMessages, segments, snippet } from '../search';
 	import { appUrl, type Scanned } from '../qr';
@@ -94,7 +94,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	import type { NotifyPermission } from '../platform/types';
 	import LangSelect from '../LangSelect.svelte';
 	import { afterSend, nextStep, type Track } from '../outbox';
-	import { cleanPinState, emptyPinState, isPinned, orderWithPins, pinKey, prunePins, toggleChatPin, togglePin, unpin, type PinState } from '../pins';
+	import { MAX_PINNED_CHATS, MAX_PINS, cleanPinState, emptyPinState, isPinned, orderWithPins, pinKey, prunePins, toggleChatPin, togglePin, unpin, type PinState } from '../pins';
 	import { TYPING_EXPIRE_MS, TYPING_IDLE, typingStep, type TypingMode, type TypingState } from '../typing';
 	import { RelayClient, type Incoming, type RelayEvents, type Status } from '../relay';
 	import {
@@ -2314,8 +2314,17 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	}
 
 	/** What this device holds, for the backup dialog to pick from. */
-	function backupSnapshot(): Snapshot {
+	async function backupSnapshot(): Promise<Snapshot> {
+		let photo: Snapshot['photo'] = null;
+		if (ownPhoto) {
+			const bytes = new Uint8Array(await ownPhoto.blob.arrayBuffer());
+			let bin = '';
+			for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+			photo = { type: ownPhoto.blob.type || 'image/webp', data: btoa(bin) };
+		}
 		return {
+			photo,
+			pins: $state.snapshot(pins),
 			profile: $state.snapshot(profile),
 			contacts: $state.snapshot(contacts),
 			blocked: $state.snapshot(blocked),
@@ -2346,6 +2355,17 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			if (content.contacts) saveContacts(mergeContacts($state.snapshot(contacts), content.contacts));
 			if (content.blocked) saveBlocked([...new Set([...$state.snapshot(blocked), ...content.blocked])].slice(0, MAX_BLOCKED));
 			if (content.muted) saveMuted([...new Set([...$state.snapshot(muted), ...content.muted])].slice(0, MAX_BLOCKED));
+			if (content.pins) {
+				const have = $state.snapshot(pins);
+				const m = { ...have.m };
+				for (const [peer, keys] of Object.entries(content.pins.m)) m[peer] = [...new Set([...(m[peer] ?? []), ...keys])].slice(0, MAX_PINS);
+				savePins({ m, c: [...new Set([...have.c, ...content.pins.c])].slice(0, MAX_PINNED_CHATS) });
+			}
+			if (content.photo && !ownPhoto) {
+				const bin = atob(content.photo.data);
+				const bytes = Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
+				await saveOwnPhoto({ blob: new Blob([bytes], { type: content.photo.type }), hash: hashBytes(bytes) });
+			}
 			if (content.chats) {
 				const merged = $state.snapshot(chats) as Chats;
 				for (const [peer, list] of Object.entries(content.chats)) mergeMessages((merged[peer] ??= []), list);

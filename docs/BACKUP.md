@@ -11,7 +11,7 @@ on the device; **a backup is never uploaded** by MIGA, and the relay never sees 
 | Backup file (`.miga`) | secret key; optionally contacts, profile, block/mute lists, settings and message history | file saved by the person |
 | Recovery code | the secret key only (32 bytes) | QR code and a grouped text code (`ABCDE-FGHJK-...`) |
 
-Attachments are not included in a backup file (they are not stored in the page data). Restoring on a new
+The own profile photo (256x256 image, base64 in `photo: { type, data }`) and the pins (`pins: { m, c }`: pinned messages per chat, pinned chats) are part of the profile choice and are optional fields, so v0.9.3 and older files still restore and the payload stays `v: 1`. Attachments are not included in a backup file (they are not stored in the page data). Restoring on a new
 device brings back the same address; chats of contacts then resync as usual.
 
 ## Container format (version 1)
@@ -39,7 +39,7 @@ offset  size  field
 - Default KDF: `logN 16, r 8, p 2` (64 MiB of memory), sized to run on a phone in about a second.
   Readers accept `logN` 12..18, `r` 1..16, `p` 1..4 and refuse anything else before running scrypt, so a
   crafted file cannot make a device allocate gigabytes.
-- Payload of a backup file: JSON `{ v: 1, created, secret (64 hex), profile?, contacts?, blocked?, muted?, settings?, chats? }`,
+- Payload of a backup file: JSON `{ v: 1, created, secret (64 hex), profile?, contacts?, blocked?, muted?, settings?, chats?, photo?, pins? }`,
   compressed when the platform supports it. A restored file is treated as untrusted input and every field
   is validated like data from another device.
 - Payload of a recovery code: the 32 raw secret bytes, not compressed. The code is the container in

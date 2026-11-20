@@ -377,7 +377,7 @@ const en = {
 	bk_last: "Last backup: {when}",
 	bk_never: "You have not backed up this key yet.",
 	bk_extras: "Contacts and settings",
-	bk_extras_sub: "Profile, contacts, blocked and muted chats.",
+	bk_extras_sub: "Profile, photo, contacts, pins, blocked and muted chats.",
 	bk_history: "Chat history",
 	bk_history_sub: "Makes the file larger. Photos and videos are not included.",
 	bk_pass: "Passphrase",
