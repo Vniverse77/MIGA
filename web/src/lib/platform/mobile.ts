@@ -26,6 +26,7 @@ type Native = {
 	getBackground?(): boolean;
 	setBackground?(on: boolean): void;
 	batteryExemption?(): void;
+	convertImage?(base64: string, maxEdge: number): string;
 };
 // MainActivity.kt registers this object; it is absent in a plain browser.
 const native = () => (window as unknown as { MigaNative?: Native }).MigaNative;
@@ -139,6 +140,16 @@ export const platform: Platform = {
 	publicOrigin: () => PUBLIC_ORIGIN,
 	openExternal: (url) => void window.open(url, '_blank', 'noopener,noreferrer'),
 	setupWindow: () => {},
+	convertImage: async (bytes, maxEdge) => {
+		const n = native();
+		if (!n?.convertImage) return null;
+		let binary = '';
+		for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+		await new Promise((r) => setTimeout(r, 0)); // let the page paint first: the call below blocks the script
+		const out = n.convertImage(btoa(binary), maxEdge);
+		if (!out) return null;
+		return Uint8Array.from(atob(out), (c) => c.charCodeAt(0));
+	},
 	clipboard: { writeText: (text) => writeText(text), readText: async () => (await readText().catch(() => '')) || '' },
 	saveFile,
 	// The native shell does the tick when it can (MainActivity.kt), the Vibration API is the fallback.

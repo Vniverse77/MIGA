@@ -53,6 +53,11 @@ export interface LinkPreviewFetcher {
 }
 
 export interface Platform {
+	/**
+	 * Android: decodes a picture the web view cannot (HEIC/HEIF, huge photos) with the system decoder and returns it as a
+	 * JPEG of at most `maxEdge` px (rotation applied, metadata dropped). Null when it cannot. Absent elsewhere.
+	 */
+	readonly convertImage?: (bytes: Uint8Array, maxEdge: number) => Promise<Uint8Array | null>;
 	/** Native clipboard of the desktop and Android shells; absent in the browser. */
 	readonly clipboard?: NativeClipboard;
 	/** Absent in the browser build: sending a link there never contacts the site. */

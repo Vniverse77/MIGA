@@ -26,12 +26,23 @@ export type Prepared = {
 	thumb: string;
 };
 
-async function bitmapOf(blob: Blob): Promise<ImageBitmap> {
+/**
+ * Decodes in the web view; when that fails (HEIC/HEIF, a photo too big for the view, an odd encoder) the system
+ * decoder of the shell gets a try: it hands back a downscaled JPEG. Throws AttachError('decode') when nothing can read it.
+ */
+async function bitmapOf(blob: Blob, maxEdge = MAX_EDGE): Promise<ImageBitmap> {
 	try {
 		return await createImageBitmap(blob);
 	} catch {
-		throw new AttachError('decode');
+		// fall through to the shell decoder
 	}
+	try {
+		const converted = await platform.convertImage?.(new Uint8Array(await blob.arrayBuffer()), maxEdge);
+		if (converted && converted.length > 0) return await createImageBitmap(new Blob([converted as BlobPart], { type: 'image/jpeg' }));
+	} catch {
+		// reported below
+	}
+	throw new AttachError('decode');
 }
 
 function canvasBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob | null> {
@@ -111,7 +122,7 @@ export async function prepare(file: Blob, opts: { maxEdge?: number; still?: bool
 		bmp.close();
 		return out;
 	}
-	const bmp = await bitmapOf(file);
+	const bmp = await bitmapOf(file, maxEdge);
 	try {
 		const scale = Math.min(1, maxEdge / Math.max(bmp.width, bmp.height));
 		const w = Math.max(1, Math.round(bmp.width * scale));
