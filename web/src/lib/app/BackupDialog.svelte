@@ -19,7 +19,7 @@
 		onclose
 	}: {
 		identity: Identity;
-		snapshot: () => Snapshot;
+		snapshot: () => Snapshot | Promise<Snapshot>;
 		last: BackupInfo | null;
 		onsaved: (kind: 'file' | 'code') => void;
 		onclose: () => void;
@@ -57,7 +57,7 @@
 		busy = true;
 		error = '';
 		try {
-			const content = buildBackup(identity, snapshot(), { extras, history });
+			const content = buildBackup(identity, await snapshot(), { extras, history });
 			const bytes = await encodeBackup(content, pass);
 			const result = await platform.saveFile(backupFileName(), bytes, 'application/octet-stream');
 			if (result === 'saved') {

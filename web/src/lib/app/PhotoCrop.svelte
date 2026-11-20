@@ -91,7 +91,6 @@
 		<input type="range" min="1" max="4" step="0.01" bind:value={view.zoom} aria-label={t('photo_zoom')} />
 	</label>
 	<div class="crop-actions">
-		<button type="button" class="ghost" title={t('photo_cancel')} aria-label={t('photo_cancel')} onclick={oncancel} disabled={busy}><Icon name="close" size={20} /></button>
 		<button type="button" class="primary" title={t('photo_save')} aria-label={t('photo_save')} onclick={save} disabled={busy}><Icon name="check" size={20} /></button>
 	</div>
 </Sheet>

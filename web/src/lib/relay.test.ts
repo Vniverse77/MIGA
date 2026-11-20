@@ -294,7 +294,7 @@ Deno.test({
 			const a = connect(h, alice);
 			a.client.connect();
 			await a.waitReady(1);
-			// Bob is offline: the frames vanish, nothing waits for him.
+			// Test Beta is offline: the frames vanish, nothing waits for him.
 			a.client.sendLive(bob.address, encryptTyping(alice, bob.address, true));
 			a.client.sendLive(bob.address, encryptLive(alice, bob.address, 'hel'));
 			await sleep(300);

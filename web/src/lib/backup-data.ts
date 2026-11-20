@@ -4,6 +4,7 @@
 import { BackupError, KIND_FILE, open, seal } from './backup';
 import { MAX_TEXT, bytesToHex, hexToBytes, identityFromSecret, isAddress, type Identity } from './crypto';
 import { cleanBlocked, cleanContact, cleanMessage, cleanProfile } from './devices';
+import { cleanPinState, type PinState } from './pins';
 import type { Chats, Contact, NotifyMode, Profile } from './storage';
 
 export type BackupSettings = { receipts: boolean; live: boolean; notify: NotifyMode };
@@ -21,6 +22,9 @@ export type BackupContent = {
 	muted?: string[];
 	settings?: BackupSettings;
 	chats?: Chats;
+	/** Own profile photo (256x256 image, base64) and pins. Added after the first release; older files lack them. */
+	photo?: { type: string; data: string };
+	pins?: PinState;
 };
 
 /** What this device holds right now; the backup dialog picks from it. */
@@ -31,6 +35,8 @@ export type Snapshot = {
 	muted: string[];
 	chats: Chats;
 	settings: BackupSettings;
+	photo?: { type: string; data: string } | null;
+	pins?: PinState;
 };
 
 export type Choice = {
@@ -48,6 +54,8 @@ export function buildBackup(identity: Identity, data: Snapshot, choice: Choice, 
 		content.blocked = data.blocked;
 		content.muted = data.muted;
 		content.settings = data.settings;
+		if (data.photo) content.photo = data.photo;
+		if (data.pins) content.pins = data.pins;
 	}
 	if (choice.history) {
 		const chats: Chats = {};
@@ -105,6 +113,18 @@ export function cleanBackup(value: unknown): BackupContent {
 	}
 	if (raw.blocked !== undefined) out.blocked = cleanBlocked(raw.blocked);
 	if (raw.muted !== undefined) out.muted = cleanBlocked(raw.muted);
+	if (raw.pins !== undefined) out.pins = cleanPinState(raw.pins);
+	const photo = (raw.photo ?? null) as { type?: unknown; data?: unknown } | null;
+	if (
+		photo &&
+		typeof photo.type === 'string' &&
+		/^image\/(webp|jpeg|png)$/.test(photo.type) &&
+		typeof photo.data === 'string' &&
+		photo.data.length <= 280_000 &&
+		/^[A-Za-z0-9+/]+={0,2}$/.test(photo.data)
+	) {
+		out.photo = { type: photo.type, data: photo.data };
+	}
 	const settings = (raw.settings ?? null) as Partial<BackupSettings> | null;
 	if (settings && typeof settings === 'object') {
 		out.settings = {
