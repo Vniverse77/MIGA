@@ -26,6 +26,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		encryptDelete,
 		encryptEdit,
 		encryptLive,
+		encryptTyping,
 		encryptReceipt,
 		MAX_TEXT,
 		MAX_DELETE,
@@ -89,6 +90,8 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	import type { NotifyPermission } from '../platform/types';
 	import LangSelect from '../LangSelect.svelte';
 	import { afterSend, nextStep, type Track } from '../outbox';
+	import { cleanPinState, emptyPinState, isPinned, orderWithPins, pinKey, prunePins, toggleChatPin, togglePin, unpin, type PinState } from '../pins';
+	import { TYPING_EXPIRE_MS, TYPING_IDLE, typingStep, type TypingMode, type TypingState } from '../typing';
 	import { RelayClient, type Incoming, type RelayEvents, type Status } from '../relay';
 	import {
 		MAX_BLOCKED,
@@ -97,8 +100,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		flushWrites,
 		loadBackupInfo,
 		loadData,
-		loadLive,
-		saveLive,
+		loadTypingMode,
+		saveTypingMode,
+		savePins,
 		loadFiltered,
 		saveFiltered,
 		loadStrict,
@@ -158,8 +162,34 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	let powBusy = $state<string[]>([]);
 	/** Read receipts: send mine and show theirs. Off by default (anonymity first). */
 	let receipts = $state(false);
-	/** Send what I type live (ephemeral frames). This device only, off by default. */
-	let liveOn = $state(false);
+	/** What the other side sees while I type: nothing, "typing..." (default) or my live text. This device only. */
+	let typingMode = $state<TypingMode>('typing');
+	const liveOn = $derived(typingMode === 'live');
+	/** Pinned messages and chats. Local to my devices, never sent to the other person. */
+	let pins = $state<PinState>(emptyPinState());
+	/** Chats whose person is typing right now ("typing..."), cleared by a stop frame, a message or a timeout. */
+	let typingIn = $state<Record<string, true>>({});
+	/** A new live line or typing row near the end keeps the chat scrolled to the end. */
+	function stickToBottom(): void {
+		void tick().then(() => {
+			const el = scroller;
+			if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight;
+		});
+	}
+	const ephTs = new Map<string, number>();
+	const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	function setTypingIn(peer: string, on: boolean): void {
+		clearTimeout(typingTimers.get(peer));
+		typingTimers.delete(peer);
+		if (!on) {
+			if (peer in typingIn) delete typingIn[peer];
+			return;
+		}
+		typingIn[peer] = true;
+		typingTimers.set(peer, setTimeout(() => setTypingIn(peer, false), TYPING_EXPIRE_MS));
+	}
+	/** The chat row long-press sheet (touch). */
+	let chatSheet = $state<string | null>(null);
 	/** What the open chat's other side is typing right now (never stored, never a message). */
 	let liveIn = $state<{ peer: string; text: string } | null>(null);
 	let liveInTimer: ReturnType<typeof setTimeout> | undefined;
@@ -523,13 +553,18 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	const ACK_MS = 1000;
 
 	const requests = $derived(contacts.filter((c) => c.request));
-	const chatContacts = $derived(contacts.filter((c) => !c.request));
+	const chatContacts = $derived(orderWithPins(contacts.filter((c) => !c.request), pins.c));
 	const activeContact = $derived(chatContacts.find((c) => c.address === active) ?? null);
 	/** Safety number with the open contact; the same digits show on the contact's device. */
 	const activeSafety = $derived(
 		identity && activeContact ? safetyNumber(identity.address, activeContact.address) : ''
 	);
 	const activeMessages = $derived(active ? (chats[active] ?? []) : []);
+	/** The open chat's pinned messages that are still here, newest pin first. */
+	const pinnedMsgs = $derived(
+		active ? (pins.m[active] ?? []).flatMap((k) => activeMessages.filter((m) => pinKey(m) === k)) : []
+	);
+	let pinCursor = $state(0);
 	const myName = $derived(profile.name.trim().replace(/\s+/g, ' ').slice(0, 40));
 	/** The name sent along with messages, or undefined when the user stays anonymous. */
 	const sharedName = $derived(profile.share && myName ? myName : undefined);
@@ -589,7 +624,8 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			chats = data.chats;
 			blocked = data.blocked;
 			receipts = loadReceipts();
-			liveOn = loadLive();
+			typingMode = loadTypingMode();
+			pins = data.pins;
 			filtered = loadFiltered();
 			strict = loadStrict();
 			unread = data.unread;
@@ -655,21 +691,31 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				checkSeen();
 			},
 			onLive: (f) => {
-				// Receiving does not depend on my own setting: the sender chooses. Only the open chat shows it.
-				if (blocked.includes(f.from) || f.from !== active || contacts.find((c) => c.address === f.from)?.request) return;
+				// Receiving does not depend on my own setting: the sender chooses.
+				if (blocked.includes(f.from) || contacts.find((c) => c.address === f.from)?.request) return;
 				const plain = decrypt(me, f.from, f.body);
-				if (!plain || plain.live === undefined) return;
+				if (!plain) return; // also what an old client does with a `typing` frame
+				// The relay forwards ephemeral frames concurrently, so two can swap places: the sender's clock decides.
+				if (plain.ts < (ephTs.get(f.from) ?? 0)) return;
+				ephTs.set(f.from, plain.ts);
+				if (plain.typing !== undefined) {
+					setTypingIn(f.from, plain.typing);
+					if (plain.typing && f.from === active) stickToBottom();
+					if (!plain.typing && liveIn?.peer === f.from) liveIn = null;
+					return;
+				}
+				// Live text is only shown in the open chat.
+				if (f.from !== active || plain.live === undefined) return;
 				clearTimeout(liveInTimer);
 				if (!plain.live) {
 					liveIn = null;
+					setTypingIn(f.from, false);
 					return;
 				}
 				liveIn = { peer: f.from, text: plain.live };
+				setTypingIn(f.from, true);
 				liveInTimer = setTimeout(() => (liveIn = null), 5000);
-				void tick().then(() => {
-					const el = scroller;
-					if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight;
-				});
+				stickToBottom();
 			},
 			onMessage: (m) => {
 				// Blocked: acknowledged (the relay deletes it) and dropped without a trace.
@@ -678,12 +724,13 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				// Anything we cannot open is acknowledged too, so it does not clog the queue.
 				if (!plain) return true;
 				// Live typing is ephemeral; one that still came as a normal message (old relay) is dropped.
-				if (plain.live !== undefined) return true;
+				if (plain.live !== undefined || plain.typing !== undefined) return true;
 				// A delete request: only messages that came from this very sender can go.
 				if (plain.del) {
 					const items = plain.del.map((id) => ({ id, mine: false }));
 					const list = chats[m.from];
 					if (list && removeMessages(list, items)) persist();
+					dropPins(m.from, items);
 					const now = Date.now();
 					rememberDeletes(items.map((i) => ({ c: m.from, s: 'm' as const, id: i.id, mine: false, ts: now })));
 					return true;
@@ -729,6 +776,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 					clearTimeout(liveInTimer);
 					liveIn = null;
 				}
+				setTypingIn(m.from, false);
 				// A shared name is only a label chosen by the sender; the address stays the identity.
 				ensureContact(m.from, plain.name, asRequest ? { unverified: verdict === 'unverified' } : undefined);
 				const message: Message = {
@@ -861,6 +909,10 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				if (message.muted !== undefined) {
 					muted = cleanBlocked(message.muted, identity?.address);
 					saveMuted($state.snapshot(muted));
+				}
+				if (message.pins !== undefined) {
+					pins = cleanPinState(message.pins);
+					savePins($state.snapshot(pins));
 				}
 				for (const other of cleanDevices(message.devices)) {
 					if (other.address !== device.address && !devices.some((d) => d.address === other.address)) {
@@ -1031,6 +1083,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		syncSend(to, { k: 'state', profile: $state.snapshot(profile), devices: everyone });
 		syncSend(to, { k: 'state', blocked: $state.snapshot(blocked) });
 		syncSend(to, { k: 'state', muted: $state.snapshot(muted) });
+		syncSend(to, { k: 'state', pins: $state.snapshot(pins) });
 		syncSend(to, { k: 'receipts', on: receipts });
 		for (let i = 0; i < all.length; i += 50) {
 			syncSend(to, { k: 'state', contacts: all.slice(i, i + 50) });
@@ -1083,6 +1136,13 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		const added = addTombs(tombs, cleanTombs(raw));
 		if (!added.length) return;
 		saveTombs([...tombs]);
+		for (const t of added) {
+			if (t.s === 'm' && t.id) dropPins(t.c, [{ id: t.id, mine: t.mine === true }]);
+			else if (pins.m[t.c]) {
+				delete pins.m[t.c];
+				savePins($state.snapshot(pins));
+			}
+		}
 		const result = applyTombs(added, chats, contacts);
 		for (const t of added) if (t.s !== 'm') clearUnread(t.c);
 		if (active && result.goneContacts.includes(active)) active = null;
@@ -1358,9 +1418,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		void tick().then(checkSeen);
 	});
 
-	function setLive(on: boolean): void {
-		liveOn = on;
-		saveLive(on);
+	function setTypingChoice(mode: TypingMode): void {
+		typingMode = mode;
+		saveTypingMode(mode);
 	}
 
 	// ── Live typing (sender side) ───────────────────────────────────────────────────────
@@ -1395,6 +1455,19 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			liveTimer = setTimeout(liveFlush, 300); // throttled, trailing edge
 		}
 	}
+
+	// Typing indicator (sender side): a tiny `typing` frame, at most every 3 s, plus a stop frame.
+	let typingState: TypingState = TYPING_IDLE;
+	const sendable = () => composerFocused && visible && view === 'chat' && !editing && active && !blocked.includes(active) && !contacts.find((c) => c.address === active)?.request;
+	$effect(() => {
+		const peer = typingMode === 'typing' && sendable() ? active : null;
+		const has = draft.trim().length > 0;
+		untrack(() => {
+			const step = typingStep(typingState, peer, has, Date.now());
+			typingState = step.state;
+			for (const f of step.frames) if (identity) relay?.sendLive(f.to, encryptTyping(identity, f.to, f.typing));
+		});
+	});
 
 	$effect(() => {
 		const peer =
@@ -1662,6 +1735,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		relay?.unsend(peer, message.id);
 		const items = [{ id: message.id, mine: true }];
 		if (chats[peer] && removeMessages(chats[peer], items)) persist();
+		dropPins(peer, items);
 		rememberDeletes(items.map((i) => ({ c: peer, s: 'm' as const, id: i.id, mine: i.mine, ts: Date.now() })));
 	}
 
@@ -2070,7 +2144,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			if (content.profile) saveProfile(content.profile);
 			if (content.settings) {
 				saveReceipts(content.settings.receipts);
-				saveLive(content.settings.live);
+				saveTypingMode(content.settings.live ? 'live' : loadTypingMode() === 'live' ? 'typing' : loadTypingMode());
 				saveNotifyMode(content.settings.notify);
 			}
 			if (content.contacts) saveContacts(mergeContacts($state.snapshot(contacts), content.contacts));
@@ -2384,6 +2458,64 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	}
 
 	/** Clears the messages of one conversation on this device only; the contact stays. */
+	// ── Pins (local to my devices, never sent to the other person) ───────────────────────
+
+	function savePinsAndSync(): void {
+		const snapshot = $state.snapshot(pins);
+		savePins(snapshot);
+		syncAll({ k: 'state', pins: snapshot });
+	}
+
+	const pinnedNow = (m: Message) => isPinned(pins.m, active ?? '', pinKey(m));
+
+	function toggleMessagePin(message: Message): void {
+		msgMenu = null;
+		if (!active) return;
+		togglePin(pins.m, active, pinKey(message));
+		pinCursor = 0;
+		savePinsAndSync();
+	}
+
+	function unpinMessage(peer: string, key: string): void {
+		if (unpin(pins.m, peer, key)) {
+			pinCursor = 0;
+			savePinsAndSync();
+		}
+	}
+
+	/** Deleted messages lose their pin. Returns nothing; the pins sync with the delete. */
+	function dropPins(peer: string, items: { id: string; mine: boolean }[]): void {
+		let changed = false;
+		for (const i of items) changed = unpin(pins.m, peer, pinKey(i)) || changed;
+		if (changed) savePins($state.snapshot(pins));
+	}
+
+	/** Safety net: a pin whose message is gone (and no history copy is running) is dropped. */
+	$effect(() => {
+		const peer = active;
+		if (!peer || hx || !pins.m[peer]) return;
+		const have = new Set(activeMessages.map(pinKey));
+		if (prunePins(pins.m, peer, have)) untrack(() => savePins($state.snapshot(pins)));
+	});
+
+	/** Tap on the bar: jump to the shown pin, then the next tap goes to the next one. */
+	function jumpToPin(): void {
+		const list = pinnedMsgs;
+		if (!list.length) return;
+		const m = list[pinCursor % list.length];
+		jumpToKey(pinKey(m));
+		pinCursor = (pinCursor + 1) % list.length;
+	}
+
+	function togglePinnedChat(address: string): void {
+		menuOpen = false;
+		ctx = null;
+		chatSheet = null;
+		pins.c = pins.c.filter((a) => contacts.some((c) => c.address === a));
+		toggleChatPin(pins.c, address);
+		savePinsAndSync();
+	}
+
 	async function deleteConversation(address: string): Promise<void> {
 		menuOpen = false;
 		ctx = null;
@@ -2396,6 +2528,10 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		});
 		if (!ok) return;
 		delete chats[address];
+		if (pins.m[address]) {
+			delete pins.m[address];
+			savePins($state.snapshot(pins));
+		}
 		clearUnread(address);
 		rememberDeletes([{ c: address, s: 'c', ts: Date.now() }]);
 		persist();
@@ -2474,6 +2610,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		if (!ok) return;
 		const items = [{ id: message.id, mine: message.mine }];
 		if (chats[peer] && removeMessages(chats[peer], items)) persist();
+		dropPins(peer, items);
 		rememberDeletes(items.map((i) => ({ c: peer, s: 'm' as const, id: i.id, mine: i.mine, ts: Date.now() })));
 	}
 
@@ -2494,6 +2631,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		if (message.att) void deleteRemote($state.snapshot(message.att));
 		const items = [{ id: message.id, mine: true }];
 		if (chats[peer] && removeMessages(chats[peer], items)) persist();
+		dropPins(peer, items);
 		rememberDeletes(items.map((i) => ({ c: peer, s: 'm' as const, id: i.id, mine: i.mine, ts: Date.now() })));
 	}
 
@@ -2524,7 +2662,10 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 
 	/** Scrolls to the original and flashes it. Does nothing when it is no longer in this chat. */
 	function jumpTo(reply: Reply): void {
-		const key = (reply.from === identity?.address ? 'm' : 't') + reply.id;
+		jumpToKey((reply.from === identity?.address ? 'm' : 't') + reply.id);
+	}
+
+	function jumpToKey(key: string): void {
 		const target = Array.from(scroller?.children ?? []).find(
 			(el) => (el as HTMLElement).dataset.key === key
 		);
@@ -2547,6 +2688,33 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		}, 450);
 	}
 	const pressEnd = () => clearTimeout(pressTimer);
+
+	// Touch: holding a chat row opens its sheet (pin, mute). The click that follows the release is swallowed.
+	let rowTimer: ReturnType<typeof setTimeout> | undefined;
+	let rowHeld = false;
+	let rowAt = { x: 0, y: 0 };
+	function rowPressStart(e: PointerEvent, address: string): void {
+		if (e.pointerType !== 'touch') return;
+		rowHeld = false;
+		rowAt = { x: e.clientX, y: e.clientY };
+		clearTimeout(rowTimer);
+		rowTimer = setTimeout(() => {
+			rowHeld = true;
+			platform.haptic?.();
+			chatSheet = address;
+		}, 450);
+	}
+	const rowPressEnd = () => clearTimeout(rowTimer);
+	function rowPressMove(e: PointerEvent): void {
+		if (Math.hypot(e.clientX - rowAt.x, e.clientY - rowAt.y) > 10) rowPressEnd();
+	}
+	function rowClick(address: string): void {
+		if (rowHeld) {
+			rowHeld = false;
+			return;
+		}
+		openChat(address);
+	}
 	function pressMove(event: PointerEvent): void {
 		if (Math.hypot(event.clientX - pressAt.x, event.clientY - pressAt.y) > 10) pressEnd();
 	}
@@ -2633,6 +2801,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	<span class="meta">
 		{#if last}<small class="when">{timeOf(last.ts)}</small>{/if}
 		<span class="marks">
+			{#if pins.c.includes(address)}<span class="pin-mark" role="img" aria-label={t('pinned_chat')} title={t('pinned_chat')}><Icon name="pin" size={13} /></span>{/if}
 			{#if muted.includes(address)}
 				<svg class="mute-icon" viewBox="0 0 24 24" width="13" height="13" role="img" aria-label={t('muted_label')} fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 					<title>{t('muted_label')}</title>
@@ -2838,13 +3007,17 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 							type="button"
 							class="contact"
 							class:selected={view === 'chat' && contact.address === active}
-							onclick={() => openChat(contact.address)}
+							onclick={() => rowClick(contact.address)}
 							oncontextmenu={(e) => openMenu(e, contact.address)}
+							onpointerdown={(e) => rowPressStart(e, contact.address)}
+							onpointerup={rowPressEnd}
+							onpointercancel={rowPressEnd}
+							onpointermove={rowPressMove}
 						>
 							<span class="avatar" aria-hidden="true">{initial(contact.name)}</span>
 							<span class="who">
 								<strong>{contact.name}{#if contact.verified}{@render verifiedMark(14)}{/if}</strong>
-								<small>{last ? previewOf(last) : shortAddress(contact.address)}</small>
+								{#if typingIn[contact.address]}<small class="typing-sub" data-typing>{t('typing_now')}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></small>{:else}<small>{last ? previewOf(last) : shortAddress(contact.address)}</small>{/if}
 							</span>
 							{@render rowMeta(contact.address, last)}
 						</button>
@@ -2944,12 +3117,17 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 							type="button"
 							class="contact"
 							class:selected={view === 'chat' && contact.address === active}
-							onclick={() => openChat(contact.address)}
+							onclick={() => rowClick(contact.address)}
+							oncontextmenu={(e) => (e.preventDefault(), !isDesktop && (chatSheet = contact.address))}
+							onpointerdown={(e) => rowPressStart(e, contact.address)}
+							onpointerup={rowPressEnd}
+							onpointercancel={rowPressEnd}
+							onpointermove={rowPressMove}
 						>
 							<span class="avatar" aria-hidden="true">{initial(contact.name)}</span>
 							<span class="who">
 								<strong>{contact.name}{#if contact.verified}{@render verifiedMark(14)}{/if}</strong>
-								<small>{last ? previewOf(last) : shortAddress(contact.address)}</small>
+								{#if typingIn[contact.address]}<small class="typing-sub" data-typing>{t('typing_now')}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></small>{:else}<small>{last ? previewOf(last) : shortAddress(contact.address)}</small>{/if}
 							</span>
 							{@render rowMeta(contact.address, last)}
 						</button>
@@ -3085,14 +3263,13 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 
 					<section class="card" id="live-typing">
 						<h2>{t('live_title')}</h2>
-						<label class="check">
-							<input
-								type="checkbox"
-								checked={liveOn}
-								onchange={(e) => setLive(e.currentTarget.checked)}
-							/>
-							<span>{t('live_label')}</span>
-						</label>
+						<div class="seg3" role="radiogroup" aria-label={t('live_title')}>
+							{#each ['off', 'typing', 'live'] as const as mode (mode)}
+								<button type="button" role="radio" aria-checked={typingMode === mode} class:on={typingMode === mode} data-typing-mode={mode} onclick={() => setTypingChoice(mode)}>
+									{t(mode === 'off' ? 'typing_off' : mode === 'typing' ? 'typing_indicator' : 'typing_live')}
+								</button>
+							{/each}
+						</div>
 						<p class="hint">{t('live_note')}</p>
 					</section>
 
@@ -3329,7 +3506,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 					<span class="avatar" aria-hidden="true">{initial(activeContact.name)}</span>
 					<div class="who">
 						<strong>{activeContact.name}{#if activeContact.verified}{@render verifiedMark(14)}{/if}{#if status !== 'online'}<i class="dot {status}" role="img" aria-label={t(`status_${status}`)} title={t(`status_${status}`)}></i>{/if}</strong>
-<small class="selectable">{shortAddress(activeContact.address)}</small>
+{#if typingIn[activeContact.address]}<small class="typing-sub" data-typing>{t('typing_now')}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></small>{:else}<small class="selectable">{shortAddress(activeContact.address)}</small>{/if}
 					</div>
 					<span class="lock">{t('f1_title')}</span>
 					<button type="button" class="ibtn" data-search-open title={t('search_chat')} aria-label={t('search_chat')} aria-pressed={searchOpen} onclick={() => (searchOpen ? closeSearch() : openSearch())}><Icon name="search" /></button>
@@ -3348,6 +3525,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 							<div class="menu" role="menu">
 								<button type="button" role="menuitem" onclick={() => openVerify(activeContact.address)}>
 									<Icon name="shield" size={16} />{t('verify_safety')}
+								</button>
+								<button type="button" role="menuitem" onclick={() => togglePinnedChat(activeContact.address)}>
+									<Icon name={pins.c.includes(activeContact.address) ? 'pin-off' : 'pin'} size={16} />{t(pins.c.includes(activeContact.address) ? 'unpin_chat' : 'pin_chat')}
 								</button>
 								<button type="button" role="menuitem" onclick={() => toggleMute(activeContact.address)}>
 									<Icon name={muted.includes(activeContact.address) ? 'bell' : 'bell-off'} size={16} />{t(muted.includes(activeContact.address) ? 'unmute_chat' : 'mute_chat')}
@@ -3388,6 +3568,20 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 							<button type="button" class="primary" onclick={() => openVerify(activeContact.address)}>{t('verify_safety')}</button>
 							<button type="button" onclick={() => dismissChanged(activeContact.address)}>{t('safety_dismiss')}</button>
 						</div>
+					</div>
+				{/if}
+
+				{#if pinnedMsgs.length}
+					{@const shown = pinnedMsgs[pinCursor % pinnedMsgs.length]}
+					<div class="pinbar" data-pinbar>
+						<button type="button" class="pin-main" aria-label={t('pinned_msg')} title={t('pinned_msg')} onclick={jumpToPin}>
+							<span class="pin-ico"><Icon name="pin" size={16} /></span>
+							<span class="pin-text">
+								{#if pinnedMsgs.length > 1}<small class="pin-n">{t('pinned_of', { i: (pinCursor % pinnedMsgs.length) + 1, n: pinnedMsgs.length })}</small>{/if}
+								<span class="pin-prev">{previewOf(shown)}</span>
+							</span>
+						</button>
+						<button type="button" class="ibtn pin-x" data-unpin aria-label={t('unpin_msg')} title={t('unpin_msg')} onclick={() => active && unpinMessage(active, pinKey(shown))}><Icon name="pin-off" size={18} /></button>
 					</div>
 				{/if}
 
@@ -3468,6 +3662,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 							<button type="button" aria-label={t('reply')} title={t('reply')} onclick={() => startReply(message)}>
 								<Icon name="reply" size={16} />
 							</button>
+							<button type="button" class:on={pinnedNow(message)} aria-pressed={pinnedNow(message)} aria-label={t(pinnedNow(message) ? 'unpin_msg' : 'pin_msg')} title={t(pinnedNow(message) ? 'unpin_msg' : 'pin_msg')} onclick={() => toggleMessagePin(message)}>
+								<Icon name={pinnedNow(message) ? 'pin-off' : 'pin'} size={16} />
+							</button>
 							<button
 								type="button"
 								class="act-btn"
@@ -3509,9 +3706,12 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 					{/each}
 					{#if liveIn && liveIn.peer === active}
 						<div class="live-line" data-live aria-live="off">
-							<span class="live-tag">{t('live_tag')}</span>
+							<span class="live-tag"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>{t('live_tag')}</span>
 							<span class="live-text">{liveIn.text}</span>
 						</div>
+					{/if}
+					{#if active && typingIn[active] && !(liveIn && liveIn.peer === active)}
+						<div class="typing-row" data-typing-row role="status"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="sr">{t('typing_now')}</span></div>
 					{/if}
 					{#if farFromBottom}
 						<div class="jump-wrap">
@@ -3632,6 +3832,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		<button type="button" role="menuitem" onclick={() => ctx && openVerify(ctx.address)}>
 			<Icon name="shield" size={16} />{t('verify_safety')}
 		</button>
+		<button type="button" role="menuitem" onclick={() => ctx && togglePinnedChat(ctx.address)}>
+			<Icon name={ctx && pins.c.includes(ctx.address) ? 'pin-off' : 'pin'} size={16} />{t(ctx && pins.c.includes(ctx.address) ? 'unpin_chat' : 'pin_chat')}
+		</button>
 		<button type="button" role="menuitem" onclick={() => ctx && toggleMute(ctx.address)}>
 			<Icon name={ctx && muted.includes(ctx.address) ? 'bell' : 'bell-off'} size={16} />{t(ctx && muted.includes(ctx.address) ? 'unmute_chat' : 'mute_chat')}
 		</button>
@@ -3647,6 +3850,19 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	</div>
 {/if}
 
+{#if chatSheet}
+	{@const addr = chatSheet}
+	{@const who = contacts.find((c) => c.address === addr)}
+	<MessageSheet
+		preview={who?.name ?? ''}
+		onclose={() => (chatSheet = null)}
+		actions={[
+			{ icon: pins.c.includes(addr) ? 'pin-off' : 'pin', label: t(pins.c.includes(addr) ? 'unpin_chat' : 'pin_chat'), run: () => togglePinnedChat(addr) },
+			{ icon: muted.includes(addr) ? 'bell' : 'bell-off', label: t(muted.includes(addr) ? 'unmute_chat' : 'mute_chat'), run: () => (chatSheet = null, toggleMute(addr)) }
+		]}
+	/>
+{/if}
+
 {#if msgMenu?.kind === 'sheet'}
 	{@const target = msgMenu.message}
 	<MessageSheet
@@ -3654,6 +3870,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		onclose={() => (msgMenu = null)}
 		actions={[
 			{ icon: 'reply', label: t('reply'), run: () => reply(target) },
+			{ icon: pinnedNow(target) ? 'pin-off' : 'pin', label: t(pinnedNow(target) ? 'unpin_msg' : 'pin_msg'), run: () => toggleMessagePin(target) },
 			...(target.text ? [{ icon: 'copy' as const, label: t('msg_copy'), run: () => void copyMessage(target) }] : []),
 			...(target.mine && target.state === 'sent' ? [{ icon: 'edit' as const, label: t('edit_msg'), run: () => startEdit(target) }] : []),
 			{ icon: 'trash', label: t('delete_msg_me'), danger: true, run: () => void deleteForMe(target) },
@@ -3673,6 +3890,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	>
 		<button type="button" role="menuitem" onclick={() => reply(target)}>
 			<Icon name="reply" size={16} />{t('reply')}
+		</button>
+		<button type="button" role="menuitem" onclick={() => toggleMessagePin(target)}>
+			<Icon name={pinnedNow(target) ? 'pin-off' : 'pin'} size={16} />{t(pinnedNow(target) ? 'unpin_msg' : 'pin_msg')}
 		</button>
 		{#if target.text}
 			<button type="button" role="menuitem" onclick={() => void copyMessage(target)}>
@@ -4711,21 +4931,162 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	.live-line {
 		align-self: flex-start;
 		max-width: min(36rem, 85%);
-		padding: 0.2rem 0.2rem 0.2rem 0.6rem;
-		border-left: 2px solid var(--line);
-		color: var(--dim);
+		padding: 0.4rem 0.75rem 0.45rem;
+		border: 0.5px dashed var(--line-strong);
+		border-radius: var(--radius-lg);
+		border-bottom-left-radius: var(--radius);
+		background: transparent;
+		color: var(--muted);
 		font-size: 0.9rem;
-		font-style: italic;
 		overflow-wrap: anywhere;
 		white-space: pre-wrap;
 	}
+	.live-text {
+		font-style: italic;
+	}
 	.live-tag {
-		display: block;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin-bottom: 0.15rem;
 		font-size: 0.68rem;
 		font-style: normal;
 		letter-spacing: 0.02em;
 		text-transform: uppercase;
-		opacity: 0.8;
+		opacity: 0.85;
+	}
+	.typing-row {
+		align-self: flex-start;
+		padding: 0.55rem 0.8rem;
+		border: 0.5px solid var(--line);
+		border-radius: var(--radius-lg);
+		border-bottom-left-radius: var(--radius);
+		background: var(--panel);
+		color: var(--muted);
+	}
+	.sr {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+	}
+	.typing-sub {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		color: var(--accent);
+	}
+	.dots {
+		display: inline-flex;
+		gap: 3px;
+		align-items: center;
+	}
+	.dots i {
+		width: 4px;
+		height: 4px;
+		border-radius: 50%;
+		background: currentColor;
+		animation: typing-dot 1.2s infinite ease-in-out;
+	}
+	.dots i:nth-child(2) {
+		animation-delay: 0.15s;
+	}
+	.dots i:nth-child(3) {
+		animation-delay: 0.3s;
+	}
+	@keyframes typing-dot {
+		0%,
+		60%,
+		100% {
+			opacity: 0.3;
+			transform: translateY(0);
+		}
+		30% {
+			opacity: 1;
+			transform: translateY(-2px);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.dots i {
+			animation: none;
+			opacity: 0.7;
+		}
+	}
+	.pinbar {
+		display: flex;
+		flex: none;
+		align-items: center;
+		min-height: 2.25rem;
+		border-bottom: 0.5px solid var(--line);
+		background: var(--panel);
+	}
+	.pin-main {
+		display: flex;
+		flex: 1;
+		align-items: center;
+		gap: 0.6rem;
+		min-width: 0;
+		min-height: 2.25rem;
+		padding: 0.2rem 0.5rem 0.2rem 0.9rem;
+		border: 0;
+		border-left: 3px solid var(--accent-2);
+		background: transparent;
+		color: var(--text);
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+	.pin-ico {
+		display: grid;
+		color: var(--accent-2);
+	}
+	.pin-text {
+		display: grid;
+		min-width: 0;
+	}
+	.pin-n {
+		color: var(--accent-2);
+		font-size: 0.68rem;
+	}
+	.pin-prev {
+		overflow: hidden;
+		color: var(--muted);
+		font-size: 0.85rem;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.pin-x {
+		flex: none;
+	}
+	.pin-mark {
+		display: inline-grid;
+		color: var(--muted);
+	}
+	.seg3 {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 2px;
+		padding: 2px;
+		border: 0.5px solid var(--line-strong);
+		border-radius: var(--radius);
+		background: var(--bg);
+	}
+	.seg3 button {
+		min-height: 2.25rem;
+		padding: 0 0.4rem;
+		border: 0;
+		border-radius: 4px;
+		background: transparent;
+		color: var(--muted);
+		font: inherit;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+	.seg3 button.on {
+		background: var(--panel-2);
+		color: var(--heading);
+		box-shadow: inset 0 0 0 0.5px var(--accent);
 	}
 	.bubble {
 		align-self: flex-start;
@@ -5484,6 +5845,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			background: transparent;
 			color: var(--muted);
 			cursor: pointer;
+		}
+		.cluster button.on {
+			color: var(--accent-2);
 		}
 		.cluster button:hover,
 		.cluster button:focus-visible {

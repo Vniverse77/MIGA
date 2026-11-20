@@ -4,10 +4,13 @@
 	import Icon from './Icon.svelte';
 	import { t } from '../i18n.svelte';
 
-	type Action = { icon: 'reply' | 'copy' | 'edit' | 'trash'; label: string; danger?: boolean; run: () => void };
+	type Action = { icon: 'reply' | 'copy' | 'edit' | 'trash' | 'pin' | 'pin-off' | 'bell' | 'bell-off'; label: string; danger?: boolean; run: () => void };
 	let { preview, actions, onclose }: { preview: string; actions: Action[]; onclose: () => void } = $props();
 
 	let sheet = $state<HTMLElement | null>(null);
+	// The click that ends the long-press must not hit the scrim that just appeared under the finger.
+	const openedAt = Date.now();
+	const scrimClick = () => Date.now() - openedAt > 400 && onclose();
 	let drag = $state<{ id: number; y0: number; dy: number } | null>(null);
 
 	$effect(() => {
@@ -29,7 +32,7 @@
 	}
 </script>
 
-<div class="scrim" role="presentation" onclick={onclose}></div>
+<div class="scrim" role="presentation" onclick={scrimClick}></div>
 <div
 	class="sheet"
 	class:dragging={!!drag}

@@ -9,6 +9,7 @@ import { cleanAtt } from './attach';
 import { cleanIds, cleanReply, editTime, fromBase64, identityFromSecret, isAddress, isSafetyNumber, toBase64, type Identity } from './crypto';
 import { MAX_BLOCKED, type Chats, type Contact, type Device, type Message, type Profile } from './storage';
 import { platform } from './platform';
+import type { PinState } from './pins';
 import type { Cursor, Tomb } from './sync';
 
 /** How long a link code stays valid. */
@@ -46,6 +47,8 @@ export type SyncMessage =
 			blocked?: string[];
 			/** The complete list of muted chats; it replaces the one on the receiving device. */
 			muted?: string[];
+			/** Pinned messages and chats; replaces the ones on the receiving device. */
+			pins?: PinState;
 	  }
 	| { k: 'history'; chats: Chats }
 	/** New device -> another device: send the next page of history after `after` (null = from the start). */
