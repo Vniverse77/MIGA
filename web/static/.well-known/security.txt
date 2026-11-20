@@ -1,0 +1,8 @@
+# DRAFT: fill the placeholders before release. Not legal advice.
+# Contact: GitHub private vulnerability reporting (preferred), or the address below.
+Contact: https://github.com/Vniverse77/MIGA/security/advisories/new
+# [TO BE FILLED BY OWNER: optional e-mail line, for example "Contact: mailto:..."] 
+Expires: 2027-11-20T00:00:00.000Z
+Preferred-Languages: en, tr
+Canonical: https://miga.vniverse77.com/.well-known/security.txt
+Policy: https://github.com/Vniverse77/MIGA/blob/master/SECURITY.md

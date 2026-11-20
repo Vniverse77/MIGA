@@ -93,6 +93,8 @@
 			<a href="https://vniverse77.com/">Vniverse77</a>
 			<a href="https://forum.vniverse77.com/">Forum</a>
 			<a href="https://github.com/Vniverse77/MIGA">GitHub</a>
+			<a href="/privacy">{t('legal_privacy')}</a>
+			<a href="/terms">{t('legal_terms')}</a>
 		</nav>
 	</div>
 </footer>
