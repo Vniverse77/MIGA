@@ -2,6 +2,7 @@
 	// Self-hosted font: no request to a third-party font service.
 	import '@fontsource-variable/jetbrains-mono/wght.css';
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { initLanguage, t } from '../lib/i18n.svelte';
 	import { initTheme } from '../lib/theme.svelte';
 	import { platform } from '../lib/platform';
@@ -14,6 +15,19 @@
 	// the server has a newer build than the one running.
 	let updateReady = $state(false);
 
+	// "D" opens the download page, from the public pages only: not in the app, not while typing, not with modifiers.
+	function onkeydown(e: KeyboardEvent): void {
+		if (__MIGA_TARGET__ !== 'web' || e.defaultPrevented) return;
+		if (e.key !== 'd' && e.key !== 'D') return;
+		if (e.ctrlKey || e.metaKey || e.altKey) return;
+		const path = location.pathname;
+		if (path.startsWith('/app') || path.startsWith('/download')) return;
+		const el = e.target instanceof HTMLElement ? e.target : null;
+		if (el && (el.isContentEditable || /^(input|textarea|select)$/i.test(el.tagName))) return;
+		e.preventDefault();
+		goto('/download/');
+	}
+
 	onMount(() => {
 		platform.setupWindow();
 		initLanguage();
@@ -21,6 +35,8 @@
 		newerBuildOnServer().then((yes) => (updateReady = yes));
 	});
 </script>
+
+<svelte:window {onkeydown} />
 
 {@render children()}
 

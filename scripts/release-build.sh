@@ -56,7 +56,8 @@ f_bump() {
   perl -pi -e 's/^pkgver=.*/pkgver=$ENV{V}/; s/^pkgrel=.*/pkgrel=1/' packaging/aur/PKGBUILD
   # Flatpak manifest (.deb name), landing download names, docs examples
   perl -pi -e 's/MIGA_[^_\/]+_amd64\.deb/MIGA_$ENV{V}_amd64.deb/' packaging/flatpak/com.vniverse77.miga.yml
-  perl -pi -e 's/MIGA_[^_\x27]+_x86_64\.flatpak/MIGA_$ENV{V}_x86_64.flatpak/; s{download/v[^\/]+/}{download/v$ENV{V}/}; s/MIGA_[^_\x27]+-beta_android\.apk/MIGA_$ENV{V}-beta_android.apk/' web/src/lib/site/Landing.svelte
+  # download page: release.ts holds the version and date; every download link is derived from them
+  perl -MPOSIX -pi -e 's/^(export const RELEASE_VERSION = \x27)[^\x27]*(\x27)/${1}$ENV{V}$2/; s/^(export const RELEASE_DATE = \x27)[^\x27]*(\x27)/${1}@{[POSIX::strftime("%F", localtime)]}$2/' web/src/lib/site/release.ts
   perl -pi -e 's/MIGA_[^_ ]+-beta_android\.apk/MIGA_$ENV{V}-beta_android.apk/g; s/(sets the version to `)[^`]*(`)/${1}$ENV{BASE}$2/; s/(`versionCode` )\d+/${1}$ENV{VCODE}/' docs/BUILDING.md
   git diff --stat | tail -1
 }
