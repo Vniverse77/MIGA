@@ -10,6 +10,7 @@
 		| 'back'
 		| 'copy'
 		| 'trash'
+		| 'refresh'
 		| 'reply'
 		| 'edit'
 		| 'close'
@@ -73,6 +74,9 @@
 		<path d="M5 15V6a2 2 0 0 1 2-2h8" />
 	{:else if name === 'trash'}
 		<path d="M4 7h16M10 4h4M6 7l1 13h10l1-13M10 11v5M14 11v5" />
+	{:else if name === 'refresh'}
+		<path d="M21 12a9 9 0 1 1-2.6-6.3" />
+		<path d="M21 4v5h-5" />
 	{:else if name === 'reply'}
 		<path d="M9 14 4 9l5-5" />
 		<path d="M4 9h10a6 6 0 0 1 6 6v3" />

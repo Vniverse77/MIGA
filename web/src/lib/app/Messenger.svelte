@@ -87,6 +87,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	import type { Component } from 'svelte';
 	import type { NotifyPermission } from '../platform/types';
 	import LangSelect from '../LangSelect.svelte';
+	import { afterSend, nextStep, type Track } from '../outbox';
 	import { RelayClient, type Incoming, type RelayEvents, type Status } from '../relay';
 	import {
 		MAX_BLOCKED,
@@ -501,6 +502,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	let linkMailbox: Identity | null = null;
 	let linkTimer: ReturnType<typeof setTimeout> | undefined;
 	let outboxTimer: ReturnType<typeof setInterval> | undefined;
+	let retryTimer: ReturnType<typeof setInterval> | undefined;
 	const outbox: { to: string; id: string; body: string }[] = [];
 	/** Delivery acks waiting to be sent (batched ~1 s): peer -> message ids. */
 	const ackQueue = new Map<string, Set<string>>();
@@ -602,6 +604,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			relay?.close();
 			deviceRelay?.close();
 			clearInterval(outboxTimer);
+			clearInterval(retryTimer);
 			clearTimeout(linkTimer);
 			clearInterval(hxTimer);
 			clearTimeout(hxFlashTimer);
@@ -716,6 +719,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				return true;
 			},
 			onSent: (id) => {
+				retryTrack.delete(id);
 				const found = setMessageState(id, 'sent');
 				if (found) syncAll({ k: 'msg', peer: found.peer, message: $state.snapshot(found.message) });
 			},
@@ -745,6 +749,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		});
 		deviceRelay.connect();
 		outboxTimer = setInterval(pumpOutbox, OUTBOX_MS);
+		retryTimer = setInterval(pumpRetries, 1000);
 		hxTimer = setInterval(hxTick, 5000);
 		applyInvite();
 
@@ -1510,14 +1515,66 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 
 	let busyRetry: ReturnType<typeof setTimeout> | undefined;
 
+	/** Per pending message: tries so far and when the next one is due (memory only; a restart starts again). */
+	const retryTrack = new Map<string, Track>();
+
+	/** Puts one own message on the wire (same id every time, so nobody gets it twice). */
+	function transmit(me: Identity, peer: string, m: Message): boolean {
+		if (!relay?.isReady) return false;
+		const ok = relay.send(peer, m.id, encrypt(me, peer, m.text, sharedName, m.reply, m.att));
+		if (ok) retryTrack.set(m.id, afterSend(retryTrack.get(m.id), Date.now()));
+		return ok;
+	}
+
+	/** After every (re)connect and after a "relay busy" pause: everything still pending goes out now. */
 	function resendPending(me: Identity): void {
 		for (const [address, list] of Object.entries(chats)) {
 			for (const m of list) {
-				if (m.mine && m.state === 'pending') {
-					relay?.send(address, m.id, encrypt(me, address, m.text, sharedName, m.reply, m.att));
+				if (m.mine && m.state === 'pending') transmit(me, address, m);
+			}
+		}
+	}
+
+	/** Once a second: pending messages whose retry is due are sent again; after 24 h they become `failed`. */
+	function pumpRetries(): void {
+		const me = identity;
+		if (!me) return;
+		const now = Date.now();
+		for (const [address, list] of Object.entries(chats)) {
+			for (const m of list) {
+				if (!m.mine || m.state !== 'pending') continue;
+				const step = nextStep(m, retryTrack.get(m.id), now);
+				if (step === 'send') transmit(me, address, m);
+				else if (step === 'fail') {
+					retryTrack.delete(m.id);
+					const found = setMessageState(m.id, 'failed');
+					if (found) syncAll({ k: 'msg', peer: found.peer, message: $state.snapshot(found.message) });
 				}
 			}
 		}
+	}
+
+	/** "Retry" on a failed message: pending again with a fresh 24 h window, sent right away if connected. */
+	function retryFailed(message: Message): void {
+		const me = identity;
+		const peer = active;
+		if (!me || !peer || !message.mine || message.state !== 'failed') return;
+		message.state = 'pending';
+		message.retried = Date.now();
+		retryTrack.delete(message.id);
+		persist();
+		transmit(me, peer, message);
+	}
+
+	/** "Delete" on a failed message: it never reached the relay, so there is nothing to confirm. */
+	function discardFailed(message: Message): void {
+		const peer = active;
+		if (!peer || !message.mine || message.state !== 'failed') return;
+		retryTrack.delete(message.id);
+		relay?.unsend(peer, message.id);
+		const items = [{ id: message.id, mine: true }];
+		if (chats[peer] && removeMessages(chats[peer], items)) persist();
+		rememberDeletes(items.map((i) => ({ c: peer, s: 'm' as const, id: i.id, mine: i.mine, ts: Date.now() })));
 	}
 
 	function startEdit(message: Message): void {
@@ -1696,7 +1753,8 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		const id = randomId();
 		if (!chats[active]) chats[active] = [];
 		const reply = replyTo ?? undefined;
-		chats[active].push({
+		const peer = active;
+		chats[peer].push({
 			id,
 			mine: true,
 			text,
@@ -1707,8 +1765,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		persist();
 		draft = '';
 		replyTo = null;
-		// When offline it stays "pending" and is sent on the next connection.
-		relay?.send(active, id, encrypt(identity, active, text, sharedName, reply));
+		// When offline it stays "pending"; pumpRetries and the next connection send it.
+		const own = chats[peer][chats[peer].length - 1];
+		transmit(identity, peer, own);
 	}
 
 	// ── Attachments ─────────────────────────────────────────────────────────────────────
@@ -1792,7 +1851,8 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		void saveMedia(att.blob, new Blob([data.prepared.bytes as BlobPart], { type: att.mime }), att.mime);
 		uploads = uploads.filter((u) => u.key !== key);
 		uploadData.delete(key);
-		relay?.send(peer, id, encrypt(identity, peer, item.caption, sharedName, item.reply, att));
+		const own = chats[peer][chats[peer].length - 1];
+		if (identity) transmit(identity, peer, own);
 	}
 
 	function cancelUpload(key: string): void {
@@ -3159,8 +3219,14 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 											<path d="M3 13l4.5 4.5L16.5 8" />
 											{#if level !== 'sent'}<path d="M13 13l4.5 4.5L27 8" />{/if}
 										</svg>
-									</span>{:else}{stateLabel(message.state)}{/if}{/if}
+									</span>{:else if message.state === 'pending'}<span class="pending" role="img" data-state="pending" aria-label={t('state_pending')} title={t('state_pending')}><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg></span>{:else}{stateLabel(message.state)}{/if}{/if}
 							</small>
+							{#if message.mine && message.state === 'failed'}
+								<span class="failed-actions">
+									<button type="button" data-retry aria-label={t('att_retry')} title={t('att_retry')} onclick={() => retryFailed(message)}><Icon name="refresh" size={18} /></button>
+									<button type="button" data-discard aria-label={t('discard_failed')} title={t('discard_failed')} onclick={() => discardFailed(message)}><Icon name="trash" size={18} /></button>
+								</span>
+							{/if}
 							</div>
 						<div class="cluster" role="toolbar" aria-label={t('msg_actions')}>
 							<button type="button" aria-label={t('reply')} title={t('reply')} onclick={() => startReply(message)}>
@@ -4499,6 +4565,41 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	}
 	.bubble.failed {
 		border-color: var(--danger);
+	}
+	.pending {
+		display: inline-flex;
+		vertical-align: -2px;
+		color: var(--muted);
+	}
+	.failed-actions {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		margin-left: 0.25rem;
+		vertical-align: middle;
+	}
+	.failed-actions button {
+		display: grid;
+		place-items: center;
+		width: 2.25rem;
+		height: 2.25rem;
+		min-height: 0;
+		padding: 0;
+		border: 0;
+		border-radius: 50%;
+		background: none;
+		color: var(--danger);
+		cursor: pointer;
+	}
+	.failed-actions button:hover,
+	.failed-actions button:focus-visible {
+		background: var(--panel-2);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.failed-actions button {
+			width: 1.75rem;
+			height: 1.75rem;
+		}
 	}
 	.bubble p {
 		margin: 0 0 0.15rem;
