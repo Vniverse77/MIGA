@@ -3,7 +3,7 @@
 // Run: deno test --no-check --allow-all src/lib/relay.test.ts
 import { RelayClient, TIMING, type Incoming, type Status, type Timing } from './relay.ts';
 import { newIdentity, randomId } from './crypto.ts';
-import { Harness, connect, dec, sleep } from './relay-harness.ts';
+import { Harness, connect, dec, sleep } from './relay-harness.test.ts';
 
 const opts = { sanitizeOps: false, sanitizeResources: false } as const;
 
