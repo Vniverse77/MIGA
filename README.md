@@ -80,3 +80,7 @@ AGPL-3.0-or-later. See [LICENSE](LICENSE).
 
 In short: you may use, study, change and share MIGA. If you distribute a changed version, or run a
 changed relay as a service for others, you must publish your changes under the same licence.
+
+## Android APK signing certificate
+Releases are signed with the MIGA release key. Verify with `apksigner verify --print-certs <apk>`.
+SHA-256: `TBD (published after the key is created, see docs/ANDROID-SIGNING.md)`

@@ -4,6 +4,9 @@
 # Does not push, tag, publish or deploy (that is scripts/release-deploy.sh). No sudo.
 # Env: MIGA_RELEASE_BRANCH (default master), MIGA_OUT_ROOT (default ~/Projects), MIGA_SKIP="android flatpak aur deb"
 #      (space-separated steps to skip; web, relay and check always run).
+#      Android signing: MIGA_ANDROID_KEYSTORE (default ~/.config/miga-release/miga-release.p12), MIGA_ANDROID_KEY_ALIAS
+#      (default miga), password from MIGA_ANDROID_KS_PASS or an interactive prompt; MIGA_ALLOW_DEBUG_SIGNING=1 = debug key
+#      fallback when the release keystore is missing. See docs/ANDROID-SIGNING.md.
 set -euo pipefail
 
 V="${1:-}"; NOTES="${2:-}"
@@ -101,20 +104,38 @@ f_android() {
   # shellcheck disable=SC1091
   source "$HOME/.local/share/android-env.sh"
   command -v zipalign >/dev/null && command -v apksigner >/dev/null
-  [[ -f "$HOME/.android/debug.keystore" ]]
+  local ks="${MIGA_ANDROID_KEYSTORE:-$HOME/.config/miga-release/miga-release.p12}"
+  local alias="${MIGA_ANDROID_KEY_ALIAS:-miga}" kind=release
+  local -a sign
+  if [[ -f "$ks" ]]; then
+    # password: env only (exported by the prompt below); never on a command line, never logged
+    sign=(--ks "$ks" --ks-key-alias "$alias" --ks-pass env:MIGA_ANDROID_KS_PASS)
+  elif [[ "${MIGA_ALLOW_DEBUG_SIGNING:-}" == 1 && -f "$HOME/.android/debug.keystore" ]]; then
+    echo "WARNING: release keystore missing, signing with the DEBUG key (MIGA_ALLOW_DEBUG_SIGNING=1)"
+    kind=debug
+    sign=(--ks "$HOME/.android/debug.keystore" --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android)
+  else
+    echo "release keystore not found: $ks"
+    echo "create it once with scripts/android-keygen.sh (see docs/ANDROID-SIGNING.md), or set MIGA_ANDROID_KEYSTORE."
+    echo "(debug signing needs MIGA_ALLOW_DEBUG_SIGNING=1 and breaks updates for users on the release key)"
+    return 1
+  fi
   cd "$ROOT/web"; npm run build:mobile
   cd "$ROOT/desktop"; [[ -d node_modules ]] || npm install --no-audit --no-fund --no-package-lock
   [[ -d src-tauri/gen/android/app ]] || npx tauri android init --ci
   bash android-patch/apply.sh
   npx tauri android build --apk --target aarch64 --target armv7
   local u="src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk"
+  local apk="$OUT/MIGA_${V}-beta_android.apk"
   local t; t="$(mktemp -d "${TMPDIR:-/tmp}/miga-apk.XXXXXX")"
   local rc=0
   { zipalign -f -p 4 "$u" "$t/aligned.apk" \
-    && apksigner sign --ks "$HOME/.android/debug.keystore" --ks-pass pass:android --key-pass pass:android \
-         --ks-key-alias androiddebugkey --out "$OUT/MIGA_${V}-beta_android.apk" "$t/aligned.apk" \
-    && rm -f "$OUT/MIGA_${V}-beta_android.apk.idsig" \
-    && apksigner verify --print-certs "$OUT/MIGA_${V}-beta_android.apk" | head -3; } || rc=$?
+    && { set +x; apksigner sign "${sign[@]}" --out "$apk" "$t/aligned.apk"; } \
+    && rm -f "$apk.idsig" \
+    && apksigner verify --print-certs "$apk" > "$t/certs.txt" \
+    && head -3 "$t/certs.txt" \
+    && { echo "signing key : $kind"; grep -m1 'certificate SHA-256' "$t/certs.txt"; } > "$OUT/android-signing-cert.txt" \
+    && cat "$OUT/android-signing-cert.txt"; } || rc=$?
   rm -rf "$t"
   return $rc
 }
@@ -142,10 +163,24 @@ f_collect() {
   # shellcheck disable=SC2046
   sha256sum $(ls MIGA_* 2>/dev/null) > sha256sums.txt
   cat sha256sums.txt
+  if [[ -f android-signing-cert.txt ]]; then
+    { echo; echo "## Android signing certificate"; sed 's/^/    /' android-signing-cert.txt; } >> NOTES.md
+    cat android-signing-cert.txt
+  fi
   git -C "$ROOT" status --porcelain
 }
 export -f f_preflight f_bump f_check f_commit f_web f_relay f_deb f_flatpak f_android f_aur f_collect
 export NOTES BRANCH SKIP
+
+# Android release key password: asked once, here (not inside a logged step); kept only in this process's env.
+if ! skipped android; then
+  _ks="${MIGA_ANDROID_KEYSTORE:-$HOME/.config/miga-release/miga-release.p12}"
+  if [[ -f "$_ks" && -z "${MIGA_ANDROID_KS_PASS:-}" ]]; then
+    [[ -t 0 ]] || { echo "need a terminal to ask the keystore password (or export MIGA_ANDROID_KS_PASS)"; exit 2; }
+    read -rsp "Android release keystore password: " MIGA_ANDROID_KS_PASS; echo
+  fi
+  export MIGA_ANDROID_KS_PASS="${MIGA_ANDROID_KS_PASS:-}"
+fi
 
 echo "MIGA release build v$V (log: $LOG)"
 step "preflight (clean $BRANCH)"   120  f_preflight
