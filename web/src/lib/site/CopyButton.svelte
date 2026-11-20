@@ -1,24 +1,30 @@
 <script lang="ts">
 	import { t } from '../i18n.svelte';
+	import { clipboardAvailable, copyText } from '../clipboard';
 
 	let { text }: { text: string } = $props();
 	let done = $state(false);
+	let failed = $state(false);
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
 	async function copy() {
-		try {
-			await navigator.clipboard.writeText(text);
+		if (await copyText(text)) {
+			failed = false;
 			done = true;
 			clearTimeout(timer);
 			timer = setTimeout(() => (done = false), 1600);
-		} catch {
-			/* clipboard blocked: the text stays selectable */
+		} else {
+			// Blocked (plain http, no permission): the text stays selectable; say so instead of a silent click.
+			done = false;
+			failed = true;
+			clearTimeout(timer);
+			timer = setTimeout(() => (failed = false), 4000);
 		}
 	}
-	const label = $derived(done ? t('dl_copied') : t('dl_copy'));
+	const label = $derived(done ? t('dl_copied') : failed ? (clipboardAvailable() ? t('n_copy_failed') : t('n_copy_insecure')) : t('dl_copy'));
 </script>
 
-<button type="button" class="copy-btn" class:done aria-label={label} title={label} onclick={copy}>
+<button type="button" class="copy-btn" class:done class:failed aria-live="polite" aria-label={label} title={label} onclick={copy}>
 	<svg viewBox="0 0 24 24" aria-hidden="true">
 		{#if done}
 			<path d="M5 12.5l4.5 4.5L19 7.5" />
@@ -50,6 +56,9 @@
 	.copy-btn.done {
 		background: var(--accent);
 		color: var(--accent-ink);
+	}
+	.copy-btn.failed {
+		border-color: var(--danger, #d9534f);
 	}
 	svg {
 		width: 1.2rem;

@@ -10,6 +10,7 @@
     "npm:@sveltejs/adapter-static@^4.0.1": "4.0.1_@sveltejs+kit@3.1.1",
     "npm:@sveltejs/kit@3": "3.1.1_@sveltejs+vite-plugin-svelte@7.3.1_svelte@5.57.3_typescript@6.0.3_vite@8.3.6",
     "npm:@sveltejs/vite-plugin-svelte@^7.2.0": "7.3.1_svelte@5.57.3_vite@8.3.6",
+    "npm:@tauri-apps/plugin-clipboard-manager@^2.5.0": "2.5.0",
     "npm:@tauri-apps/plugin-dialog@^2.3.0": "2.8.4",
     "npm:@tauri-apps/plugin-fs@^2.4.0": "2.7.1",
     "npm:@tauri-apps/plugin-notification@^2.8.1": "2.8.1",
@@ -216,6 +217,12 @@
     },
     "@tauri-apps/api@2.12.5": {
       "integrity": "sha512-G9QIMt5fzED+aS4QhVK3w1HWLKpLIwH/MnpCr9z1ugGEHnS2ORmqrLkc0uALOjRK4qXJy+4Yiw8LDl/KicC1Hg=="
+    },
+    "@tauri-apps/plugin-clipboard-manager@2.5.0": {
+      "integrity": "sha512-dibUy1nKURYDXRMvjNk4deAbTZ5jPQ8wCE4nolt5xniryWgXQ4sK2GkFXoXlHbRdPzfZptZj95BRLfalA7m/2Q==",
+      "dependencies": [
+        "@tauri-apps/api"
+      ]
     },
     "@tauri-apps/plugin-dialog@2.8.4": {
       "integrity": "sha512-+6ZOiXenOaxXwb8qCbBPdT2jX2cFPaVVHGIskrpmJLpmWj+qKRTD6X/z9x7hTdSQn7NedcoXCkWGej4a7dC4lw==",
@@ -582,6 +589,7 @@
         "npm:@sveltejs/adapter-static@^4.0.1",
         "npm:@sveltejs/kit@3",
         "npm:@sveltejs/vite-plugin-svelte@^7.2.0",
+        "npm:@tauri-apps/plugin-clipboard-manager@^2.5.0",
         "npm:@tauri-apps/plugin-dialog@^2.3.0",
         "npm:@tauri-apps/plugin-fs@^2.4.0",
         "npm:@tauri-apps/plugin-notification@^2.8.1",

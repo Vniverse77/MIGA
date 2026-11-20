@@ -1,6 +1,7 @@
 // Mobile (Android first). Files come from inside the package.
 // Mobile-only features go here: push wake-ups, share sheet, QR scanning for addresses and link codes,
 // and the native transports from the censorship-resistance plan (DNS and low-volume UDP).
+import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
 import {
 	PUBLIC_ORIGIN,
 	PUBLIC_RELAY,
@@ -122,6 +123,7 @@ export const platform: Platform = {
 	publicOrigin: () => PUBLIC_ORIGIN,
 	openExternal: (url) => void window.open(url, '_blank', 'noopener,noreferrer'),
 	setupWindow: () => {},
+	clipboard: { writeText: (text) => writeText(text), readText: async () => (await readText().catch(() => '')) || '' },
 	saveFile,
 	// The native shell does the tick when it can (MainActivity.kt), the Vibration API is the fallback.
 	haptic: () => {

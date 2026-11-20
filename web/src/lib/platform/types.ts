@@ -35,7 +35,18 @@ export interface BackgroundControl {
 	batteryExemption?(): Promise<void>;
 }
 
+/** The system clipboard through the shell, for builds whose WebView has no reliable web clipboard API. */
+export interface NativeClipboard {
+	writeText(text: string): Promise<void>;
+	/** Plain text on the clipboard, or ''. */
+	readText(): Promise<string>;
+	/** An image on the clipboard as PNG bytes; absent where the system cannot read images. */
+	readImage?(): Promise<Uint8Array | null>;
+}
+
 export interface Platform {
+	/** Native clipboard of the desktop and Android shells; absent in the browser. */
+	readonly clipboard?: NativeClipboard;
 	/** Background connection setting; absent in the browser, where a closed tab cannot keep a connection. */
 	readonly background?: BackgroundControl;
 	/** Desktop: the unread total (muted chats left out) for the tray icon. */

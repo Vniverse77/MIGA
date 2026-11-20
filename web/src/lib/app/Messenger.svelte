@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { platform } from '../platform';
+	import { clipboardAvailable, copyText, imagesFrom, nativeImage } from '../clipboard';
 import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './ConfirmDialog.svelte';
 	import BackupDialog from './BackupDialog.svelte';
 	import RestoreDialog, { type Restored } from './RestoreDialog.svelte';
@@ -2219,11 +2220,27 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		uploadData.delete(key);
 	}
 
+	function copyFailedNotice(): string {
+		return clipboardAvailable() ? t('n_copy_failed') : t('n_copy_insecure');
+	}
+
+	/** Plain text pastes natively (never prevented). Images and GIFs from the clipboard go out as attachments. */
 	function onPaste(e: ClipboardEvent): void {
-		const files = [...(e.clipboardData?.files ?? [])];
-		if (!files.length) return;
-		e.preventDefault();
-		void attachFiles(files);
+		const images = imagesFrom(e.clipboardData);
+		const others = [...(e.clipboardData?.files ?? [])].filter((f) => !f.type.startsWith('image/'));
+		const files = [...images, ...others];
+		if (files.length) {
+			e.preventDefault();
+			void attachFiles(files);
+			return;
+		}
+		// WebKitGTK hands a copied screenshot to the shell only: ask the native clipboard when no text came along.
+		if (platform.clipboard?.readImage && !e.clipboardData?.getData('text/plain')) {
+			e.preventDefault();
+			void nativeImage().then((f) => {
+				if (f) void attachFiles([f]);
+			});
+		}
 	}
 
 	function onDragOver(e: DragEvent): void {
@@ -2233,10 +2250,11 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	}
 
 	function onDrop(e: DragEvent): void {
-		if (!e.dataTransfer?.files.length) return;
+		if (!e.dataTransfer?.files.length && !imagesFrom(e.dataTransfer).length) return;
 		e.preventDefault();
 		dragging = false;
-		void attachFiles([...e.dataTransfer.files]);
+		const dropped = [...(e.dataTransfer?.files ?? [])];
+		void attachFiles(dropped.length ? dropped : imagesFrom(e.dataTransfer));
 	}
 
 	function addContact(event?: SubmitEvent): void {
@@ -2305,12 +2323,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 
 	async function copyAddress(): Promise<void> {
 		if (!identity) return;
-		try {
-			await navigator.clipboard.writeText(identity.address);
-			notice = t('n_copied');
-		} catch {
-			notice = t('n_copy_failed');
-		}
+		notice = (await copyText(identity.address)) ? t('n_copied') : copyFailedNotice();
 	}
 
 	/** What this device holds, for the backup dialog to pick from. */
@@ -2420,12 +2433,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	}
 
 	async function copySafety(): Promise<void> {
-		try {
-			await navigator.clipboard.writeText(groupSafety(activeSafety));
-			notice = t('safety_copied');
-		} catch {
-			notice = t('n_copy_failed');
-		}
+		notice = (await copyText(groupSafety(activeSafety))) ? t('safety_copied') : copyFailedNotice();
 	}
 
 	// ── Search (local only: decrypted messages already in memory, nothing is sent anywhere) ──
@@ -2949,12 +2957,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 
 	async function copyMessage(message: Message): Promise<void> {
 		msgMenu = null;
-		try {
-			await navigator.clipboard.writeText(message.text);
-			notice = t('dl_copied');
-		} catch {
-			// Clipboard blocked: nothing to say, the text stays selectable on a mouse device.
-		}
+		notice = (await copyText(message.text)) ? t('dl_copied') : copyFailedNotice();
 	}
 
 	/** Arrow keys move inside the open message menu. */

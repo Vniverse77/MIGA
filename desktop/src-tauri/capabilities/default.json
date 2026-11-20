@@ -3,5 +3,5 @@
 	"identifier": "default",
 	"description": "The window gets the core defaults and local notifications only: no shell or network commands.",
 	"windows": ["main"],
-	"permissions": ["core:default", "notification:default"]
+	"permissions": ["core:default", "notification:default", "clipboard-manager:allow-write-text", "clipboard-manager:allow-read-text"]
 }

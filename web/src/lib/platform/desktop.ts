@@ -5,6 +5,7 @@ import {
 	requestPermission,
 	sendNotification
 } from '@tauri-apps/plugin-notification';
+import { readImage, readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
 import {
 	PUBLIC_ORIGIN,
 	PUBLIC_RELAY,
@@ -115,7 +116,23 @@ export const platform: Platform = {
 	publicOrigin: () => PUBLIC_ORIGIN,
 	openExternal: (url) => void window.open(url, '_blank', 'noopener,noreferrer'),
 	setupWindow,
-	saveFile
+	saveFile,
+	clipboard: {
+		writeText: (text) => writeText(text),
+		readText: async () => (await readText().catch(() => '')) || '',
+		async readImage() {
+			const img = await readImage().catch(() => null);
+			if (!img) return null;
+			const { width, height } = await img.size();
+			const rgba = await img.rgba();
+			const canvas = new OffscreenCanvas(width, height);
+			const ctx = canvas.getContext('2d');
+			if (!ctx) return null;
+			ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0);
+			const blob = await canvas.convertToBlob({ type: 'image/png' });
+			return new Uint8Array(await blob.arrayBuffer());
+		}
+	}
 };
 
 const TEXT_FIELD = 'input, textarea, [contenteditable]';

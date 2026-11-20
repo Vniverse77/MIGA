@@ -294,7 +294,10 @@ pub fn run() {
         // path the page may then write (the fs plugin starts with an empty scope).
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init());
-    let builder = builder.plugin(tauri_plugin_notification::init());
+    // Copy and paste go through the system clipboard, because the web clipboard API is unreliable in WebKitGTK and the Android WebView.
+    let builder = builder
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_clipboard_manager::init());
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
