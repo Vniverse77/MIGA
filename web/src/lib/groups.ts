@@ -66,7 +66,61 @@ export type GroupMessage = {
 	edited?: number;
 	/** Own messages: delivery of each copy, by member address. */
 	to?: Record<string, 'pending' | 'sent' | 'failed'>;
+	/** A system line ("A added B"), not a message. Derived on each device from signed state changes, never sent. */
+	sys?: SysLine;
 };
+
+export type SysKind = 'created' | 'added' | 'joined' | 'left' | 'removed' | 'banned' | 'unbanned' | 'renamed' | 'admin';
+/** `by`: who did it (the admin), `who`: whom it is about, `name`: the new name (renamed). */
+export type SysLine = { k: SysKind; by?: string; who?: string; name?: string };
+
+const SYS_KINDS: SysKind[] = ['created', 'added', 'joined', 'left', 'removed', 'banned', 'unbanned', 'renamed', 'admin'];
+
+/** Deterministic id, so two devices that derive the same line store it once. */
+export function sysId(gid: string, epoch: number, line: SysLine): string {
+	return bytesToHex(sha256(utf8ToBytes(`miga-sys\0${gid}\0${epoch}\0${line.k}\0${line.who ?? ''}`))).slice(0, 32);
+}
+
+/**
+ * System lines for a change from `before` to `after` (the same group). New group: "created".
+ * A state with a higher epoch yields added / left / removed / banned / unbanned / renamed / admin;
+ * a member that confirmed (`accepted` grows) yields "joined".
+ */
+export function systemLines(before: GroupRecord | undefined, after: GroupRecord): { epoch: number; line: SysLine }[] {
+	const out: { epoch: number; line: SysLine }[] = [];
+	const a = after.state;
+	if (!before) {
+		if (after.status === 'active') out.push({ epoch: a.epoch, line: { k: 'created', by: a.admin } });
+		return out;
+	}
+	const b = before.state;
+	if (a.epoch > b.epoch) {
+		for (const m of a.members) if (!b.members.includes(m)) out.push({ epoch: a.epoch, line: { k: 'added', by: a.admin, who: m } });
+		for (const m of b.members) {
+			if (a.members.includes(m)) continue;
+			if (a.banned.includes(m)) out.push({ epoch: a.epoch, line: { k: 'banned', by: a.admin, who: m } });
+			else if (before.left.includes(m)) out.push({ epoch: a.epoch, line: { k: 'left', who: m } });
+			else out.push({ epoch: a.epoch, line: { k: 'removed', by: a.admin, who: m } });
+		}
+		for (const m of b.banned) if (!a.banned.includes(m)) out.push({ epoch: a.epoch, line: { k: 'unbanned', by: a.admin, who: m } });
+		if (a.name !== b.name) out.push({ epoch: a.epoch, line: { k: 'renamed', by: a.admin, name: a.name } });
+		if (a.admin !== b.admin) out.push({ epoch: a.epoch, line: { k: 'admin', by: b.admin, who: a.admin } });
+	}
+	if (before.status === 'active' && after.status === 'active') {
+		for (const m of after.accepted) if (!before.accepted.includes(m) && m !== a.admin && a.members.includes(m)) out.push({ epoch: a.epoch, line: { k: 'joined', who: m } });
+	}
+	return out;
+}
+
+export function cleanSys(value: unknown, known: string[]): SysLine | undefined {
+	const v = (value ?? {}) as Partial<SysLine>;
+	if (!SYS_KINDS.includes(v.k as SysKind)) return undefined;
+	const addr = (x: unknown) => (typeof x === 'string' && isAddress(x) && known.includes(x) ? x : undefined);
+	const by = addr(v.by);
+	const who = addr(v.who);
+	const name = typeof v.name === 'string' && v.name ? cleanGroupName(v.name) : '';
+	return { k: v.k as SysKind, ...(by ? { by } : {}), ...(who ? { who } : {}), ...(name ? { name } : {}) };
+}
 
 /** Sync between my own devices (sealed with the account sync key, like the other kinds). */
 export type GroupSync =
@@ -182,6 +236,12 @@ export function renamed(st: GroupState, name: string): GroupState {
 	return { ...st, name: clean, epoch: st.epoch + 1 };
 }
 
+/** The admin lifts a ban. The person is not added back; they have to be invited again. */
+export function unbanned(st: GroupState, address: string): GroupState {
+	if (!st.banned.includes(address)) throw new GroupError('not_member');
+	return { ...st, banned: st.banned.filter((b) => b !== address), epoch: st.epoch + 1 };
+}
+
 export function transferred(st: GroupState, to: string): GroupState {
 	if (!st.members.includes(to) || to === st.admin) throw new GroupError('not_member');
 	return { ...st, admin: to, epoch: st.epoch + 1 };
@@ -263,6 +323,8 @@ export function cleanGroupMessage(value: unknown, gid: string, members: string[]
 	const m = (value ?? {}) as Partial<GroupMessage>;
 	if (!isMsgId(m.id) || typeof m.from !== 'string' || !isAddress(m.from) || typeof m.mine !== 'boolean') return null;
 	if (typeof m.text !== 'string' || m.text.length > MAX_TEXT) return null;
+	const sys = m.sys === undefined ? undefined : cleanSys(m.sys, [...members, m.from]);
+	if (m.sys !== undefined && !sys) return null;
 	const att = m.att === undefined ? undefined : cleanAtt(m.att, true);
 	if (m.att !== undefined && !att) return null;
 	const reply = m.reply === undefined ? undefined : cleanReply(m.reply);
@@ -283,6 +345,7 @@ export function cleanGroupMessage(value: unknown, gid: string, members: string[]
 		...(m.mentionsMe === true ? { mentionsMe: true } : {}),
 		...(typeof m.name === 'string' && m.name ? { name: m.name.slice(0, 40) } : {}),
 		...(Number(m.edited) > 0 ? { edited: Number(m.edited) } : {}),
-		...(m.mine && Object.keys(to).length ? { to } : {})
+		...(m.mine && Object.keys(to).length ? { to } : {}),
+		...(sys ? { sys } : {})
 	};
 }

@@ -524,7 +524,7 @@ Deno.test('linked device: group, messages, edits, deletes and settings follow th
 	await net.pump();
 	const snap = await b.engine.snapshot();
 	assert(snap.some((s) => s.k === 'grp'));
-	assertEquals(snap.filter((s) => s.k === 'gmsg').length, 2);
+	assertEquals(snap.filter((s) => s.k === 'gmsg' && !s.message.sys).length, 2);
 	for (const s of snap) await b2.engine.applySync(s);
 	assertEquals(b2.engine.get(gid)?.status, 'active');
 	assertEquals((await b2.messages(gid)).map((m) => m.text).sort(), ['from device one', 'to the account']);

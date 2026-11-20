@@ -4,7 +4,7 @@
 import type { Att } from './attach';
 import { cleanAtt } from './attach';
 import { cleanReply, encryptGroup, MAX_TEXT, randomId, type Identity, type Plain, type Reply } from './crypto';
-import { cleanGroupMessage, cleanGroupName, MAX_GONE, cleanMentions, cleanMsgIds, cleanRecord, GroupError, isGid, isMsgId, judgeState, newState, renamed, signState, transferred, wireId, withMember, withoutMember, type GroupMessage, type GroupRecord, type GroupState, type GroupSync } from './groups';
+import { cleanGroupMessage, cleanGroupName, MAX_GONE, cleanMentions, cleanMsgIds, cleanRecord, GroupError, isGid, isMsgId, judgeState, newState, renamed, signState, sysId, systemLines, transferred, unbanned, wireId, withMember, withoutMember, type GroupMessage, type GroupRecord, type GroupState, type GroupSync } from './groups';
 import type { GroupStore, OutItem } from './group-store';
 import { afterSend, FAIL_AFTER_MS, nextStep, type Track } from './outbox';
 import type { Pow } from './pow';
@@ -88,7 +88,12 @@ export class GroupEngine {
 	invites(): GroupRecord[] {
 		return this.list().filter((g) => g.status === 'invited');
 	}
-	messages(gid: string): Promise<GroupMessage[]> {
+	/** Content messages only (no system lines). */
+	async messages(gid: string): Promise<GroupMessage[]> {
+		return (await this.d.store.listMessages(gid)).filter((m) => !m.sys);
+	}
+	/** Everything in order, including system lines ("A added B"): what the chat shows. */
+	timeline(gid: string): Promise<GroupMessage[]> {
 		return this.d.store.listMessages(gid);
 	}
 	/** Members that must get a copy of what I send: everyone in the group but me. */
@@ -103,10 +108,24 @@ export class GroupEngine {
 	// ── Internal helpers ────────────────────────────────────────────────────────────────────
 
 	private async save(rec: GroupRecord, sync = true): Promise<void> {
+		const before = this.groups.get(rec.state.id);
 		this.groups.set(rec.state.id, rec);
 		await this.d.store.putGroup(rec);
+		await this.writeSys(before, rec);
 		if (sync) this.d.transport.syncAll({ k: 'grp', rec });
 		this.onEvent({ type: 'group', gid: rec.state.id, record: rec });
+	}
+
+	/** Stores the system lines of a state change. The id is derived, so a second device (or a replay) writes the same row. */
+	private async writeSys(before: GroupRecord | undefined, rec: GroupRecord): Promise<void> {
+		const gid = rec.state.id;
+		for (const { epoch, line } of systemLines(before, rec)) {
+			const id = sysId(gid, epoch, line);
+			if (rec.gone?.includes(id) || (await this.d.store.getMessage(gid, id))) continue;
+			const msg: GroupMessage = { gid, id, from: rec.state.admin, mine: false, text: '', ts: this.now(), sys: line };
+			await this.d.store.putMessage(msg);
+			this.onEvent({ type: 'message', gid, message: msg, notify: 'silent' });
+		}
 	}
 
 	private async enqueue(to: string, gid: string, payload: OutItem['payload'], extra: { mid?: string; pow?: Pow } = {}): Promise<void> {
@@ -250,6 +269,13 @@ export class GroupEngine {
 		return this.run(async () => {
 			const rec = this.admin(gid);
 			return this.publish(rec, renamed(rec.state, name), 'rename');
+		});
+	}
+
+	unban(gid: string, address: string): Promise<GroupRecord> {
+		return this.run(async () => {
+			const rec = this.admin(gid);
+			return this.publish(rec, unbanned(rec.state, address), 'unban');
 		});
 	}
 

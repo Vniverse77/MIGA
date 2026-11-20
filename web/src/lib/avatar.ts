@@ -95,3 +95,39 @@ export function avatarUrl(address: string): string {
 	}
 	return url;
 }
+
+// ── Group avatar: a symmetric pixel pattern from the group id (no picture, nothing to store) ──
+
+const GROUP_COLORS = ['#3f7f9c', '#2f6f7a', '#4f6fa8', '#7a6fb0', '#c0794f', '#b8924a', '#5d8f6a', '#a95c6f'];
+const GROUP_BG = ['#16222d', '#162b2c', '#1d2335', '#2a2333', '#222b24', '#2b2a22', '#1f2a36', '#26212b'];
+export const GROUP_AVATAR_N = 8;
+
+/** An 8x8 mirrored pattern in two colours; deterministic per group id. */
+export function groupAvatarSvg(gid: string): string {
+	const h = sha256(utf8ToBytes('miga-group-avatar-v1\0' + gid.toLowerCase().trim()));
+	const fg = GROUP_COLORS[h[0] % GROUP_COLORS.length];
+	const fg2 = GROUP_COLORS[(h[0] + 3 + (h[1] % 4)) % GROUP_COLORS.length];
+	const bg = GROUP_BG[h[2] % GROUP_BG.length];
+	let rects = '';
+	for (let y = 0; y < GROUP_AVATAR_N; y++) {
+		for (let x = 0; x < GROUP_AVATAR_N / 2; x++) {
+			const bit = h[3 + y * 2 + (x >> 2)] >> (x & 3);
+			const v = bit & 3;
+			if (v === 0) continue;
+			const color = v === 1 ? fg2 : fg;
+			rects += `<rect x="${x}" y="${y}" width="1" height="1" fill="${color}"/><rect x="${GROUP_AVATAR_N - 1 - x}" y="${y}" width="1" height="1" fill="${color}"/>`;
+		}
+	}
+	return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${GROUP_AVATAR_N} ${GROUP_AVATAR_N}" shape-rendering="crispEdges"><rect width="${GROUP_AVATAR_N}" height="${GROUP_AVATAR_N}" fill="${bg}"/>${rects}</svg>`;
+}
+
+export function groupAvatarUrl(gid: string): string {
+	const key = 'g:' + gid.toLowerCase().trim();
+	let url = cache.get(key);
+	if (!url) {
+		url = 'data:image/svg+xml,' + encodeURIComponent(groupAvatarSvg(gid));
+		if (cache.size > 500) cache.clear();
+		cache.set(key, url);
+	}
+	return url;
+}
