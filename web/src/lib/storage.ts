@@ -22,6 +22,10 @@ export type Contact = {
 	verified?: string;
 	/** A verified contact's safety number changed; a warning shows until the user dismisses it. */
 	keyChanged?: boolean;
+	/** A message request: someone I have not added and have not written to. Shown in Requests, not in chats. */
+	request?: boolean;
+	/** Requests only: the first message came without proof of work (an old client, or a sender that skipped it). */
+	unverified?: boolean;
 };
 /** Empty name means anonymous. `share` decides whether the name is sent to the people you write to. */
 export type Profile = { name: string; share: boolean };
@@ -57,6 +61,8 @@ const KEY_LINK = 'miga.link';
 const KEY_BLOCKED = 'miga.blocked';
 const KEY_RECEIPTS = 'miga.receipts';
 const KEY_LIVE = 'miga.live';
+const KEY_FILTERED = 'miga.filtered';
+const KEY_STRICT = 'miga.strict';
 const KEY_UNREAD = 'miga.unread';
 const KEY_MUTED = 'miga.muted';
 const KEY_NOTIFY = 'miga.notify';
@@ -114,6 +120,40 @@ export function loadLive(): boolean {
 export function saveLive(on: boolean): void {
 	try {
 		localStorage.setItem(KEY_LIVE, on ? '1' : '0');
+	} catch {
+		// Ignored: the setting just does not persist.
+	}
+}
+
+/** Messages from unknown senders dropped because their proof of work was invalid (or missing in strict mode). */
+export function loadFiltered(): number {
+	try {
+		return Math.max(0, Math.min(999_999, Math.floor(Number(localStorage.getItem(KEY_FILTERED)) || 0)));
+	} catch {
+		return 0;
+	}
+}
+
+export function saveFiltered(n: number): void {
+	try {
+		localStorage.setItem(KEY_FILTERED, String(Math.max(0, Math.floor(n))));
+	} catch {
+		// Ignored: the counter just does not persist.
+	}
+}
+
+/** Strict requests: unknown senders without proof of work are filtered instead of shown as "unverified". */
+export function loadStrict(): boolean {
+	try {
+		return localStorage.getItem(KEY_STRICT) === '1';
+	} catch {
+		return false;
+	}
+}
+
+export function saveStrict(on: boolean): void {
+	try {
+		localStorage.setItem(KEY_STRICT, on ? '1' : '0');
 	} catch {
 		// Ignored: the setting just does not persist.
 	}
@@ -240,6 +280,7 @@ export async function eraseAll(): Promise<void> {
 		KEY_LINK,
 		KEY_BLOCKED,
 		KEY_RECEIPTS,
+		KEY_FILTERED,
 		KEY_UNREAD,
 		KEY_MUTED,
 		KEY_NOTIFY,

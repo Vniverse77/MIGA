@@ -56,7 +56,9 @@ export type SyncMessage =
 	| { k: 'tomb'; items: Tomb[] }
 	/** This chat was read up to `upTo` (ms) on the sending device. */
 	| { k: 'read'; peer: string; upTo: number }
-	| { k: 'msg'; peer: string; message: Message; name?: string }
+	| { k: 'msg'; peer: string; message: Message; name?: string; req?: boolean }
+	/** This device accepted a message request: the chat moves from Requests to chats everywhere. */
+	| { k: 'accept'; peer: string }
 	| { k: 'del'; peer: string; items: { id: string; mine: boolean }[] }
 	| { k: 'edit'; peer: string; id: string; mine: boolean; text: string; ts: number }
 	| { k: 'st'; peer: string; ids: string[]; d: 'delivered' | 'read' }
@@ -150,6 +152,8 @@ export function cleanContact(value: unknown): Contact | null {
 		address: contact.address,
 		name,
 		...(contact.custom === true ? { custom: true } : {}),
+		...(contact.request === true ? { request: true } : {}),
+		...(contact.request === true && contact.unverified === true ? { unverified: true } : {}),
 		...(isSafetyNumber(contact.verified) ? { verified: contact.verified } : {})
 	};
 }
