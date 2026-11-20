@@ -90,6 +90,14 @@
 		--mine: #123a66;
 		--danger: #f0766b;
 		--radius: 6px;
+		--gm-0: #5cc8b0;
+		--gm-1: #e6a15c;
+		--gm-2: #8aa8ff;
+		--gm-3: #c792ea;
+		--gm-4: #f28b82;
+		--gm-5: #9ed36a;
+		--gm-6: #e8c46a;
+		--gm-7: #5cc3e8;
 		--radius-lg: 12px;
 		/* Type scale by input type: dense for mouse and keyboard, larger for touch. */
 		--fs-body: 14px;
@@ -121,6 +129,14 @@
 		--link: #185fa5;
 		--mine: #b9d3f5;
 		--danger: #b3261e;
+		--gm-0: #0f7f6b;
+		--gm-1: #b5651d;
+		--gm-2: #3b5bdb;
+		--gm-3: #8e44ad;
+		--gm-4: #c0392b;
+		--gm-5: #3d8b1f;
+		--gm-6: #8a6d00;
+		--gm-7: #0e7ca3;
 		color-scheme: light;
 	}
 	:global(*) {

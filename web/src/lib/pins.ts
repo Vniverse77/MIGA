@@ -7,6 +7,8 @@ import { isAddress } from './crypto';
 export type Pins = Record<string, string[]>;
 
 export const MAX_PINS = 3;
+/** A chat key is a contact address or a group id (32 hex). */
+export const isChatKey = (v: string): boolean => isAddress(v) || /^[0-9a-f]{32}$/.test(v);
 const KEY = /^[mt][A-Za-z0-9_-]{1,64}$/;
 
 export const pinKey = (m: { id: string; mine: boolean }): string => (m.mine ? 'm' : 't') + m.id;
@@ -16,7 +18,7 @@ export function cleanPins(value: unknown): Pins {
 	const out: Pins = {};
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
 	for (const [peer, list] of Object.entries(value as Record<string, unknown>)) {
-		if (!isAddress(peer) || !Array.isArray(list)) continue;
+		if (!isChatKey(peer) || !Array.isArray(list)) continue;
 		const keys = [...new Set(list.filter((k): k is string => typeof k === 'string' && KEY.test(k)))].slice(0, MAX_PINS);
 		if (keys.length) out[peer] = keys;
 	}
@@ -71,7 +73,7 @@ export const emptyPinState = (): PinState => ({ m: {}, c: [] });
 export function cleanPinState(value: unknown): PinState {
 	const v = (value && typeof value === 'object' ? value : {}) as Partial<PinState>;
 	const c = Array.isArray(v.c)
-		? [...new Set(v.c.filter((a): a is string => typeof a === 'string' && isAddress(a)))].slice(0, MAX_PINNED_CHATS)
+		? [...new Set(v.c.filter((a): a is string => typeof a === 'string' && isChatKey(a)))].slice(0, MAX_PINNED_CHATS)
 		: [];
 	return { m: cleanPins(v.m), c };
 }

@@ -230,9 +230,9 @@ export class GroupEngine {
 	// ── Membership, as admin ────────────────────────────────────────────────────────────────
 
 	/** Makes a group and invites `invitees` (at most 4). `pows`: proof of work for invitees that never wrote to me. */
-	create(name: string, invitees: string[] = [], pows: Record<string, Pow> = {}): Promise<GroupRecord> {
+	create(name: string, invitees: string[] = [], pows: Record<string, Pow> = {}, id?: string): Promise<GroupRecord> {
 		return this.run(async () => {
-			const gid = randomId();
+			const gid = id && isGid(id) ? id : randomId();
 			let st = newState(this.me, name, this.now(), gid);
 			for (const a of new Set(invitees)) st = withMember(st, a);
 			st = { ...st, epoch: 1 };
