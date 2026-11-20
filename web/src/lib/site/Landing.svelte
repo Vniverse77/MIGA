@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { VERSION_LABEL } from '../version';
 	import SiteHeader from './SiteHeader.svelte';
+	import CopyButton from './CopyButton.svelte';
 	import { t } from '../i18n.svelte';
 	import { RELEASE_VERSION, URLS, YAY, FLATPAK_CMD } from './release';
 	import type { MessageKey } from '../i18n.svelte';
@@ -18,7 +19,6 @@
 	let glReady = $state(false);
 	let armed = $state(false);
 	let os = $state<Os>('linux');
-	let copied = $state('');
 	let activeStep = $state(0);
 	let howStep = $state(0);
 
@@ -62,16 +62,6 @@
 
 	const phoneShots = ['list', 'address', 'address', 'chat', 'chat', 'requests'];
 	const shotAlt = $derived(t('lp_shot_alt'));
-
-	async function copy(text: string) {
-		try {
-			await navigator.clipboard.writeText(text);
-			copied = text;
-			setTimeout(() => (copied = ''), 1800);
-		} catch {
-			/* clipboard blocked: the command stays selectable */
-		}
-	}
 
 	onMount(() => {
 		const ua = navigator.userAgent;
@@ -129,7 +119,9 @@
 		// The 3D mark loads after the page has painted, and only when motion is welcome.
 		let handle: SceneHandle | null = null;
 		let cancelled = false;
-		if (!reduced && !saver && canvas) {
+		// Phones get the static icon in the hero only: no 3D companion crowding the content.
+		const narrow = matchMedia('(max-width: 820px)').matches;
+		if (!reduced && !saver && !narrow && canvas) {
 			const start = () => {
 				if (cancelled || !canvas) return;
 				import('./landing-scene')
@@ -237,7 +229,7 @@
 									<h3>{title}</h3>
 									<p>{body}</p>
 									{#if i === 2}
-										<div class="cmd"><code>{SHA_APK}</code><button type="button" onclick={() => copy(SHA_APK)}>{copied === SHA_APK ? t('dl_copied') : t('dl_copy')}</button></div>
+										<div class="cmd"><code>{SHA_APK}</code><CopyButton text={SHA_APK} /></div>
 									{/if}
 								</li>
 							{/each}
@@ -250,24 +242,24 @@
 						<p class="intro">{t('lp_l_intro')}</p>
 						<div class="way">
 							<h3>{t('lp_l_deb')}</h3>
-							<div class="cmd"><code>{DEB_CMD}</code><button type="button" onclick={() => copy(DEB_CMD)}>{copied === DEB_CMD ? t('dl_copied') : t('dl_copy')}</button></div>
+							<div class="cmd"><code>{DEB_CMD}</code><CopyButton text={DEB_CMD} /></div>
 							<a class="txt" href={URLS.deb}>{t('dp_deb')} →</a>
 						</div>
 						<div class="way">
 							<h3>{t('lp_l_flatpak')}</h3>
-							<div class="cmd"><code>{FLATPAK_CMD}</code><button type="button" onclick={() => copy(FLATPAK_CMD)}>{copied === FLATPAK_CMD ? t('dl_copied') : t('dl_copy')}</button></div>
+							<div class="cmd"><code>{FLATPAK_CMD}</code><CopyButton text={FLATPAK_CMD} /></div>
 							<p class="hint">{t('lp_l_flatpak_run')}</p>
-							<div class="cmd"><code>{FLATPAK_RUN}</code><button type="button" onclick={() => copy(FLATPAK_RUN)}>{copied === FLATPAK_RUN ? t('dl_copied') : t('dl_copy')}</button></div>
+							<div class="cmd"><code>{FLATPAK_RUN}</code><CopyButton text={FLATPAK_RUN} /></div>
 							<a class="txt" href={URLS.flatpak}>{t('dp_flatpak')} →</a>
 						</div>
 						<div class="way">
 							<h3>{t('lp_l_aur')}</h3>
-							<div class="cmd"><code>{YAY}</code><button type="button" onclick={() => copy(YAY)}>{copied === YAY ? t('dl_copied') : t('dl_copy')}</button></div>
+							<div class="cmd"><code>{YAY}</code><CopyButton text={YAY} /></div>
 							<a class="txt" href={URLS.aur}>{t('dl_aur_link')} →</a>
 						</div>
 						<div class="way">
 							<h3>{t('lp_l_verify')}</h3>
-							<div class="cmd"><code>{SHA_LINUX}</code><button type="button" onclick={() => copy(SHA_LINUX)}>{copied === SHA_LINUX ? t('dl_copied') : t('dl_copy')}</button></div>
+							<div class="cmd"><code>{SHA_LINUX}</code><CopyButton text={SHA_LINUX} /></div>
 							<a class="txt" href={URLS.sha}>{t('dp_sha')} →</a>
 						</div>
 						<div class="actions"><a class="btn outline" href="/download/">{t('lp_inst_files')}</a></div>
@@ -441,6 +433,22 @@
 		position: relative;
 		z-index: 1;
 	}
+	.page :global(h1),
+	.page :global(h2),
+	.page :global(h3),
+	.page :global(p),
+	.page :global(li),
+	.page :global(summary) {
+		overflow-wrap: anywhere;
+	}
+	.page :global(img) {
+		max-width: 100%;
+	}
+	.col,
+	.card,
+	.panel {
+		min-width: 0;
+	}
 	.wrap {
 		width: 100%;
 		max-width: 72rem;
@@ -464,7 +472,8 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		padding: 0.75rem 1.5rem;
+		min-height: 2.9rem;
+		padding: 0.6rem 1.5rem;
 		border: 0.5px solid var(--accent);
 		border-radius: var(--radius);
 		font-weight: 500;
@@ -717,6 +726,7 @@
 		overflow-x: auto;
 	}
 	.tabs button {
+		min-height: 2.75rem;
 		padding: 0.5rem 1rem;
 		border: 0.5px solid var(--line-strong);
 		border-radius: var(--radius);
@@ -739,6 +749,7 @@
 		padding: 0;
 		list-style: none;
 		counter-reset: s;
+		grid-template-columns: minmax(0, 1fr);
 	}
 	.steps li {
 		position: relative;
@@ -759,8 +770,8 @@
 		color: var(--link);
 		font-size: 0.8rem;
 	}
-	.intro {
-		margin: 0 0 1rem;
+	.card .intro {
+		margin: 0 0 1.25rem;
 		color: var(--text);
 		font-size: 0.9rem;
 	}
@@ -768,39 +779,30 @@
 		padding: 0.9rem 0;
 		border-top: 0.5px solid var(--line);
 	}
+	.steps .cmd {
+		margin-bottom: 0;
+	}
 	.hint {
 		margin: 0.6rem 0 0.4rem !important;
 	}
 	.cmd {
 		display: flex;
-		align-items: stretch;
+		align-items: center;
 		gap: 0.5rem;
 		margin: 0.5rem 0;
 	}
 	.cmd code {
 		flex: 1;
 		min-width: 0;
-		padding: 0.55rem 0.75rem;
-		border: 0.5px solid var(--line);
+		padding: 0.75rem;
+		border: 0.5px solid var(--line-strong);
 		border-radius: var(--radius);
 		background: var(--bg);
 		color: var(--text);
-		font-size: 0.78rem;
+		font-size: 0.85rem;
 		overflow-x: auto;
 		white-space: nowrap;
-	}
-	.cmd button {
-		padding: 0 0.8rem;
-		border: 0.5px solid var(--line-strong);
-		border-radius: var(--radius);
-		background: transparent;
-		color: var(--link);
-		font-size: 0.78rem;
-		cursor: pointer;
-	}
-	.cmd button:hover {
-		background: var(--accent);
-		color: var(--accent-ink);
+		-webkit-overflow-scrolling: touch;
 	}
 	.txt {
 		font-size: 0.85rem;
@@ -984,6 +986,7 @@
 	.faq {
 		display: grid;
 		gap: 0.6rem;
+		margin-top: 1.5rem;
 	}
 	details {
 		border: 0.5px solid var(--line);
@@ -997,6 +1000,7 @@
 	}
 	summary {
 		display: flex;
+		align-items: flex-start;
 		justify-content: space-between;
 		gap: 1rem;
 		padding: 0.9rem 1.1rem;
@@ -1099,6 +1103,9 @@
 		section:not(.hero) {
 			padding-top: 4rem;
 		}
+		section:not(.hero).how {
+			padding: 0;
+		}
 		.lane {
 			display: block;
 		}
@@ -1114,8 +1121,8 @@
 			scroll-snap-type: x mandatory;
 		}
 		.shots img {
-			flex: 0 0 62%;
-			width: 62%;
+			flex: 0 0 76%;
+			width: 76%;
 			height: auto;
 			border: 0.5px solid var(--line-strong);
 			border-radius: 1.2rem;
@@ -1128,24 +1135,36 @@
 		.see {
 			grid-template-columns: 1fr;
 		}
+		/* No 3D journey on phones: the four steps are a plain stacked list, no pinned empty stage. */
 		.how {
-			height: 300vh;
+			height: auto;
 		}
 		.pin {
-			padding-top: 4.5rem;
+			position: static;
+			height: auto;
+			display: block;
+			padding: 4rem 0 0;
 		}
 		.caps {
-			display: block;
+			display: grid;
+			grid-template-columns: minmax(0, 1fr);
+			gap: 0.8rem;
 		}
 		.cap {
-			display: none;
+			opacity: 1;
 		}
 		.cap.active {
-			display: block;
 			transform: none;
+			border-color: var(--line);
 		}
 		.cta .btn {
 			flex: 1 1 100%;
+		}
+		kbd {
+			display: none;
+		}
+		.slot {
+			margin-bottom: 1.25rem;
 		}
 		.foot {
 			flex-direction: column;
