@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import SiteHeader from './SiteHeader.svelte';
+	import CopyButton from './CopyButton.svelte';
 	import { t } from '../i18n.svelte';
 	import { RELEASE_DATE, RELEASE_VERSION, URLS, YAY, FLATPAK_CMD } from './release';
 
 	type Os = 'linux' | 'android' | 'web' | 'windows';
 	let channel = $state<'stable' | 'beta'>('stable');
 	let detected = $state<Os | ''>('');
-	let copied = $state('');
 
 	// The visitor's platform, from the user agent. Only used to order the rows and pick the tab; nothing is sent.
 	onMount(() => {
@@ -27,15 +27,6 @@
 			: stable
 	);
 
-	async function copy(text: string) {
-		try {
-			await navigator.clipboard.writeText(text);
-			copied = text;
-			setTimeout(() => (copied = ''), 1800);
-		} catch {
-			/* clipboard blocked: the command stays selectable */
-		}
-	}
 	// TODO: when the legal pages (/terms) are live on master, add the line
 	// "By downloading and using MIGA you agree to its terms" with a link below the card.
 </script>
@@ -108,18 +99,14 @@
 							<p class="note">{t('dp_flatpak_hint')}</p>
 							<div class="cmd">
 								<code>{FLATPAK_CMD}</code>
-								<button type="button" class="copy" onclick={() => copy(FLATPAK_CMD)}>
-									{copied === FLATPAK_CMD ? t('dl_copied') : t('dl_copy')}
-								</button>
+								<CopyButton text={FLATPAK_CMD} />
 							</div>
 						</div>
 						<div class="sub">
 							<p class="label">{t('dp_aur')}</p>
 							<div class="cmd">
 								<code>{YAY}</code>
-								<button type="button" class="copy" onclick={() => copy(YAY)}>
-									{copied === YAY ? t('dl_copied') : t('dl_copy')}
-								</button>
+								<CopyButton text={YAY} />
 							</div>
 							<a class="txt" href={URLS.aur}>{t('dl_aur_link')} →</a>
 						</div>
@@ -140,7 +127,6 @@
 							<h2>Windows</h2>
 							<span class="arch">{t('dl_soon')}</span>
 						</header>
-						<span class="btn disabled" aria-disabled="true">{t('dl_soon')}</span>
 					</article>
 				{/if}
 			{/each}
@@ -361,11 +347,6 @@
 		background: var(--accent);
 		color: var(--accent-ink);
 	}
-	.btn.disabled {
-		border-color: var(--line-strong);
-		color: var(--muted);
-		cursor: not-allowed;
-	}
 	.ext {
 		opacity: 0.75;
 		font-size: 0.85em;
@@ -373,35 +354,21 @@
 	.cmd {
 		display: flex;
 		align-items: center;
+		gap: 0.5rem;
 		width: 100%;
-		padding-left: 0.75rem;
-		border: 0.5px solid var(--line-strong);
-		border-radius: var(--radius);
-		background: var(--bg);
+		min-width: 0;
 	}
 	.cmd code {
 		flex: 1;
 		min-width: 0;
+		padding: 0.75rem;
+		border: 0.5px solid var(--line-strong);
+		border-radius: var(--radius);
+		background: var(--bg);
 		overflow-x: auto;
 		white-space: nowrap;
 		color: var(--text);
 		font-size: 0.85rem;
-	}
-	.copy {
-		min-width: 5.5rem;
-		min-height: 2.75rem;
-		padding: 0 0.8rem;
-		border: 0;
-		border-left: 0.5px solid var(--line-strong);
-		border-radius: 0 var(--radius) var(--radius) 0;
-		background: transparent;
-		color: var(--link);
-		font-size: 0.85rem;
-		cursor: pointer;
-	}
-	.copy:hover {
-		background: var(--accent);
-		color: var(--accent-ink);
 	}
 	.txt {
 		display: inline-flex;

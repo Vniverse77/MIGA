@@ -65,6 +65,7 @@ export const landingEn = {
 
 	lp_how_title: 'How a message travels',
 	lp_how_lead: 'Scroll to follow one message from your device to theirs.',
+	lp_how_lead_short: 'Four steps, from your device to theirs.',
 	lp_hs1: 'Sealed on your device|The message is encrypted with the recipient\'s key before it leaves.',
 	lp_hs2: 'Sent as an envelope|It goes to the relay over HTTPS, like a normal web request.',
 	lp_hs3: 'The relay passes it on|It can see the envelope and who it is for. It cannot open it.',
@@ -164,6 +165,7 @@ export const landingTr: LandingDict = {
 
 	lp_how_title: 'Bir mesaj nasıl yol alır',
 	lp_how_lead: 'Bir mesajı cihazından karşıdakine kadar izlemek için kaydır.',
+	lp_how_lead_short: 'Dört adımda, cihazından karşıdakine.',
 	lp_hs1: 'Cihazında mühürlenir|Mesaj, çıkmadan önce alıcının anahtarıyla şifrelenir.',
 	lp_hs2: 'Zarf olarak gider|HTTPS ile röleye gider, sıradan bir web isteği gibi.',
 	lp_hs3: 'Röle iletir|Zarfı ve kime gittiğini görür. Açamaz.',
@@ -261,6 +263,7 @@ export const landingTk: LandingDict = {
 
 	lp_how_title: 'Habar nähili ýol alýar',
 	lp_how_lead: 'Bir habary enjamyňdan alyjynyňky çenli yzarlamak üçin aşak sür.',
+	lp_how_lead_short: 'Dört ädimde, enjamyňdan alyjynyňka çenli.',
 	lp_hs1: 'Enjamyňda möhürlenýär|Habar çykmanka alyjynyň açary bilen şifrlenýär.',
 	lp_hs2: 'Konwert hökmünde gidýär|HTTPS bilen rele gidýär, adaty web haýyşy ýaly.',
 	lp_hs3: 'Rele geçirýär|Ol konwerti we kime gidýändigini görýär. Açyp bilmeýär.',
@@ -358,6 +361,7 @@ export const landingRu: LandingDict = {
 
 	lp_how_title: 'Как путешествует сообщение',
 	lp_how_lead: 'Листайте, чтобы проследить одно сообщение от вашего устройства до чужого.',
+	lp_how_lead_short: 'Четыре шага от вашего устройства до чужого.',
 	lp_hs1: 'Запечатывается на устройстве|Сообщение шифруется ключом получателя до отправки.',
 	lp_hs2: 'Уходит как конверт|Оно идёт на реле по HTTPS, как обычный веб-запрос.',
 	lp_hs3: 'Реле передаёт дальше|Оно видит конверт и кому он адресован. Открыть его не может.',

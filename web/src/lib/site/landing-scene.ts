@@ -24,6 +24,7 @@ import {
 	WebGLRenderer,
 	Box3
 } from 'three';
+import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js';
 import { ICON_SVG } from './icon-svg';
 
@@ -96,18 +97,25 @@ function buildIcon(): Group {
 	const shapes = data.paths.flatMap((p) => p.toShapes());
 	const bust = new Group();
 	const bustMat = new MeshStandardMaterial({ color: TEXT, roughness: 0.38, metalness: 0.12 });
-	for (const [i, shape] of shapes.entries()) {
-		// Overlapping parts get a hair more depth each, so their front faces never fight for the same pixels.
-		const g = new ExtrudeGeometry(shape, {
-			depth: 36 + i * 2.5,
-			bevelEnabled: true,
-			bevelThickness: 7,
-			bevelSize: 5,
-			bevelSegments: 2,
-			curveSegments: 14
-		});
-		bust.add(new Mesh(g, bustMat));
+	// One outline, extruded once with a soft bevel: no overlapping parts, so no seams or z-fighting.
+	const raw = new ExtrudeGeometry(shapes, {
+		depth: 36,
+		bevelEnabled: true,
+		bevelThickness: 7,
+		bevelSize: 4,
+		bevelSegments: 5,
+		curveSegments: 32
+	});
+	// Smooth the bevel and the outline, but keep the big front/back faces perfectly flat (no shading facets).
+	const g = toCreasedNormals(raw, 0.9);
+	const pos = g.attributes.position;
+	const gn = g.attributes.normal;
+	for (let i = 0; i < pos.count; i++) {
+		const z = pos.getZ(i);
+		if (Math.abs(z + 7) < 1e-3) gn.setXYZ(i, 0, 0, -1); // front cap (z = -bevelThickness)
+		else if (Math.abs(z - 43) < 1e-3) gn.setXYZ(i, 0, 0, 1); // back cap (z = depth + bevelThickness)
 	}
+	bust.add(new Mesh(g, bustMat));
 	const box = new Box3().setFromObject(bust);
 	const size = box.getSize(new Vector3());
 	const k = 1 / (Math.max(size.x, size.y) * 1.2); // the tile side becomes 1 unit
