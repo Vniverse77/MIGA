@@ -4,7 +4,7 @@ that counts for Law No. 6698. Placeholders must be filled by the owner before pu
 -->
 # KVKK Information Notice (English summary)
 
-Last updated: [TO BE FILLED BY OWNER: date]
+Last updated: 2026-11-20
 
 > **The short version**
 > Turkish law (KVKK, Law No. 6698, Art. 10) requires a notice in Turkish. This is a summary. MIGA asks for no account,
@@ -15,7 +15,7 @@ The Turkish text is the binding one. Full details of what is stored are in the [
 
 ## Controller
 
-[TO BE FILLED BY OWNER: legal name, postal address, e-mail, KEP address if any]. An individual developer
+Vniverse77 (data controller). Postal address and KEP: Provided to authorities and to data subjects with a verified request via root@vniverse77.com. An individual developer
 publishing as Vniverse77.
 
 ## Data, purposes and retention
@@ -41,5 +41,7 @@ abroad (Art. 9). Nothing is sold or shared for marketing.
 
 You may ask whether data about you is processed, get information, learn the purpose and recipients, ask for correction,
 deletion or destruction, object to automated results, and claim compensation for unlawful processing. Write to
-[TO BE FILLED BY OWNER: contact e-mail] with your MIGA address. It is free; we answer within 30 days. You can complain
+root@vniverse77.com with your MIGA address. It is free; we answer within 30 days. You can complain
 to the [Personal Data Protection Board](https://www.kvkk.gov.tr).
+
+Prepared by an independent developer; legal review in progress.

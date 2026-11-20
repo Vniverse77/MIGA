@@ -1,5 +1,5 @@
 <!--
-DRAFT for lawyer/owner review. Not legal advice. Fill the [TO BE FILLED BY OWNER: ...] placeholders.
+DRAFT for lawyer/owner review. Not legal advice. 
 -->
 # Security Policy
 
@@ -11,10 +11,8 @@ MIGA is an early-stage, not yet audited, end-to-end encrypted messenger. Please 
 Please report privately. Do not open a public issue or post details before a fix is out.
 
 1. Preferred: GitHub private vulnerability reporting. Open the repository's **Security** tab, then
-   **Report a vulnerability**. [TO BE FILLED BY OWNER: enable "Private vulnerability reporting" in the repository
-   settings.]
-2. Alternative: e-mail [TO BE FILLED BY OWNER: security contact address]. [TO BE FILLED BY OWNER: optional PGP key
-   link.]
+   **Report a vulnerability**. 
+2. Alternative: e-mail root@vniverse77.com. 
 
 Please include: affected component (relay, web, desktop, Android), version, steps to reproduce, and impact. Do not
 send real users' data. Do not test against other people's accounts or devices.
@@ -40,7 +38,7 @@ unmodified dependencies (report those upstream; tell us if MIGA is affected).
 
 Good-faith research that follows this policy, avoids harming other users and does not read or keep other
 people's data will not be pursued by the operator. This cannot bind third parties or authorities.
-[TO BE FILLED BY LAWYER: review this paragraph.]
+<!-- pending legal review -->
 
 ## Supported versions
 

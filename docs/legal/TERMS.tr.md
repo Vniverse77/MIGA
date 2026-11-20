@@ -1,11 +1,11 @@
 <!--
-AVUKAT İNCELEMESİ İÇİN TASLAK. Hukuki tavsiye değildir. [TO BE FILLED BY OWNER: ...] ile işaretli her yer
+AVUKAT İNCELEMESİ İÇİN TASLAK. Hukuki tavsiye değildir.
 yayından önce doldurulmalıdır. İngilizce sürüm: TERMS.md. Web uygulamasında /terms sayfasında gösterilir; bu yorum
 orada görünmez.
 -->
 # MIGA Kullanım Koşulları
 
-Son güncelleme: [TO BE FILLED BY OWNER: tarih]
+Son güncelleme: 2026-11-20
 
 > **Kısaca**
 > MIGA ücretsiz, deneysel, şifreli bir mesajlaşma uygulamasıdır. Düzgün davran, yasa dışı bir şey gönderme, spam yapma
@@ -17,12 +17,12 @@ değildir: herkese açık paylaşım, akış ya da aranabilir profil yoktur.
 
 ## 1. İşletici
 
-[TO BE FILLED BY OWNER: yasal ad soyad, posta adresi, iletişim e-postası]. Ayrıca bkz.
+Vniverse77 (bağımsız bir geliştirici). Posta adresi: Doğrulanmış başvuru üzerine root@vniverse77.com aracılığıyla bildirilir. İletişim: root@vniverse77.com. Ayrıca bkz.
 [Gizlilik Politikası](/privacy).
 
 ## 2. Kimler kullanabilir
 
-En az 16 yaşında olmalısınız. [TO BE FILLED BY LAWYER: yaş.] Gönderdiklerinizden, gizli anahtarınızı ve
+En az 16 yaşında olmalısınız. <!-- pending legal review --> Gönderdiklerinizden, gizli anahtarınızı ve
 cihazlarınızı korumaktan siz sorumlusunuz. Hesap ve şifre sıfırlama yoktur: anahtarınızı kaybederseniz geri
 getirilemez.
 
@@ -46,7 +46,7 @@ MIGA deneyseldir. "olduğu gibi", hiçbir garanti olmadan sunulur; buna erişile
 bir amaca uygunluk ya da her saldırıya karşı koruma dahildir. Güvenlik denetiminden geçmemiştir. Güvenliğinizin
 ya da diğer önemli çıkarlarınızın buna bağlı olduğu yerlerde güvenmeyin. Kanunun izin verdiği ölçüde işletici,
 kullanımdan, kaybolan anahtar veya mesajlardan, kesintilerden ya da üçüncü kişilerin eylemlerinden doğan
-zararlardan sorumlu değildir. [TO BE FILLED BY LAWYER: zorunlu tüketici ve sorumluluk kurallarıyla karşılaştır.]
+zararlardan sorumlu değildir. Hizmet, kanunun izin verdiği ölçüde "olduğu gibi" sunulur. <!-- pending legal review -->
 
 ## 5. İçeriğiniz
 
@@ -63,13 +63,13 @@ zararlardan sorumlu değildir. [TO BE FILLED BY LAWYER: zorunlu tüketici ve sor
 
 Kullanıcılar uygulamada adresleri engelleyebilir. İşletici, hizmeti korumak ya da kanuna uymak için, acil
 durumlarda haber vermeden erişimi askıya alabilir. Kötüye kullanımı bildirmek için:
-[TO BE FILLED BY OWNER: kötüye kullanım e-postası].
+root@vniverse77.com.
 
 ## 7. Makam talepleri
 
 Gizlilik Politikası'nın 11. bölümüne bakın. İşletici geçerli, yazılı yasal taleplere kanunun gerektirdiği şekilde
 yanıt verir. Relay'de olmadığı için mesaj metnini, kişi listelerini ya da göndericinin IP adresini veremez. İşletici
-arka kapı koymaz ve şifrelemeyi zayıflatmaz. [TO BE FILLED BY LAWYER: bu ifadenin uygunluğunu doğrula.]
+arka kapı koymaz ve şifrelemeyi zayıflatmaz. <!-- pending legal review -->
 
 ## 8. Erişilebilirlik ve değişiklikler
 
@@ -78,10 +78,11 @@ güncellenebilir; yeni sürüm yeni tarihle burada yayınlanır. Kullanmaya deva
 
 ## 9. Hukuk ve uyuşmazlık
 
-[TO BE FILLED BY LAWYER: uygulanacak hukuk ve mahkemeler. Öneri: Türkiye Cumhuriyeti hukuku,
-[TO BE FILLED BY OWNER: şehir] mahkemeleri.] Ülkenizdeki zorunlu tüketici haklarınız saklıdır.
+Türkiye Cumhuriyeti kanunları; İstanbul mahkemeleri. <!-- pending legal review --> Ülkenizdeki zorunlu tüketici haklarınız saklıdır.
 
 ## 10. İletişim
 
-[TO BE FILLED BY OWNER: iletişim e-postası]. Güvenlik sorunları için:
+root@vniverse77.com. Güvenlik sorunları için:
 [SECURITY.md](https://github.com/Vniverse77/MIGA/blob/master/SECURITY.md).
+
+Bu metin bağımsız bir geliştirici tarafından hazırlanmıştır ve hukuki incelemesi sürmektedir.

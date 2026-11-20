@@ -1,12 +1,12 @@
 <!--
 DRAFT for lawyer review. Not legal advice. Prepared from the code and docs of MIGA (relay/, docs/PROTOCOL.md),
 a check of the production server on 2026-11-20 and public secondary sources (owner's research note).
-Everything marked [TO BE FILLED BY OWNER: ...] must be completed before publication.
+Legal review is pending.
 Turkish version: PRIVACY.tr.md. Turkish KVKK notice: KVKK.tr.md. Rendered at /privacy; this comment is not shown.
 -->
 # MIGA Privacy Policy
 
-Last updated: [TO BE FILLED BY OWNER: date]
+Last updated: 2026-11-20
 
 > **The short version**
 > No accounts, no phone number, no e-mail, no ads, no analytics, and your data is never sold. The relay cannot read
@@ -18,10 +18,10 @@ Last updated: [TO BE FILLED BY OWNER: date]
 The relay server and the web app at miga.vniverse77.com are run by an individual developer who publishes under
 the name Vniverse77. That person is the data controller (KVKK) and controller (GDPR) for this service.
 
-- Operator (data controller): [TO BE FILLED BY OWNER: legal name]
-- Address: [TO BE FILLED BY OWNER: postal address]
-- Contact for privacy requests: [TO BE FILLED BY OWNER: e-mail address]
-- Representative in the EU or in Turkey, if one is required: [TO BE FILLED BY OWNER: or "none"]
+- Operator (data controller): Vniverse77
+- Address: Provided to authorities and to data subjects with a verified request via root@vniverse77.com
+- Contact for privacy requests: root@vniverse77.com
+- Representative in the EU or in Turkey, if one is required: None appointed
 
 MIGA is free software (AGPL-3.0-or-later). Anyone can run their own relay; this policy covers only the relay
 and web app operated by the person named above. The Turkish information notice under KVKK Art. 10 is on the
@@ -93,7 +93,7 @@ same 30-day maximum.
 We process the minimum above to deliver messages you ask to send and to keep the service available and free of
 abuse. The legal bases are: performing the service you use, and our legitimate interest in the security and
 stable operation of the service (GDPR Art. 6(1)(b) and (f); KVKK Art. 5(2)(c) and (f)).
-[TO BE FILLED BY LAWYER: confirm legal bases.] We do not sell data, profile users or use data for advertising.
+<!-- pending legal review --> We do not sell data, profile users or use data for advertising.
 If the law ever requires us to keep traffic logs, this policy will be changed before any logging starts.
 
 ## 9. Sharing and transfers
@@ -141,3 +141,5 @@ requires. To report a security problem see [SECURITY.md](https://github.com/Vniv
 
 If this policy changes, the new version appears here with a new date. Older versions stay in the public source
 history on GitHub.
+
+Prepared by an independent developer; legal review in progress.

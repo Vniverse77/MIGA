@@ -150,7 +150,26 @@
 	<p class="other"><a href={URLS.releases}>{t('dp_all')} →</a></p>
 </main>
 
+<footer class="legal">
+	<nav aria-label="Legal">
+		<a href="/privacy">{t('legal_privacy')}</a>
+		<span aria-hidden="true">·</span>
+		<a href="/terms">{t('legal_terms')}</a>
+		<span aria-hidden="true">·</span>
+		<a href="/kvkk">{t('legal_kvkk')}</a>
+	</nav>
+</footer>
+
 <style>
+	.legal {
+		padding: 2rem 1rem 2.5rem;
+		text-align: center;
+		font-size: 0.85rem;
+		color: var(--muted, inherit);
+	}
+	.legal a {
+		color: inherit;
+	}
 	.wrap {
 		width: 100%;
 		max-width: 46rem;

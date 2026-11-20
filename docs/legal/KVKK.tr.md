@@ -1,10 +1,9 @@
 <!--
 AVUKAT İNCELEMESİ İÇİN TASLAK. Hukuki tavsiye değildir. 6698 sayılı Kanun m. 10 kapsamında aydınlatma metni.
-[TO BE FILLED BY OWNER: ...] ile işaretli her yer yayından önce doldurulmalıdır. İngilizce özet: KVKK.md.
 -->
 # KVKK Aydınlatma Metni
 
-Son güncelleme: [TO BE FILLED BY OWNER: tarih]
+Son güncelleme: 2026-11-20
 
 > **Kısaca**
 > MIGA hesap, telefon veya e-posta istemez. İşlenen kişisel veri çok azdır: IP adresin (yalnızca bellekte), gönderen ve
@@ -16,10 +15,10 @@ miga.vniverse77.com üzerindeki MIGA aktarıcısı ve web uygulaması için geç
 
 ## 1. Veri sorumlusu
 
-- Veri sorumlusu: [TO BE FILLED BY OWNER: yasal ad soyad]
-- Adres: [TO BE FILLED BY OWNER: posta adresi]
-- İletişim: [TO BE FILLED BY OWNER: e-posta adresi]
-- KEP adresi (varsa): [TO BE FILLED BY OWNER: KEP adresi veya "yok"]
+- Veri sorumlusu: Vniverse77
+- Adres: Doğrulanmış başvuru üzerine root@vniverse77.com aracılığıyla bildirilir
+- İletişim: root@vniverse77.com
+- KEP adresi (varsa): Doğrulanmış başvuru üzerine root@vniverse77.com aracılığıyla bildirilir
 
 Hizmet, Vniverse77 takma adıyla yayın yapan bireysel bir geliştirici tarafından kişisel bir proje olarak işletilir.
 
@@ -39,9 +38,8 @@ Ad, telefon, e-posta, konum, kişi listesi veya mesaj içeriği toplanmaz. Özel
 ## 3. Toplama yöntemi ve hukuki sebepler
 
 Veriler, uygulamanın aktarıcıya bağlanması sırasında otomatik olarak ve tamamen otomatik yollarla elde edilir.
-Hukuki sebepler: hizmetin ifası için veri işlemenin gerekli olması (m. 5/2-c), veri sorumlusunun hukuki yükümlülüğü
-(m. 5/2-ç) ve temel hak ve özgürlüklerine zarar vermemek kaydıyla meşru menfaat (m. 5/2-f): hizmetin güvenliği ve
-kötüye kullanımın önlenmesi. [TO BE FILLED BY LAWYER: hukuki sebepleri doğrula.]
+Hukuki sebepler: hizmetin ifası için veri işlemenin gerekli olması (m. 5/2-c), temel hak ve özgürlüklerine zarar vermemek kaydıyla meşru menfaat (m. 5/2-f): hizmetin güvenliği ve
+kötüye kullanımın önlenmesi. <!-- pending legal review -->
 
 ## 4. Aktarım ve yurt dışına aktarım (m. 8 ve 9)
 
@@ -53,8 +51,7 @@ kötüye kullanımın önlenmesi. [TO BE FILLED BY LAWYER: hukuki sebepleri doğ
 
 Cloudflare'in dünya çapında çalışması nedeniyle IP adresi gibi veriler yurt dışında işlenebilir. Bu, m. 9 kapsamında
 yurt dışına aktarımdır; aktarım, m. 9'daki güvenceler (yeterlilik kararı, standart sözleşme, taahhütname veya
-arızi aktarım gibi) çerçevesinde yürütülür. [TO BE FILLED BY LAWYER: Cloudflare için m. 9 mekanizmasını ve Kurul'a
-bildirim gereğini doğrula.] Veriler satılmaz ve pazarlama için paylaşılmaz.
+arızi aktarım gibi) çerçevesinde yürütülür. <!-- pending legal review --> Veriler satılmaz ve pazarlama için paylaşılmaz.
 
 ## 5. Veri güvenliği ve ihlal bildirimi (m. 12)
 
@@ -78,10 +75,12 @@ okuyamadığımız için içerik veremeyiz.
 
 ## 7. Başvuru yolu
 
-Taleplerini yazılı olarak [TO BE FILLED BY OWNER: e-posta adresi veya KEP adresi] adresine, adresini ve talebini
+Taleplerini yazılı olarak root@vniverse77.com adresine, adresini ve talebini
 belirterek gönder. Başvurular ücretsizdir ve en geç 30 gün içinde yanıtlanır. Yanıttan memnun kalmazsan
 [Kişisel Verileri Koruma Kurulu](https://www.kvkk.gov.tr)'na şikâyette bulunabilirsin.
 
 ## 8. Yaş sınırı ve değişiklikler
 
 MIGA 16 yaş ve üzeri içindir. Bu metin değişirse üstteki tarih de değişir.
+
+Bu metin bağımsız bir geliştirici tarafından hazırlanmıştır ve hukuki incelemesi sürmektedir.

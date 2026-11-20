@@ -1,12 +1,11 @@
 <!--
 AVUKAT İNCELEMESİ İÇİN TASLAK. Hukuki tavsiye değildir. MIGA kodundan ve belgelerinden (relay/, docs/PROTOCOL.md),
 2026-11-20 tarihli üretim sunucusu kontrolünden ve kamuya açık ikincil kaynaklardan hazırlandı.
-[TO BE FILLED BY OWNER: ...] ile işaretli her yer yayından önce doldurulmalıdır.
 İngilizce sürüm: PRIVACY.md. KVKK aydınlatma metni: KVKK.tr.md. /privacy sayfasında gösterilir; bu yorum görünmez.
 -->
 # MIGA Gizlilik Politikası
 
-Son güncelleme: [TO BE FILLED BY OWNER: tarih]
+Son güncelleme: 2026-11-20
 
 > **Kısaca**
 > Hesap yok, telefon numarası yok, e-posta yok, reklam yok, analitik yok ve verilerin satılmaz. Aktarıcı (relay)
@@ -18,10 +17,10 @@ Son güncelleme: [TO BE FILLED BY OWNER: tarih]
 miga.vniverse77.com adresindeki aktarıcı sunucusu ve web uygulaması, Vniverse77 takma adıyla yayın yapan bireysel
 bir geliştirici tarafından işletilir. Bu kişi hizmetin veri sorumlusudur.
 
-- Veri sorumlusu: [TO BE FILLED BY OWNER: yasal ad soyad]
-- Adres: [TO BE FILLED BY OWNER: posta adresi]
-- Gizlilik başvuruları için iletişim: [TO BE FILLED BY OWNER: e-posta adresi]
-- Gerekiyorsa AB veya Türkiye temsilcisi: [TO BE FILLED BY OWNER: ya da "yok"]
+- Veri sorumlusu: Vniverse77
+- Adres: Doğrulanmış başvuru üzerine root@vniverse77.com aracılığıyla bildirilir
+- Gizlilik başvuruları için iletişim: root@vniverse77.com
+- Gerekiyorsa AB veya Türkiye temsilcisi: Atanmadı
 
 MIGA özgür yazılımdır (AGPL-3.0-or-later). Herkes kendi aktarıcısını çalıştırabilir; bu politika yalnızca yukarıda
 adı geçen kişinin işlettiği aktarıcıyı ve web uygulamasını kapsar. KVKK madde 10 aydınlatma metni
@@ -94,7 +93,7 @@ geri alınamaz. Başka bir cihazı bağlamak, aynı 30 günlük üst sınırla a
 Yukarıdaki asgari veriyi, göndermek istediğin mesajları iletmek ve hizmeti erişilebilir ve kötüye kullanımdan uzak
 tutmak için işleriz. Hukuki sebepler: kullandığın hizmetin ifası ve hizmetin güvenliği ile istikrarlı çalışmasındaki
 meşru menfaatimiz (KVKK m. 5/2-c ve 5/2-f; GDPR m. 6/1-b ve 6/1-f).
-[TO BE FILLED BY LAWYER: hukuki sebepleri doğrula.] Veri satmayız, kullanıcıları profillemeyiz, reklam için
+<!-- pending legal review --> Veri satmayız, kullanıcıları profillemeyiz, reklam için
 kullanmayız. Kanun ileride trafik kaydı tutmamızı gerektirirse, kayıt başlamadan önce bu politika değiştirilir.
 
 ## 9. Paylaşım ve aktarım
@@ -138,3 +137,5 @@ sorunu bildirmek için [SECURITY.md](https://github.com/Vniverse77/MIGA/blob/mas
 ## 14. Değişiklikler
 
 Politika değişirse yeni sürüm burada yeni tarihle yayımlanır. Eski sürümler GitHub'daki açık kaynak geçmişinde kalır.
+
+Bu metin bağımsız bir geliştirici tarafından hazırlanmıştır ve hukuki incelemesi sürmektedir.

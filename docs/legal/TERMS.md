@@ -1,11 +1,11 @@
 <!--
 DRAFT for lawyer review. Not legal advice. Prepared from the code and docs of MIGA and from public secondary
-sources. Everything marked [TO BE FILLED BY OWNER: ...] must be completed before publication.
+sources. Legal review is pending.
 Turkish version: TERMS.tr.md. Rendered at /terms in the web app; this comment is not shown there.
 -->
 # MIGA Terms of Use
 
-Last updated: [TO BE FILLED BY OWNER: date]
+Last updated: 2026-11-20
 
 > **The short version**
 > MIGA is a free, experimental, encrypted messenger. Be a decent human, send nothing illegal, do not spam or attack
@@ -17,12 +17,12 @@ public posts, feeds or searchable profiles.
 
 ## 1. Operator
 
-[TO BE FILLED BY OWNER: legal name, postal address, contact e-mail]. See also the
+Vniverse77 (an independent developer). Postal address: Provided to authorities and to data subjects with a verified request via root@vniverse77.com. Contact: root@vniverse77.com. See also the
 [Privacy Policy](/privacy).
 
 ## 2. Who may use MIGA
 
-You must be at least 16 years old. [TO BE FILLED BY LAWYER: age.] You are responsible for what you send
+You must be at least 16 years old. <!-- pending legal review --> You are responsible for what you send
 and for keeping your secret key and devices safe. There is no account and no password reset: if you lose your
 key, it cannot be recovered.
 
@@ -44,7 +44,7 @@ MIGA is experimental. It is provided "as is", without warranty of any kind, incl
 of every message, fitness for a purpose, or protection against every attack. It has not been security-audited.
 Do not rely on it where your safety or other critical interests depend on it. To the extent the law allows, the
 operator is not liable for losses from use, lost keys or messages, outages, or third-party actions.
-[TO BE FILLED BY LAWYER: check against mandatory consumer and liability rules.]
+The service is provided "as is", to the extent permitted by law. <!-- pending legal review -->
 
 ## 5. Your content
 
@@ -60,14 +60,14 @@ The operator cannot read messages and cannot tell who is behind an address. For 
 - Change or lower limits, or stop the service.
 
 Users can block addresses in the app. The operator may suspend access to protect the service or comply with the
-law, without notice where urgent. To report abuse write to: [TO BE FILLED BY OWNER: abuse contact e-mail].
+law, without notice where urgent. To report abuse write to: root@vniverse77.com.
 
 ## 7. Requests from authorities
 
 See section 11 of the [Privacy Policy](/privacy). The operator answers valid, written legal requests as the law
 requires. The operator cannot provide message plaintext, contact lists or sender IP addresses from the relay,
 because the relay does not hold them. The operator does not add backdoors or weaken the encryption.
-[TO BE FILLED BY LAWYER: check this statement is allowed.]
+<!-- pending legal review -->
 
 ## 8. Availability and changes
 
@@ -76,9 +76,10 @@ updated; the new version appears here with a new date. Continued use means you a
 
 ## 9. Law and disputes
 
-[TO BE FILLED BY LAWYER: governing law and courts. Suggested: law of the Republic of Turkiye, courts of
-[TO BE FILLED BY OWNER: city].] Mandatory consumer rights in your country are not affected.
+Laws of the Republic of Türkiye; Istanbul courts. <!-- pending legal review --> Mandatory consumer rights in your country are not affected.
 
 ## 10. Contact
 
-[TO BE FILLED BY OWNER: contact e-mail]. Security problems: see [SECURITY.md](https://github.com/Vniverse77/MIGA/blob/master/SECURITY.md).
+root@vniverse77.com. Security problems: see [SECURITY.md](https://github.com/Vniverse77/MIGA/blob/master/SECURITY.md).
+
+Prepared by an independent developer; legal review in progress.
