@@ -33,11 +33,45 @@ Quitting with an unsent draft asks first; drafts and read markers are stored per
 
 Many terminals cannot tell `Shift+Enter` from `Enter`, so `Alt+Enter` is the dependable newline.
 
-### One interface per profile
+### One interface per profile and the local socket
 
-The UI takes a lock on the profile. While it is open, `miga send` and `miga listen` for the same profile refuse to run
-with a clear message (a local socket that lets `miga send` talk to the running UI is planned for M3). `miga log`, `contacts`,
-`address` and `add` are safe. Use `--profile <name>` for a second account.
+The UI takes a lock on the profile and owns the relay connection. While it is open, `miga send`, `miga send --file` and
+`miga listen` for the same profile hand their work to the UI over a Unix socket (`<data>/miga.sock`, mode 0600; if that path is
+longer than 100 bytes, `$XDG_RUNTIME_DIR/miga-<hash>.sock`). `miga log`, `contacts`, `address`, `add`, `devices` work on the
+files directly. Use `--profile <name>` for a second account.
+
+## Linked devices (M3)
+
+The terminal is a normal device of the account, with its own device key (`config/device.json`) and the same sync as the app
+(ENGINE.md section 12): sync messages, tombstones, read state, edits, receipts, block and mute lists, and the pull-based history copy.
+
+- Show a code and a QR code for a phone or the web app: `miga link` (or `:link` / `F3` then `a` in the UI). The QR code
+  contains `https://<app origin>/app/#link=<code>`; the app's scanner reads it. The code is valid for 10 minutes. Keep the
+  process running while the new device copies the history (`--stay`, default 120 s; the UI serves it as long as it is open).
+- Join an account with a code from another device: first run in the UI ("Link to an account I already use"), or
+  `miga join <code>` on a profile that has no account yet. The history copy shows as `history N%` in the header.
+- `miga devices` lists the devices; `miga devices --remove <address prefix>` removes one (it erases itself when it connects).
+  The UI's devices popup (`F3`) can add a device, copy the history again from one and remove one.
+
+## Attachments
+
+- Send: `/attach <path> | <caption>` in the composer, `:attach <path>`, or `miga send <contact> --file <path> [caption]`.
+  JPEG, PNG, WebP and GIF up to 25 MiB. JPEG and PNG have their metadata removed (EXIF, XMP, comments, PNG text chunks) before
+  encryption. The CLI does **not** decode, rotate, resize or make a thumbnail (the app re-encodes to at most 2048 px): an image
+  that relies on EXIF orientation shows unrotated, and the recipient sees no thumbnail until the file loads. Video cannot be sent yet.
+- Receive: the message shows `[attachment: type, size, WxH]`; `o` on it downloads, decrypts, verifies and saves it
+  (`<data>/files/miga-<id>.<ext>`) and opens it with `open_command`. `miga get <contact> <id> [--out DIR]` saves without opening.
+  Deleting your own message for everyone also deletes the uploaded blob.
+
+## Search, mute, block, safety numbers
+
+`Ctrl+F` searches the open chat, `Alt+F` all chats (Enter jumps to the message). Commands (`:`): `mute`/`unmute`, `block`/`unblock`
+(blocked senders are dropped and acknowledged, as in the app), `delete chat`, `delete contact` (both asked first, both sync to
+your other devices with tombstones), `safety` (the number, `v` marks it verified; a mark from another device counts only if it
+matches the number computed here), `verify`/`unverify`, `qr` (your address as a QR code), `search`, `gsearch`.
+Your address is shown masked (`F2`); `r` reveals it, `c` copies it, `Shift+Q` shows the QR code.
+Optional **live text** (`live_text = true`): what you type goes to the open chat as ephemeral frames (about three per second)
+and the other side's typing appears in the header; off by default.
 
 ## Configuration
 
@@ -53,6 +87,7 @@ editor = "default"             # default = $VISUAL, then $EDITOR
 open_command = "xdg-open"      # "" = show the link instead
 confirm_delete = true
 show_receipts = true
+live_text = false              # send what you type as it is typed (ephemeral); off by default
 
 [theme]
 name = "miga-dark"             # miga-dark | transparent | mono
@@ -79,7 +114,7 @@ with `unicode-width`; terminals disagree on some emoji sequences, so a line with
 
 Received text is stripped of control characters and bidi overrides before it is drawn.
 
-## Not in M2 (planned)
+## Not done yet
 
-Device linking and history pull, backup, attachments (shown as a placeholder), local socket for `miga send`, in-chat search,
-per-chat mute, live typing line, QR code popup, translations.
+Backup and restore, translations, sending video, thumbnails and image resizing, Windows and macOS terminal testing, a pre-link
+"scan to add contact" (the QR popup shows your address; scanning is for the phone). Details in the M3 report.

@@ -12,13 +12,26 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedSender;
 
+/// `<data>/miga.sock`; Unix socket paths are limited to about 100 bytes, so a long data directory
+/// falls back to the per-user runtime directory (mode 0700) with a name derived from it.
 pub fn socket_path(store: &Store) -> PathBuf {
-    store.data_dir().join("miga.sock")
+    let direct = store.data_dir().join("miga.sock");
+    if direct.as_os_str().len() <= 100 {
+        return direct;
+    }
+    match std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).filter(|p| p.is_absolute()) {
+        Some(run) => {
+            let h = miga_core::to_hex(&miga_core::crypto::sha256(store.data_dir().to_string_lossy().as_bytes()));
+            run.join(format!("miga-{}.sock", &h[..16]))
+        }
+        None => direct,
+    }
 }
 
 /// Starts serving. The returned sender broadcasts event lines to `listen` clients.
 pub fn serve(store: Arc<Store>, cmds: UnboundedSender<Cmd>) -> Option<broadcast::Sender<String>> {
     let path = socket_path(&store);
+    let _ = std::fs::create_dir_all(store.data_dir());
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).ok()?;
     {
