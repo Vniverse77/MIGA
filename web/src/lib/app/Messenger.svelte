@@ -80,6 +80,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	import MessageSheet from './MessageSheet.svelte';
 	import { swipeReply } from './swipe';
 	import { pwa, promptInstall, setUnreadBadge } from '../pwa.svelte';
+	import BackgroundSetting from './BackgroundSetting.svelte';
 	import { closeTopLayer, layers, onShortcutKey, shortcutsOn, type ShortcutActions } from './shortcuts.svelte';
 	import { getTheme, setTheme, type Theme } from '../theme.svelte';
 	import { getLanguage, t, type MessageKey } from '../i18n.svelte';
@@ -1429,6 +1430,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 
 	$effect(() => {
 		if (platform.target === 'web') setUnreadBadge(unreadTotal);
+		platform.setUnread?.(unreadTotal);
 		document.title = unreadTotal > 0 ? `(${unreadTotal > 99 ? '99+' : unreadTotal}) ${baseTitle}` : baseTitle;
 	});
 
@@ -3055,6 +3057,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 						</div>
 						<p class="hint">{t('notif_privacy')}</p>
 						<p class="hint">{t('notif_note')}</p>
+						<BackgroundSetting />
 					</section>
 
 							{:else if curPage === 'privacy'}

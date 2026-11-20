@@ -36,3 +36,28 @@ Ship Android first with the **foreground service connection** (no relay change, 
 privacy rules and F-Droid), with a clear first-run screen for battery optimisation. Add **UnifiedPush** as an
 opt-in second step for people who want a quieter phone. Do not build FCM unless a Play Store flavour is
 required later, and then keep it a separate flavour with empty payloads.
+
+## Background and tray (v0.8.x, P1-c)
+
+**Android: foreground service, no Google services.** `desktop/android-patch/MigaService.kt` is a foreground service
+(type `remoteMessaging`, which has no time limit) with one quiet ongoing notification, "MIGA is connected" (its
+channel is `IMPORTANCE_MIN`; the user can hide it in the system settings). It holds a partial wake lock so the
+page's keep-alive pings are not delayed while the screen is off. The relay connection stays the page's own
+WebSocket inside the web view: the service only keeps the process alive, so no key or message ever reaches native
+code and there is no second protocol client to maintain. Message notifications are posted natively through
+`MigaNative.notify(tag, title, body)`, after the page has applied mute, block and the "What a notification shows"
+setting; a tap brings the app forward and the page opens that chat. `POST_NOTIFICATIONS` is requested from the
+"Turn on notifications" button only. Settings > Notifications has "Background connection" (default on) and an
+optional "Allow unrestricted battery use" button (Doze can still delay a connection without it).
+Limit: swiping the app away from recent apps destroys the web view that holds the connection, so the service stops
+itself (no stale "connected" notification) and messages wait on the relay until MIGA is opened again. Receiving
+after a swipe would need a native relay client holding the identity key, which was rejected for now.
+Tested on the API 36 emulator: home, then a message from a second identity gives a notification; tapping opens the chat.
+
+**Desktop: tray.** Closing the window hides it to the tray (setting "Keep running in the tray when closed", default
+on, stored in `prefs.json` in the app config folder). Tray menu: Open MIGA, Disable/Enable notifications (persisted;
+the page asks the shell before each native notification), Quit MIGA (exits). The icon gets a red dot and tooltip
+with the unread total. On Linux the status area opens the menu on any click (appindicator has no click events);
+Windows and macOS toggle the window on a left click. The tray is created only if `libayatana-appindicator3` can be
+loaded and a StatusNotifier host is on the session bus; otherwise closing quits and the setting says so. The `.deb`
+depends on `libayatana-appindicator3-1`; AUR on `libayatana-appindicator`; the Flatpak ships it.
