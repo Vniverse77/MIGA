@@ -26,6 +26,7 @@ type limits struct {
 	QueueBytes       int64 // MIGA_QUEUE_BYTES: queued bytes per recipient
 	QueueTotalBytes  int64 // MIGA_QUEUE_TOTAL_BYTES: queued bytes over all recipients
 	BlobQuota        int64 // MIGA_BLOB_QUOTA: total blob bytes on disk
+	BlobUploads      int   // MIGA_BLOB_UPLOADS_TOTAL: concurrent blob uploads on the whole relay (HTTP 503)
 	BlobPerIPUploads int   // MIGA_BLOB_UPLOADS_PER_IP: concurrent uploads per IP
 	BlobPerIPReads   int   // MIGA_BLOB_DOWNLOADS_PER_IP: concurrent downloads per IP
 	BlobPerWindow    int   // MIGA_BLOB_UPLOADS_PER_10MIN: uploads per 10 minutes per IP
@@ -35,7 +36,7 @@ func defaultLimits() limits {
 	return limits{
 		MaxConnsPerIP: 300, ConnPerMin: 600, MsgPerMin: 3000, NewRcptPerHour: 300,
 		QueueMsgs: maxQueue, QueueBytes: 8 << 20, QueueTotalBytes: 512 << 20,
-		BlobQuota: 1 << 30, BlobPerIPUploads: 20, BlobPerIPReads: 60, BlobPerWindow: blobRateLimit,
+		BlobQuota: 1 << 30, BlobUploads: defaultMaxActiveUploads, BlobPerIPUploads: 20, BlobPerIPReads: 60, BlobPerWindow: blobRateLimit,
 	}
 }
 
@@ -59,7 +60,7 @@ func limitsFromEnv() limits {
 	}{
 		{"MIGA_MAX_CONNS_PER_IP", &l.MaxConnsPerIP}, {"MIGA_CONNS_PER_MIN", &l.ConnPerMin},
 		{"MIGA_MSGS_PER_MIN", &l.MsgPerMin}, {"MIGA_NEW_RCPT_PER_HOUR", &l.NewRcptPerHour},
-		{"MIGA_QUEUE_MSGS", &l.QueueMsgs}, {"MIGA_BLOB_UPLOADS_PER_IP", &l.BlobPerIPUploads},
+		{"MIGA_QUEUE_MSGS", &l.QueueMsgs}, {"MIGA_BLOB_UPLOADS_PER_IP", &l.BlobPerIPUploads}, {"MIGA_BLOB_UPLOADS_TOTAL", &l.BlobUploads},
 		{"MIGA_BLOB_DOWNLOADS_PER_IP", &l.BlobPerIPReads}, {"MIGA_BLOB_UPLOADS_PER_10MIN", &l.BlobPerWindow},
 	} {
 		n := int64(*e.dst)

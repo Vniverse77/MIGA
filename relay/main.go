@@ -112,7 +112,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("blob store: %v", err)
 	}
-	blobs.g, blobs.rateMax = s.g, lim.BlobPerWindow
+	blobs.g, blobs.rateMax, blobs.maxActive = s.g, lim.BlobPerWindow, lim.BlobUploads
 	go blobs.cleanupLoop()
 
 	mux := http.NewServeMux()

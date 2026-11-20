@@ -266,6 +266,41 @@ func TestBlobUploadConcurrencyPerIP(t *testing.T) {
 	}
 }
 
+func TestBlobGlobalUploadCap(t *testing.T) {
+	b, mux := testStore(t, 1<<30)
+	b.maxActive = 2
+	var writers []*io.PipeWriter
+	done := make(chan int, 2)
+	for _, ip := range []string{"192.0.2.10:1", "192.0.2.11:1"} {
+		pr, pw := io.Pipe()
+		writers = append(writers, pw)
+		go func(ip string) {
+			req := httptest.NewRequest("PUT", "/blob", pr)
+			req.RemoteAddr = ip
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			done <- rec.Code
+		}(ip)
+	}
+	time.Sleep(200 * time.Millisecond) // both uploads are in flight
+	rec := do(mux, "PUT", "/blob", []byte("abc"), nil)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("third upload over the global cap: %d", rec.Code)
+	}
+	for _, pw := range writers {
+		pw.Write([]byte("data"))
+		pw.Close()
+	}
+	for i := 0; i < 2; i++ {
+		if c := <-done; c != http.StatusCreated {
+			t.Fatalf("in-flight upload: %d", c)
+		}
+	}
+	if rec := do(mux, "PUT", "/blob", []byte("abc"), nil); rec.Code != http.StatusCreated {
+		t.Fatalf("upload after slots freed: %d", rec.Code)
+	}
+}
+
 func TestBlobDownloadConcurrencyPerIP(t *testing.T) {
 	b, mux := testStore(t, 1<<30)
 	b.g = newGuard(defaultLimits(), false)
@@ -309,8 +344,9 @@ func TestBlobStorageCapAnswers507(t *testing.T) {
 func TestLimitsFromEnvDefaults(t *testing.T) {
 	t.Setenv("MIGA_QUEUE_MSGS", "7")
 	t.Setenv("MIGA_BLOB_QUOTA", "12345")
+	t.Setenv("MIGA_BLOB_UPLOADS_TOTAL", "32")
 	l := limitsFromEnv()
-	if l.QueueMsgs != 7 || l.BlobQuota != 12345 || l.MaxConnsPerIP != 300 || l.QueueTotalBytes != 512<<20 {
+	if l.QueueMsgs != 7 || l.BlobQuota != 12345 || l.MaxConnsPerIP != 300 || l.QueueTotalBytes != 512<<20 || l.BlobUploads != 32 {
 		t.Fatalf("%+v", l)
 	}
 }

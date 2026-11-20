@@ -31,11 +31,12 @@ Set `MIGA_TRUST_PROXY=1` behind Cloudflare so the real client IP (`CF-Connecting
 | `MIGA_QUEUE_BYTES` | 8388608 | queued bytes per recipient (`queue_full`) |
 | `MIGA_QUEUE_TOTAL_BYTES` | 536870912 | queued bytes in total (`queue_full`) |
 | `MIGA_BLOB_QUOTA` | 1073741824 | total blob bytes on disk (HTTP 507) |
+| `MIGA_BLOB_UPLOADS_TOTAL` | 16 | concurrent blob uploads on the whole relay (HTTP 503) |
 | `MIGA_BLOB_UPLOADS_PER_IP` | 20 | concurrent uploads per IP (HTTP 429) |
 | `MIGA_BLOB_DOWNLOADS_PER_IP` | 60 | concurrent downloads per IP (HTTP 429) |
 | `MIGA_BLOB_UPLOADS_PER_10MIN` | 300 | uploads per 10 minutes per IP (HTTP 429) |
 
-Fixed: 25 MiB per blob, 4 concurrent uploads in total, 32 KiB per frame, 24,000 characters per
+Fixed: 25 MiB per blob, 32 KiB per frame, 24,000 characters per
 message body, 30 messages per 10 s per connection, 30 day expiry.
 
 Queue policy: a full queue rejects the new message (`queue_full`); messages already queued are never

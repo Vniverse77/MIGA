@@ -26,13 +26,13 @@ import (
 
 const (
 	// 25 MiB of content plus the per-chunk authentication tags (16 bytes per 64 KiB, about 6.4 KB).
-	defaultMaxBlob   = 25<<20 + 64<<10
-	defaultBlobQuota = 1 << 30
-	blobTTL          = 30 * 24 * time.Hour
-	blobRateWindow   = 10 * time.Minute
-	blobRateLimit    = 300
-	maxActiveUploads = 4
-	tempMaxAge       = time.Hour
+	defaultMaxBlob          = 25<<20 + 64<<10
+	defaultBlobQuota        = 1 << 30
+	blobTTL                 = 30 * 24 * time.Hour
+	blobRateWindow          = 10 * time.Minute
+	blobRateLimit           = 300
+	defaultMaxActiveUploads = 16 // global concurrent uploads; MIGA_BLOB_UPLOADS_TOTAL overrides
+	tempMaxAge              = time.Hour
 )
 
 var blobIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
@@ -51,12 +51,13 @@ type blobStore struct {
 	origins  []string
 	trustXFF bool
 
-	mu       sync.Mutex
-	reserved int64 // bytes promised to uploads still in flight
-	active   int
-	rate     map[string]*ipWindow
-	rateMax  int
-	g        *guard // per-IP transfer concurrency; nil allows everything
+	mu        sync.Mutex
+	reserved  int64 // bytes promised to uploads still in flight
+	active    int
+	maxActive int // global concurrent upload cap (answers 503 beyond it)
+	rate      map[string]*ipWindow
+	rateMax   int
+	g         *guard // per-IP transfer concurrency; nil allows everything
 }
 
 type ipWindow struct {
@@ -80,7 +81,7 @@ func newBlobStore(db *sql.DB, dir string, quota int64, origins []string) (*blobS
 	return &blobStore{
 		db: db, dir: dir, maxSize: defaultMaxBlob, quota: quota, ttl: blobTTL, origins: origins,
 		trustXFF: os.Getenv("MIGA_TRUST_PROXY") == "1",
-		rate:     map[string]*ipWindow{}, rateMax: blobRateLimit,
+		rate:     map[string]*ipWindow{}, rateMax: blobRateLimit, maxActive: defaultMaxActiveUploads,
 	}, nil
 }
 
@@ -162,7 +163,7 @@ func (b *blobStore) allow(ip string) bool {
 func (b *blobStore) reserve(n int64) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.active >= maxActiveUploads {
+	if b.active >= b.maxActive {
 		return errBusy
 	}
 	var used int64
