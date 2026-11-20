@@ -62,7 +62,7 @@ f_bump() {
   git diff --stat | tail -1
 }
 
-f_check() { cd "$ROOT/web"; [[ -d node_modules ]] || npm install --no-audit --no-fund --no-package-lock; deno task check; }
+f_check() { cd "$ROOT/web"; deno install >/dev/null 2>&1 || npm install --no-audit --no-fund --no-package-lock; deno task check; }
 
 f_commit() {
   cd "$ROOT"
