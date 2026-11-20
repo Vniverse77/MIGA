@@ -4,5 +4,5 @@
 	"description": "Desktop only: a native save dialog and one write to the file the person picked in it (key backup). The file system scope is empty until the dialog adds that single path.",
 	"windows": ["main"],
 	"platforms": ["linux", "macOS", "windows"],
-	"permissions": ["dialog:allow-save", "fs:allow-write-file"]
+	"permissions": ["dialog:allow-save", "fs:allow-write-file", "clipboard-manager:allow-read-image"]
 }

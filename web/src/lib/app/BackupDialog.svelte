@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { copyText } from '../clipboard';
 	import { MIN_PASSPHRASE, recoveryCode } from '../backup';
 	import { backupFileName, buildBackup, encodeBackup, type Snapshot } from '../backup-data';
 	import type { Identity } from '../crypto';
@@ -89,12 +90,7 @@
 
 	async function copyCode(): Promise<void> {
 		if (!code) return;
-		try {
-			await navigator.clipboard.writeText(code.grouped);
-			copied = true;
-		} catch {
-			copied = false;
-		}
+		copied = await copyText(code.grouped);
 	}
 
 	function finishCode(): void {
