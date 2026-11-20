@@ -1,0 +1,24 @@
+ MIGA         ● history 42%  Anna  aaaa…aaaa
+  Boris               22:04
+  ship it?              2
+▌ Anna                21:52                 ────────── Yesterday ──────────
+  You: se╭ Devices ─────────────────────────────────────────────────────────────╮
+  Chen We│                                                                      │
+  You: th│  dddddddddddd (this device)                                          │
+  ddddddd│  eeeeeeeeeeee  Android · MIGA Mobile                                 │
+  No mess│  ffffffffffff  Linux · MIGA CLI                                      │
+         │                                                                      │
+         │  a add (QR)   c copy history from it   x remove   Esc                │
+         │                                                                      │
+         │                                                                      │
+         ╰──────────────────────────────────────────────────────────────────────╯
+                                              yes, around eight. I can bring the maps 🗺️
+                                                                                21:47 ✓✓
+
+                                                             ▎ Anna: The usual place
+                                                             which one is that?  21:49 ✓
+
+                                                                 see you there  21:52 ✓✓
+
+                             › Message Anna
+ Enter send   Alt+Enter newline   Ctrl+K switch   Esc messages   F1 help           v0.1.0

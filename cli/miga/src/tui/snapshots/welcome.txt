@@ -1,0 +1,22 @@
+ MIGA              ● online  Welcome
+
+  No chats yet
+                                                    Welcome to MIGA
+  Ctrl+N add a contact
+                                        Private messages, end to end encrypted.
+
+                                           Ctrl+N  add a contact by address
+                                               F2  show your own address
+                                                 ?  help and all keys
+
+
+
+
+
+
+
+
+
+
+
+ Enter open   Ctrl+K switch   Ctrl+N new chat   Alt+A unread   ? help              v0.1.0

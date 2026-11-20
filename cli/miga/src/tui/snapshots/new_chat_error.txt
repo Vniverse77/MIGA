@@ -1,0 +1,24 @@
+ MIGA              ● online  Anna  aaaa…aaaa
+  Boris               22:04
+  ship it?              2
+▌ Anna                21:52                 ────────── Yesterday ──────────
+  You: se╭ New chat ────────────────────────────────────────────────────────────╮
+  Chen We│                                                                      │
+  You: th│  Address                                                             │
+  ddddddd│  abc                                                                 │
+  No mess│  Name (optional)                                                     │
+         │                                                                      │
+         │                                                                      │
+         │  That is not a valid MIGA address (64 hex characters)                │
+         │                                                                      │
+         │  Enter add   Tab next field   Esc cancel                             │
+         ╰──────────────────────────────────────────────────────────────────────╯maps 🗺️
+                                                                                21:47 ✓✓
+
+                                                             ▎ Anna: The usual place
+                                                             which one is that?  21:49 ✓
+
+                                                                 see you there  21:52 ✓✓
+
+                             › Message Anna
+ Enter send   Alt+Enter newline   Ctrl+K switch   Esc messages   F1 help           v0.1.0

@@ -1,0 +1,153 @@
+{
+  "note": "code (12 Crockford base32 chars from `byte & 31`) -> scrypt(utf8(code), \"miga-link-v0\", N=2^15, r=8, p=1, 64) -> [0..32] mailbox seed, [32..64] bundle key. Bundle = same sealed format as messages but with NO pair key and NO AAD. The new device must also reject a bundle whose exp has passed (not part of open()).",
+  "alphabet": "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
+  "cases": [
+    {
+      "random_bytes": "d088852766ea07ee9558a594",
+      "code": "G8576A7ENR5M",
+      "grouped": "G857-6A7E-NR5M",
+      "scrypt_out": "33e00699bea46b96593d9c3e3696083905255cdb402b0e3435ba387185daa56f69d6e968ec91f77d9c80d03638244d8eed96c6b3ede5a970fe4285af39b42ff8",
+      "mailbox_seed": "33e00699bea46b96593d9c3e3696083905255cdb402b0e3435ba387185daa56f",
+      "mailbox_address": "1e2832f0fbd8e8d36730f8c31893f9ea107c92851daedd19e349fe331dcffa2e",
+      "bundle_key": "69d6e968ec91f77d9c80d03638244d8eed96c6b3ede5a970fe4285af39b42ff8",
+      "bundle": {
+        "k": "link",
+        "secret": "a73a57a17008969c24a81e11a204ed07083bd84137955f99e26c2c25bae96f7b",
+        "sponsor": "b90e0c8cb02cd9d0c62156edeef89651c215c3396ff9e5d26aa34e555eabc05e",
+        "exp": 1700000600000,
+        "profile": {
+          "name": "Alice",
+          "share": true
+        },
+        "devices": [
+          {
+            "address": "b90e0c8cb02cd9d0c62156edeef89651c215c3396ff9e5d26aa34e555eabc05e",
+            "label": "Linux · MIGA CLI",
+            "added": 1699999999000
+          }
+        ]
+      },
+      "nonce": "7812b0649af513a2c4ac000beab655589fd7f3160eb0279d",
+      "plaintext": "{\"k\":\"link\",\"secret\":\"a73a57a17008969c24a81e11a204ed07083bd84137955f99e26c2c25bae96f7b\",\"sponsor\":\"b90e0c8cb02cd9d0c62156edeef89651c215c3396ff9e5d26aa34e555eabc05e\",\"exp\":1700000600000,\"profile\":{\"name\":\"Alice\",\"share\":true},\"devices\":[{\"address\":\"b90e0c8cb02cd9d0c62156edeef89651c215c3396ff9e5d26aa34e555eabc05e\",\"label\":\"Linux · MIGA CLI\",\"added\":1699999999000}]}",
+      "padded_len": 512,
+      "body": "eBKwZJr1E6LErAAL6rZVWJ/X8xYOsCedyANpBV05+wSy9i6GqkE2GFTEOpG1iqqMBD0oplyVJwSSuvBZ8eLfcn3Lx2W9wpDP8pP+CUWpLPMx1cdjaCYvWS8yzxy8tERpLvSRbn1HZAHr64r13owtY4RkzY+m15a+EEgRXpznRxOuQz4L4BGIoBEqpyDAJ4V8XVSS+SnUKQUw1cjSAUC+I3+LjpBFznqtF8hjtw/b8pTAetZU62r8Y57x1QfAyPRzNV36xBGc1HNb33+z5Wv+gV30vtxmBlTmN92fOV1KhGq5W9bTPXs1U/YdbI3KdLt7spHuw9L+iUSlleo9wzNNxigZIfLZR9UX4oJtF9c289zlDbCSXmDo/Nee6NrTepa1l6B3fv4N9+V7l1xcL8d4RqLsmn1U3Nig9iFiQp+fiOsX6+N1LgS7G6jQXGKv66iJmuiIdymlr+fD950agABKBPQRP8dkGzZ31Ix9hYoBJeG+++I9ZOVe4E215Iz1mmECX7Q/IPK0GvUhc1rxAFjgpZluKTA1e0yw0ftoom1LoEnBus1s9slOOZRf3BoCAPWoD7as/6e/z7iy67CNTFjsW72g4Weip0l9+Kbo4XtEiWAXt5T0f5dB7UCpBvVkxazhrv5md35oN8qUxA0at7Ne40iZPpwWnUgGYkETJ/W5/pWhcBxtkdwQXdbvmFAbIJkwiFNjozeB7UmtuOtNWNXY+J3af1oq0NB3",
+      "open_ok": {
+        "k": "link",
+        "secret": "a73a57a17008969c24a81e11a204ed07083bd84137955f99e26c2c25bae96f7b",
+        "sponsor": "b90e0c8cb02cd9d0c62156edeef89651c215c3396ff9e5d26aa34e555eabc05e",
+        "exp": 1700000600000,
+        "profile": {
+          "name": "Alice",
+          "share": true
+        },
+        "devices": [
+          {
+            "address": "b90e0c8cb02cd9d0c62156edeef89651c215c3396ff9e5d26aa34e555eabc05e",
+            "label": "Linux · MIGA CLI",
+            "added": 1699999999000
+          }
+        ]
+      },
+      "open_with_other_key": null,
+      "open_with_aad": null
+    },
+    {
+      "random_bytes": "55533b8e82831f69be29bd40",
+      "code": "NKVE23Z9Y9X0",
+      "grouped": "NKVE-23Z9-Y9X0",
+      "scrypt_out": "833cf06aafbe113e8ef20c7725869425da463e39317d99aa69dd63d293535bf151b7afe75bfe6f5da544e7261839a9613e933dbf5a4ccfe7e5ba83f041dfab02",
+      "mailbox_seed": "833cf06aafbe113e8ef20c7725869425da463e39317d99aa69dd63d293535bf1",
+      "mailbox_address": "f5cab1df28ad81ee7eee7b4905bb8be37dc1ccfdf25a42ecb65c56a85a74094d",
+      "bundle_key": "51b7afe75bfe6f5da544e7261839a9613e933dbf5a4ccfe7e5ba83f041dfab02",
+      "bundle": {
+        "k": "link",
+        "secret": "a73a57a17008969c24a81e11a204ed07083bd84137955f99e26c2c25bae96f7b",
+        "sponsor": "8ecab351f2c043ccffe108dfb6838d40e9541bb7bf96564198c5ae692be64d40",
+        "exp": 1700000600000,
+        "profile": {
+          "name": "",
+          "share": true
+        },
+        "devices": [
+          {
+            "address": "8ecab351f2c043ccffe108dfb6838d40e9541bb7bf96564198c5ae692be64d40",
+            "label": "Linux · MIGA CLI",
+            "added": 1699999999000
+          }
+        ]
+      },
+      "nonce": "999d9c636f82171f058e3004662b7c6773bb7968088094fd",
+      "plaintext": "{\"k\":\"link\",\"secret\":\"a73a57a17008969c24a81e11a204ed07083bd84137955f99e26c2c25bae96f7b\",\"sponsor\":\"8ecab351f2c043ccffe108dfb6838d40e9541bb7bf96564198c5ae692be64d40\",\"exp\":1700000600000,\"profile\":{\"name\":\"\",\"share\":true},\"devices\":[{\"address\":\"8ecab351f2c043ccffe108dfb6838d40e9541bb7bf96564198c5ae692be64d40\",\"label\":\"Linux · MIGA CLI\",\"added\":1699999999000}]}",
+      "padded_len": 512,
+      "body": "mZ2cY2+CFx8FjjAEZit8Z3O7eWgIgJT9KsFM9FC6nQ2CY63Wew+fWksKoNbP+0uT91xrNAp2lgDcV9zXu1jf5GjCbOY52GDR0SC27gW/ilCTd6PRhVy2hGrdinI/9i7Xt04q0DgxJsxNp4U7Ma8Z6PxNx8ipJQFmg+q6sZwBvF8OPtOaU1ElZ/h23wRZXN5MiDPHT04KzU7xvo3ngUVGyCOQbHJT8kf/NwvTktTmB6+kAiHwUwLBrM3OzTlRQEa4eOjCKnCfj0f1WaMcnD9eGedDpeNpC0/p2psRsnMuMyY1aMzFYqmY6KyGKmlEFHpuw8t1+PRuZPaRY6w1FKGI2wNBoI7g5M3UdrRZfcO1bqNnIG72UV1X2BpUEFdtlTdnqxB4rWaykiaLFfkGyZAV1RlR9jRpxoSHDmPiQeOIPw0Rr8tIPgbVDlCdrgt/utj3TQpMn78HJwuYTBwRJx/LpemL1NxrPoTBBmYT2RtohY6bTY9Zu+RM6sAzn6PPjMDVH0OdxQwdXjj0+sXm1U6Nyiu4u8UOCY1rXM3kCmlu6GtxnIV/rsiS195Sp5cY24Ix/KeOPjeiRfOmdnwg7lkjjf9DcSNrFVqe/Plc0zrFSLqN7cfSlVhrMBwvEMp94hGXl6hVaOYe7OJOCGaVrbOtkKJrA95Fr4y/rh1dPpE3vltWlLfBPynULnTyifFDD/OUU5q8BTuWyjhbZk5J3117UjQmciGbIN/O",
+      "open_ok": {
+        "k": "link",
+        "secret": "a73a57a17008969c24a81e11a204ed07083bd84137955f99e26c2c25bae96f7b",
+        "sponsor": "8ecab351f2c043ccffe108dfb6838d40e9541bb7bf96564198c5ae692be64d40",
+        "exp": 1700000600000,
+        "profile": {
+          "name": "",
+          "share": true
+        },
+        "devices": [
+          {
+            "address": "8ecab351f2c043ccffe108dfb6838d40e9541bb7bf96564198c5ae692be64d40",
+            "label": "Linux · MIGA CLI",
+            "added": 1699999999000
+          }
+        ]
+      },
+      "open_with_other_key": null,
+      "open_with_aad": null
+    },
+    {
+      "random_bytes": "bca954cae1b226b5082b1324",
+      "code": "W9MA1J6N8BK4",
+      "grouped": "W9MA-1J6N-8BK4",
+      "scrypt_out": "83a9c0859b92b68cb8ab482cef7cbfefac3f9a3c5c7b83647a216a0b849d2192bb0a2b070eb8a5aff420a0e5eee77546237e1bddafbc66922d744aaea4bbef9f",
+      "mailbox_seed": "83a9c0859b92b68cb8ab482cef7cbfefac3f9a3c5c7b83647a216a0b849d2192",
+      "mailbox_address": "054916cdbf45e71d17190348a78b53dffe6eb3daaab51cc1139470ac5a1cbca9",
+      "bundle_key": "bb0a2b070eb8a5aff420a0e5eee77546237e1bddafbc66922d744aaea4bbef9f",
+      "bundle": {
+        "k": "link",
+        "secret": "a73a57a17008969c24a81e11a204ed07083bd84137955f99e26c2c25bae96f7b",
+        "sponsor": "a6264655472be8e4b9041639c54bb20af7ca8f8aa68f5c448cfd9fd9dd6a94ed",
+        "exp": 1700000600000,
+        "profile": {
+          "name": "Alice",
+          "share": false
+        },
+        "devices": [
+          {
+            "address": "a6264655472be8e4b9041639c54bb20af7ca8f8aa68f5c448cfd9fd9dd6a94ed",
+            "label": "Linux · MIGA CLI",
+            "added": 1699999999000
+          }
+        ]
+      },
+      "nonce": "43611284429cbe26a2d3b68358cecd6dd6c3b495200ec56f",
+      "plaintext": "{\"k\":\"link\",\"secret\":\"a73a57a17008969c24a81e11a204ed07083bd84137955f99e26c2c25bae96f7b\",\"sponsor\":\"a6264655472be8e4b9041639c54bb20af7ca8f8aa68f5c448cfd9fd9dd6a94ed\",\"exp\":1700000600000,\"profile\":{\"name\":\"Alice\",\"share\":false},\"devices\":[{\"address\":\"a6264655472be8e4b9041639c54bb20af7ca8f8aa68f5c448cfd9fd9dd6a94ed\",\"label\":\"Linux · MIGA CLI\",\"added\":1699999999000}]}",
+      "padded_len": 512,
+      "body": "Q2EShEKcviai07aDWM7NbdbDtJUgDsVvyEj7NOPoubTCrX23M7SGoJ7+zQ5Vyx7n4kkNUzb4fBtTmoROM0QauBieKU4s2TePJnJI6YUzzVdj0IEHqCPX/bPaaaCB+Qzuh2yHYPV5BWavm6S3mnoyDN2pILB7STVurlmEdfNIEe4iSrxi++UnxST+U+XlwGcFBzLXVKhwU5gIVISVX36E0t/CHpbE5/gfmVGuG1bzbfhAJBuXPAiF+J/X0InZ0V0IHuyyNNY+Pp9hoUsF8TexMh34wYVwkAtRxIPUWlAkAdLyhltAcWHm7VYtjwNYr3vTV1vPZuHWaOcidFqVBaydcHFi3yhGDMk++xeR8CfLhNBElcH4ONa71Y4c0sZYv6btpFY3A0sB/yiPPNso6DzLt/5G1VkJrCCA3p2B/AFhmgN1p+CKzzBt9b/OmdkwKJ0FVzLrAKdGqVfBM3yZ8hZXfeBxTOhWm80pHF7Ui81FgFDsvJFJRgJsb/3Cai3oXOQgg+wDbu69v44ANhatu8PIgqhNceHEl7tgUkcc+K7Pz5ZCVv134U0EKNHEypJZ7jmbM/7WxofABJVBMLht40Fl8sm2LPMp/pshhBDfJdZ3+vGA2MQu4kW088OYlWOoUU79drG5T3gK9XjnGesDPlV6t+G2Bs6+KkMkBuQU0Ia4EdGkywsqdjYXBeIaUiHWkXKsk9xdNEHGNl/s0LJFs7eIhRhAi6s80KZt",
+      "open_ok": {
+        "k": "link",
+        "secret": "a73a57a17008969c24a81e11a204ed07083bd84137955f99e26c2c25bae96f7b",
+        "sponsor": "a6264655472be8e4b9041639c54bb20af7ca8f8aa68f5c448cfd9fd9dd6a94ed",
+        "exp": 1700000600000,
+        "profile": {
+          "name": "Alice",
+          "share": false
+        },
+        "devices": [
+          {
+            "address": "a6264655472be8e4b9041639c54bb20af7ca8f8aa68f5c448cfd9fd9dd6a94ed",
+            "label": "Linux · MIGA CLI",
+            "added": 1699999999000
+          }
+        ]
+      },
+      "open_with_other_key": null,
+      "open_with_aad": null
+    }
+  ]
+}
