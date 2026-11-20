@@ -27,7 +27,7 @@ Deno.test('mentions: filter, insert, parse', () => {
 	assertEquals(mentionToken('Test Beta'), '@Test_Beta');
 	const r = insertMention('hi @Te', 3, 6, 'Test Beta');
 	assertEquals(r, { text: 'hi @Test_Beta ', caret: 14 });
-	assertEquals(parseMentions('hi @Test_Beta and @delta, @nobody @Test_Beta', cands), [B]); // "@delta," has a comma: no match
+	assertEquals(parseMentions('hi @Test_Beta and @delta, @nobody @Test_Beta', cands), [B, D]); // trailing comma is not part of the name
 	assertEquals(parseMentions('@Test_Gamma @Delta', cands), [C, D]);
 });
 
