@@ -428,6 +428,98 @@ Clients that predate this field ignore `pow`. Linked devices: the `msg` sync cop
 
 Limits: this is a speed bump, not identity proof. A sender that omits `pow` still reaches Requests unless the receiver turns on the strict setting; a later release can make that the default.
 
+## Groups (v1)
+
+Small private groups, at most 5 members including the admin. Client-side only: the relay is unchanged and does
+not know groups exist. A group message is encrypted separately to every member with the normal pairwise envelope
+(see "Encryption") and sent as an ordinary relay message to that member. There is no shared group key, so removing
+a member needs no re-keying: they simply stop receiving.
+
+**Group id and state.** `gid` = 16 random bytes, 32 hex. The state is
+`{"id":gid,"name":<=40 chars,"admin":<address>,"members":[<address>...],"banned":[<address>...],"epoch":<int>,"createdAt":<ms>}`.
+Invariants (a state that breaks one is ignored): 1 to 5 distinct valid addresses in `members`, the admin is one of them,
+`banned` (at most 50) shares no address with `members`, `epoch >= 1`. Only the admin changes the state; every change
+raises `epoch` by at least 1.
+
+**Signature.** `sig` = hex Ed25519 signature, made with the admin's identity key, over the bytes
+`"miga-group-v1" 0x00 canonical`, where `canonical` is the JSON of the state with keys in the order above, `members` and
+`banned` sorted bytewise, no whitespace. The admin address is the Ed25519 public key, so anyone can verify it.
+
+**Payloads.** All group payloads are the pairwise plaintext with **no top-level `text`**: `{"v":0,"ts":..,"group":{..}}`
+(control) or `{"v":0,"ts":..,"g":{..}}` (content). Both stay inside the ciphertext.
+
+Admin-signed control, `group` = `{"op":<op>,"st":<state>,"sig":<hex>}` plus optional `"pow"` (invite to a stranger),
+sent by the admin to every member of the new state and, for `remove`/`ban`, to the removed address too. `op` is a hint
+for display (`invite` | `remove` | `ban` | `rename` | `transfer`); receivers act on the state, not on `op`.
+Unsigned member control, `group` = `{"op":"accept"|"leave"|"want","gid":..,"epoch":n}`: `accept` is sent to the admin
+and all members, `leave` the same, `want` only to the admin ("I saw epoch n, send me the state").
+
+Content, `g` = `{"gid":..,"epoch":<sender's known epoch>,"id":<message id, 32 hex>,"t":<kind>,...}`:
+
+| `t` | Fields |
+|---|---|
+| `msg` | `text` (<= 4000), optional `att` (as in "Attachments", without `del`), `reply`, `mentions` (member addresses, <= 5), `name` (sender's shared display name) |
+| `edit` | `eid` (the message), `text` |
+| `del` | `ids` (<= 50) |
+| `typing` | `on` (bool): ephemeral frame |
+| `live` | `text`: ephemeral frame |
+
+**Receiver rules (state).** A signed state is accepted only if (1) it is well formed and has the invariants above, (2)
+the signature verifies against the admin of the state I already know (for an unknown group: against `st.admin`, which must
+also be the sender of the envelope), (3) `st.epoch` is greater than the epoch I know. Otherwise it is dropped silently
+(still acknowledged to the relay). If I am in `members` the group is mine (first time: an *invite*, status `invited`); if I
+am not, my status becomes `removed` (or `banned` when listed in `banned`) and the record is kept so an older invite
+cannot be replayed. A new state replaces the old one; `accept` marks and `leave` hints that came from members that are no
+longer listed are forgotten.
+
+**Receiver rules (content).** Dropped (acknowledged, no trace) when the group is unknown, my status is not `active` or
+`invited`, the sender is not in `members` of my known state, is in `banned`, is me, or has sent `leave`. Duplicates are
+dropped by `(gid, id)`, so a relay redelivery, a linked-device copy and a retry never show twice. `edit` and `del` only
+touch a message whose author is the sender (delete for everyone is author-only). A message whose `epoch` is higher than
+mine makes the client send `want` to the admin once per epoch. Messages from a member who has not accepted yet are not
+possible, but messages that arrive while *I* have not accepted are held and shown after accept.
+
+**Flows.**
+- *Create*: admin makes a state (epoch 1), sends it to each invitee. Invitees are members at once but are `invited`
+  until they accept.
+- *Accept*: the invitee sets status `active`, sends `accept` to the admin and every other member. Receivers record it.
+  Until accepted a client sends nothing into the group (no messages, typing, receipts).
+- *Invite* (later): admin adds the address (refused when banned or when 5 are reached), raises the epoch, sends the new
+  state to all members including the new one.
+- *Leave*: a member sends `leave` to all and drops the group locally. The admin removes it from `members`, raises the
+  epoch and sends the new state to the remaining members and to the leaver. The admin cannot leave while others remain
+  (transfer first).
+- *Remove / ban*: admin removes the address (ban also adds it to `banned`), raises the epoch, sends the state to the
+  remaining members and to the removed one. Nobody sends to a removed member any more, and their later messages and
+  `accept`s are dropped (the admin never re-adds a banned address).
+- *Rename*: state change. *Transfer admin*: the old admin signs a state whose `admin` is another member.
+
+**Fan-out.** Sender encrypts the payload for every member except itself, with one relay id per recipient
+(`hex(SHA-256(gid ":" id ":" recipient))` first 32 chars), so the relay's `sent` frame says which copy arrived. Each copy is retried like a
+normal message (see outbox: 2 s, 5 s, 15 s, 30 s, then every 60 s, 24 h limit). Own other devices get a sync copy
+(`grp` = the group record, `gmsg` = one group message; unknown to old devices, which ignore them) and also receive group
+messages from the relay like any message sent to the account. Typing and live frames go as ephemeral frames to members
+only, never queued.
+
+**Attachments.** The file is encrypted and uploaded once. The same `att` (blob id, key, nonce, hash) is put into each
+member's envelope; the delete token stays with the sender. "Delete for everyone" deletes the blob.
+
+**Mentions.** `mentions` lists members. A client exposes `mentionsMe` on the stored message so a muted group can still
+notify for it.
+
+**Requests.** An invite from an address that is not a contact is a request until accepted, classified like a first
+message (proof of work in `group.pow`, same rules and "unverified" badge; a wrong proof is dropped and counted as
+filtered). The sender attaches `pow` to an invite when the invitee has never written to it.
+
+**Old clients.** Payloads have no top-level `text` and none of the keys older clients know, so they fail to read them,
+acknowledge and discard them: no bubble, no error (the same path as `typing`). Their owner just does not see the group
+and cannot be invited meaningfully. Verified by test against the unchanged v0.9.4 reader logic (`decrypt` returns a result
+only for new keys).
+
+Limits: members see each other's addresses. The admin is trusted for membership; a malicious member can only send
+messages like a normal contact. No forward secrecy (same as v0). Delivery to members is per copy; there are no group
+read receipts in v1.
+
 ## Safety numbers
 
 Because an address is the account's Ed25519 public key, two people can check that nobody sits
