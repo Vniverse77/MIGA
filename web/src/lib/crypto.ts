@@ -38,8 +38,6 @@ export type Plain = {
 	live?: string;
 	/** Typing indicator (ephemeral, no bubble): true = typing now, false = stopped. */
 	typing?: boolean;
-}
-
 	/**
 	 * Profile photo control message (no top-level text, no bubble): `att` = the sender's new photo
 	 * (a normal encrypted attachment, 256x256), `off` = the sender removed or hid it.
@@ -48,6 +46,7 @@ export type Plain = {
 	/** First-contact proof of work (docs/PROTOCOL.md). Absent from old clients and from known contacts. */
 	pow?: Pow;
 };
+
 /**
  * Shown by clients that predate attachments (v0.5.0 needs a string `text` or it drops the message).
  * New clients never show it: they read the real caption from `cap` and ignore `text`.
