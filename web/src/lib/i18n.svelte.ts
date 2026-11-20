@@ -1,7 +1,10 @@
 // Interface translations. English is the source; every other language must have the same keys.
 // The choice is stored in this browser only and never sent anywhere.
 
+import { landingEn, landingTr, landingTk, landingRu } from './site/landing-copy';
+
 const en = {
+	...landingEn,
 	search_chat: 'Search in conversation',
 	search_placeholder: 'Search messages',
 	search_prev: 'Previous match',
@@ -445,6 +448,7 @@ export type MessageKey = keyof typeof en;
 type Dictionary = Record<MessageKey, string>;
 
 const tr: Dictionary = {
+	...landingTr,
 	search_chat: 'Sohbette ara',
 	search_placeholder: 'Mesajlarda ara',
 	search_prev: 'Önceki eşleşme',
@@ -885,6 +889,7 @@ const tr: Dictionary = {
 
 // Turkmen: first draft, to be reviewed by a native speaker.
 const tk: Dictionary = {
+	...landingTk,
 	search_chat: 'Söhbetdeşlikde gözle',
 	search_placeholder: 'Habarlarda gözle',
 	search_prev: 'Öňki gabat gelme',
@@ -1325,6 +1330,7 @@ const tk: Dictionary = {
 };
 
 const ru: Dictionary = {
+	...landingRu,
 	search_chat: 'Поиск в разговоре',
 	search_placeholder: 'Поиск по сообщениям',
 	search_prev: 'Предыдущее совпадение',
