@@ -33,7 +33,13 @@
 		| 'eye'
 		| 'key'
 		| 'info'
-		| 'laptop';
+		| 'laptop'
+		| 'file'
+		| 'qr'
+		| 'eye-off'
+		| 'alert'
+		| 'upload'
+		| 'lock';
 
 	let { name, size = 20 }: { name: IconName; size?: number } = $props();
 </script>
@@ -133,6 +139,24 @@
 	{:else if name === 'laptop'}
 		<rect x="4" y="5" width="16" height="11" rx="2" />
 		<path d="M2 19h20" />
+	{:else if name === 'file'}
+		<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+		<path d="M14 3v5h5M9 13h6M9 17h4" />
+	{:else if name === 'qr'}
+		<rect x="4" y="4" width="6" height="6" rx="1" />
+		<rect x="14" y="4" width="6" height="6" rx="1" />
+		<rect x="4" y="14" width="6" height="6" rx="1" />
+		<path d="M14 14h2v2h-2zM18 14h2M14 18h2M18 18h2v2" />
+	{:else if name === 'eye-off'}
+		<path d="M3 3l18 18M10.6 6a9 9 0 0 1 1.4-.1c6.4 0 10 6.1 10 6.1a17 17 0 0 1-3.2 3.9M6.6 7.3A16.6 16.6 0 0 0 2 12s3.6 6.5 10 6.5a9.5 9.5 0 0 0 4.2-1M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+	{:else if name === 'alert'}
+		<path d="M12 4 2.8 19.5h18.4z" />
+		<path d="M12 10v4.5M12 17.2h.01" />
+	{:else if name === 'upload'}
+		<path d="M12 16V5M7 9l5-5 5 5M5 20h14" />
+	{:else if name === 'lock'}
+		<rect x="5" y="11" width="14" height="9" rx="2" />
+		<path d="M8 11V8a4 4 0 0 1 8 0v3" />
 	{/if}
 </svg>
 

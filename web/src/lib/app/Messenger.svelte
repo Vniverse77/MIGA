@@ -1,6 +1,10 @@
 <script lang="ts">
 	import { platform } from '../platform';
-import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './ConfirmDialog.svelte';
+import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './ConfirmDialog.svelte';
+	import BackupDialog from './BackupDialog.svelte';
+	import RestoreDialog, { type Restored } from './RestoreDialog.svelte';
+	import { dismissSheet, sheetOpen } from './Sheet.svelte';
+	import { mergeContacts, type Snapshot } from '../backup-data';
 	import QrCode from './QrCode.svelte';
 	import Attachment from './Attachment.svelte';
 	import Viewer from './Viewer.svelte';
@@ -88,6 +92,8 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 		MAX_BLOCKED,
 		createIdentity,
 		eraseAll,
+		flushWrites,
+		loadBackupInfo,
 		loadData,
 		loadLive,
 		saveLive,
@@ -99,6 +105,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 		loadNotifyBannerDismissed,
 		loadNotifyMode,
 		loadReceipts,
+		saveBackupInfo,
 		saveBlocked,
 		saveChats,
 		saveContacts,
@@ -113,6 +120,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 		saveNotifyMode,
 		saveReceipts,
 		saveUnread,
+		type BackupInfo,
 		type Chats,
 		type Contact,
 		type Device,
@@ -211,6 +219,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 		if (p === 'appearance') return t(`theme_${getTheme()}`);
 		if (p === 'notifications') return t(notifyPerm === 'granted' ? 'set_on' : 'set_off');
 		if (p === 'devices') return String(devices.length + 1);
+		if (p === 'key' && needsBackup) return t('set_backup_short');
 		return '';
 	}
 	function settingsBack(): void {
@@ -241,6 +250,8 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 		// One layer per Back: dialog, viewer, sheet or menu first, then the emoji/GIF panel under them.
 		if (layers.lang) return (layers.lang = false), true;
 		if (confirmOpen()) return dismissConfirm(), true;
+		if (sheetOpen()) return dismissSheet(), true;
+		if (nudge) return true;
 		if (viewer) return (viewer = null), true;
 		if (msgMenu || ctx || menuOpen) {
 			msgMenu = null;
@@ -339,7 +350,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 
 	// Navigation layers: sheet/picker/menu (1) > settings or other sub screen (1) > open chat (1) > list. One count drives the
 	// browser history (web at phone width), the native back state (Android) and the screen transitions.
-	const overlayCount = $derived((layers.lang || confirmOpen() || msgMenu || ctx || menuOpen || viewer ? 1 : 0) + (emojiOpen || gifOpen ? 1 : 0));
+	const overlayCount = $derived((layers.lang || confirmOpen() || sheetOpen() || msgMenu || ctx || menuOpen || viewer ? 1 : 0) + (emojiOpen || gifOpen ? 1 : 0));
 	const depth = $derived((active ? 1 : 0) + (view !== 'chat' ? 1 : 0) + (view === 'settings' && phoneLayout && setPage ? 1 : 0) + overlayCount);
 	const screen = $derived(view !== 'chat' ? 'sub' : active ? 'chat' : 'list');
 
@@ -446,6 +457,15 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 	let newName = $state('');
 	let notice = $state('');
 	let scroller = $state<HTMLElement | null>(null);
+
+	// Key backup (docs/BACKUP.md)
+	let backupInfo = $state<BackupInfo | null>(null);
+	let backupOpen = $state(false);
+	let restoreOpen = $state(false);
+	/** The "back up your key" step right after an address was created. It stays until the person acts. */
+	let nudge = $state(false);
+	/** No backup and no second device: losing this device would lose the account. */
+	const needsBackup = $derived(!!identity && !backupInfo && devices.length === 0);
 
 	// First-run screen
 	let onboard = $state<'create' | 'link'>('create');
@@ -590,6 +610,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 
 	function begin(): void {
 		profile = loadProfile();
+		backupInfo = loadBackupInfo();
 		deviceLabel = guessDeviceLabel();
 		readInvite();
 		const me = loadIdentity();
@@ -1080,7 +1101,12 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 	}
 
 	async function eraseThisDevice(): Promise<void> {
-		if (!(await ask({ body: t('q_erase'), confirm: t('erase'), danger: true }))) return;
+		if (needsBackup) {
+			// The only copy of the key is on this device: offer the backup before anything is lost.
+			const choice = await askChoice({ title: t('erase_nb_title'), body: `${t('erase_nb_body')}\n\n${t('q_erase')}`, confirm: t('erase_nb_anyway'), alt: t('erase_nb_backup'), danger: true });
+			if (choice === 'alt') backupOpen = true;
+			if (choice !== 'confirm') return;
+		} else if (!(await ask({ body: t('q_erase'), confirm: t('erase'), danger: true }))) return;
 		if (linkMailbox) endLink('');
 		if (device && sync) {
 			for (const other of devices) {
@@ -1099,6 +1125,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 		saveProfile($state.snapshot(profile));
 		notice = '';
 		start(createIdentity());
+		nudge = true;
 	}
 
 	/** On the new device: fetch the bundle that the code points to and adopt the account. */
@@ -1865,35 +1892,47 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 		}
 	}
 
-	async function backupKey(): Promise<void> {
-		if (!identity) return;
-		if (!(await ask({ body: t('q_backup'), confirm: t('backup_key') }))) return;
-		try {
-			await navigator.clipboard.writeText(bytesToHex(identity.secret));
-			notice = t('n_key_copied');
-		} catch {
-			notice = t('n_key_copy_failed');
-		}
+	/** What this device holds, for the backup dialog to pick from. */
+	function backupSnapshot(): Snapshot {
+		return {
+			profile: $state.snapshot(profile),
+			contacts: $state.snapshot(contacts),
+			blocked: $state.snapshot(blocked),
+			muted: $state.snapshot(muted),
+			chats: $state.snapshot(chats),
+			settings: { receipts, live: liveOn, notify: notifyMode }
+		};
 	}
 
-	async function restoreKey(): Promise<void> {
-		const typed = await askText({
-			title: t('restore'),
-			// One step: the warning is part of the same dialog, so no second dialog can swallow the click.
-			body: identity ? `${t('q_restore_confirm')}\n\n${t('q_restore_prompt')}` : t('q_restore_prompt'),
-			confirm: t('restore'),
-			danger: identity !== null,
-			placeholder: t('ph_key')
-		});
-		const value = typed?.trim().toLowerCase();
-		if (!value) return;
-		if (!/^[0-9a-f]{64}$/.test(value)) {
-			notice = t('n_bad_key');
-			return;
-		}
-		saveIdentity(identityFromSecret(hexToBytes(value)));
+	function backedUp(kind: 'file' | 'code'): void {
+		saveBackupInfo({ ts: Date.now(), kind });
+		backupInfo = loadBackupInfo();
+		nudge = false;
+	}
+
+	/** Puts a restored account in place and reloads. What the backup brings is merged into what is here. */
+	async function applyRestored({ secret, content }: Restored): Promise<void> {
+		saveIdentity(identityFromSecret(secret));
 		// The device list belongs to the account that is being replaced.
 		saveDevices([]);
+		if (content) {
+			if (content.profile) saveProfile(content.profile);
+			if (content.settings) {
+				saveReceipts(content.settings.receipts);
+				saveLive(content.settings.live);
+				saveNotifyMode(content.settings.notify);
+			}
+			if (content.contacts) saveContacts(mergeContacts($state.snapshot(contacts), content.contacts));
+			if (content.blocked) saveBlocked([...new Set([...$state.snapshot(blocked), ...content.blocked])].slice(0, MAX_BLOCKED));
+			if (content.muted) saveMuted([...new Set([...$state.snapshot(muted), ...content.muted])].slice(0, MAX_BLOCKED));
+			if (content.chats) {
+				const merged = $state.snapshot(chats) as Chats;
+				for (const [peer, list] of Object.entries(content.chats)) mergeMessages((merged[peer] ??= []), list);
+				saveChats(merged);
+			}
+		}
+		saveBackupInfo({ ts: Date.now(), kind: 'restored' });
+		await flushWrites();
 		location.reload();
 	}
 
@@ -2432,6 +2471,16 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 	{/if}
 {/snippet}
 
+{#snippet backupBanner()}
+	{#if needsBackup && !nudge}
+		<div class="backup-banner" role="region" aria-label={t('set_key')}>
+			<Icon name="alert" size={18} />
+			<p>{t('bk_banner')}</p>
+			<button type="button" class="primary" onclick={() => (backupOpen = true)}>{t('bk_banner_btn')}</button>
+		</div>
+	{/if}
+{/snippet}
+
 {#snippet notifyBanner()}
 	{#if notifyPerm === 'default' && !bannerDismissed && identity}
 		<div class="notify-banner" role="region" aria-label={t('notif_title')}>
@@ -2489,11 +2538,11 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 					<p class="lead">{t('ob_text')}</p>
 					{@render profileFields()}
 					<button type="submit" class="primary">{t('ob_create')}</button>
-					<div class="row">
-						<button type="button" onclick={() => ((onboard = 'link'), (notice = ''))}>
-							{t('ob_link')}
+					<div class="row stack">
+						<button type="button" class="with-icon" onclick={() => ((onboard = 'link'), (notice = ''))}>
+							<Icon name="device-add" size={16} />{t('ob_link')}
 						</button>
-						<button type="button" onclick={restoreKey}>{t('ob_restore')}</button>
+						<button type="button" class="with-icon" onclick={() => ((restoreOpen = true), (notice = ''))}><Icon name="upload" size={16} />{t('ob_restore')}</button>
 					</div>
 					{#if notice}<p class="notice" role="status">{notice}</p>{/if}
 				</form>
@@ -2523,6 +2572,17 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 				</form>
 			{/if}
 		</div>
+	{:else if nudge}
+		<div class="onboard">
+			<div class="card nudge" role="alertdialog" aria-labelledby="nudge-title" aria-describedby="nudge-text">
+				<span class="nudge-icon"><Icon name="key" size={26} /></span>
+				<h1 id="nudge-title">{t('np_title')}</h1>
+				<p id="nudge-text" class="lead">{t('np_text')}</p>
+				<button type="button" class="primary with-icon" onclick={() => (backupOpen = true)}><Icon name="download" size={16} />{t('np_now')}</button>
+				<button type="button" onclick={() => (nudge = false)}>{t('np_later')}</button>
+				<p class="hint">{t('np_later_note')}</p>
+			</div>
+		</div>
 	{:else}
 		{#if isDesktop}
 		<aside class="side">
@@ -2539,7 +2599,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 			</div>
 
 			{@render globalBar(0)}
-			{#if gResults === null}{@render hxBanner()}{@render notifyBanner()}{/if}
+			{#if gResults === null}{@render backupBanner()}{@render hxBanner()}{@render notifyBanner()}{/if}
 			<ul class="contacts side-list" class:hidden={gResults !== null}>
 				{#each contacts as contact (contact.address)}
 					{@const last = chats[contact.address]?.at(-1)}
@@ -2644,7 +2704,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 				<p class="notice" role="status">{notice}</p>
 			{/if}
 
-			{#if gResults === null}{@render hxBanner()}{@render notifyBanner()}{/if}
+			{#if gResults === null}{@render backupBanner()}{@render hxBanner()}{@render notifyBanner()}{/if}
 			<ul class="contacts" class:hidden={gResults !== null}>
 				{#each contacts as contact (contact.address)}
 					{@const last = chats[contact.address]?.at(-1)}
@@ -2700,7 +2760,7 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 											<button type="button" class="set-row" class:on={curPage === p} data-set={p} aria-current={curPage === p ? 'page' : undefined} onclick={() => (setPage = p)}>
 												<Icon name={setIcon[p]} size={20} />
 												<span class="set-label">{t(setTitle[p])}</span>
-												{#if setSummary(p)}<span class="set-sum">{setSummary(p)}</span>{/if}
+												{#if setSummary(p)}<span class="set-sum" class:bad={p === 'key' && needsBackup}>{setSummary(p)}</span>{/if}
 												<Icon name="chevron-right" size={18} />
 											</button>
 										{/each}
@@ -2861,10 +2921,14 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 							{:else if curPage === 'key'}
 					<section class="card">
 						<h2>{t('set_key')}</h2>
-						<p class="hint">{t('set_key_help')}</p>
-						<div class="row">
-							<button type="button" onclick={backupKey}>{t('backup_key')}</button>
-							<button type="button" onclick={restoreKey}>{t('restore')}</button>
+						<div class="bk-status" class:bad={needsBackup}>
+							<Icon name={backupInfo ? 'shield' : 'alert'} size={18} />
+							<span>{backupInfo ? t(backupInfo.kind === 'restored' ? 'set_backup_restored' : 'set_backup_last', { when: dateOf(backupInfo.ts) }) : t('set_backup_never')}</span>
+						</div>
+						<p class="hint">{t('set_backup_help')}</p>
+						<div class="row stack">
+							<button type="button" class="primary with-icon" onclick={() => (backupOpen = true)}><Icon name="download" size={16} />{t('set_backup_make')}</button>
+							<button type="button" class="with-icon" onclick={() => (restoreOpen = true)}><Icon name="upload" size={16} />{t('set_backup_restore')}</button>
 						</div>
 						{#if notice}<p class="notice" role="status">{notice}</p>{/if}
 					</section>
@@ -3328,6 +3392,12 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 {/if}
 
 <ConfirmDialog />
+{#if backupOpen && identity}
+	<BackupDialog {identity} snapshot={backupSnapshot} last={backupInfo} onsaved={backedUp} onclose={() => (backupOpen = false)} />
+{/if}
+{#if restoreOpen}
+	<RestoreDialog replacing={!!identity} onrestore={applyRestored} onclose={() => (restoreOpen = false)} />
+{/if}
 <Shortcuts {contacts} {chats} onchat={openChat} onhit={(address, message) => void openHit(address, message)} />
 {#if scanning}
 	<Scanner accept={scanning} onresult={scanned} onclose={() => (scanning = null)} />
@@ -4117,6 +4187,65 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 		border: 0.5px solid var(--line-strong);
 		color: var(--muted);
 		line-height: calc(1.2rem - 1px);
+	}
+	.backup-banner {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin: 0 0 0.6rem;
+		padding: 0.5rem 0.5rem 0.5rem 0.7rem;
+		border: 0.5px solid var(--danger);
+		border-radius: var(--radius-lg);
+		background: color-mix(in srgb, var(--danger) 8%, var(--panel));
+	}
+	.backup-banner :global(.icon) {
+		color: var(--danger);
+	}
+	.backup-banner p {
+		flex: 1;
+		min-width: 0;
+		margin: 0;
+		color: var(--text);
+		font-size: 0.78rem;
+		line-height: 1.35;
+	}
+	.backup-banner button {
+		flex: none;
+		width: auto;
+		min-height: 2.25rem;
+		padding: 0 0.7rem;
+		font-size: 0.8rem;
+	}
+	.bk-status {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		color: var(--text);
+		font-size: 0.88rem;
+	}
+	.bk-status :global(.icon) {
+		color: var(--accent-2);
+	}
+	.bk-status.bad :global(.icon) {
+		color: var(--danger);
+	}
+	.set-sum.bad {
+		color: var(--danger);
+	}
+	.nudge-icon {
+		display: grid;
+		place-items: center;
+		width: 3.2rem;
+		height: 3.2rem;
+		border-radius: 50%;
+		background: color-mix(in srgb, var(--accent-2) 16%, transparent);
+		color: var(--accent-2);
+	}
+	.onboard .nudge .hint {
+		margin: 0;
+		color: var(--muted);
+		font-size: 0.8rem;
+		text-align: center;
 	}
 	.notify-banner {
 		display: flex;
@@ -4928,6 +5057,9 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 0.5rem;
+	}
+	.row.stack {
+		grid-template-columns: minmax(0, 1fr);
 	}
 	.row > :global(button:only-child),
 	.row > :global(button:first-child:nth-last-child(3)) {

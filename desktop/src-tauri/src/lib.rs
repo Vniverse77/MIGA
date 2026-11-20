@@ -2,7 +2,7 @@
 // the files come from inside the package. Nothing is downloaded at start, so whoever controls
 // a server cannot swap the app's code. No Rust command is exposed to the page.
 //
-// Two native extras: local notifications (official plugin; the page decides when to show one)
+// Native extras: a save dialog for key backups (dialog + fs plugins, desktop only), local notifications (official plugin; the page decides when to show one)
 // and a tray icon. Closing the window hides it to the tray so the relay connection stays alive;
 // "Quit" in the tray menu ends the app. If the tray cannot be created (no status-area support),
 // closing the window quits as before, so the app is never left running without a way back.
@@ -38,7 +38,11 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
-        .plugin(tauri_plugin_window_state::Builder::default().build());
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Only for saving a key backup: the person picks the file in a native dialog, which is the only
+        // path the page may then write (the fs plugin starts with an empty scope).
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init());
     let builder = builder.plugin(tauri_plugin_notification::init());
     #[cfg(desktop)]
     let builder = builder

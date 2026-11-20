@@ -6,6 +6,8 @@
 		danger?: boolean;
 		/** When set, the dialog shows a text field with this placeholder. */
 		placeholder?: string;
+		/** A third button between cancel and confirm; only `askChoice` shows it. */
+		alt?: string;
 	};
 
 	let pending = $state<{ options: AskOptions; resolve: (ok: boolean, value: string) => void } | null>(null);
@@ -27,6 +29,16 @@
 		pending?.resolve(false, '');
 		pending = null;
 	}
+
+	/** Dialog with a second way out: resolves which button was pressed. */
+	export function askChoice(options: AskOptions & { alt: string }): Promise<'confirm' | 'alt' | 'cancel'> {
+		pending?.resolve(false, '');
+		return new Promise((resolve) => {
+			value = '';
+			pending = { options, resolve: (ok, text) => resolve(ok ? (text === ALT ? 'alt' : 'confirm') : 'cancel') };
+		});
+	}
+	const ALT = '\u0000alt';
 
 	/** Same dialog with a text field. Resolves the typed text, or null on cancel or Esc. */
 	export function askText(options: AskOptions & { placeholder: string }): Promise<string | null> {
@@ -55,6 +67,11 @@
 		opener = null;
 		if (back?.isConnected) queueMicrotask(() => back.focus());
 		current?.resolve(ok, value);
+	}
+
+	function pickAlt(): void {
+		value = ALT;
+		close(true);
 	}
 
 	$effect(() => {
@@ -107,6 +124,7 @@
 			{/if}
 			<div class="actions">
 				<button type="button" bind:this={cancelButton} onclick={() => close(false)}>{t('cancel')}</button>
+				{#if pending.options.alt}<button type="button" class="alt" onclick={pickAlt}>{pending.options.alt}</button>{/if}
 				<button
 					type="button"
 					class={pending.options.danger ? 'danger' : 'primary'}

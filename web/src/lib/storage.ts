@@ -61,6 +61,7 @@ const KEY_NOTIFY = 'miga.notify';
 const KEY_NOTIFY_BANNER = 'miga.notify-banner';
 const KEY_TOMBS = 'miga.tombs';
 const KEY_HX = 'miga.hx';
+const KEY_BACKUP = 'miga.backup';
 
 /** What a notification shows: sender and text, sender only (default), or nothing but "New message". */
 export type NotifyMode = 'full' | 'name' | 'generic';
@@ -194,6 +195,32 @@ export function saveOpenLink(mailboxSecret: string | null): void {
 	else localStorage.removeItem(KEY_LINK);
 }
 
+/**
+ * When the key was last backed up on this device, and how. Only the time and the kind are kept, never
+ * the file or the passphrase. `restored` means the account came from a backup, so one exists.
+ */
+export type BackupInfo = { ts: number; kind: 'file' | 'code' | 'restored' };
+
+export function loadBackupInfo(): BackupInfo | null {
+	const stored = readJson<Partial<BackupInfo> | null>(KEY_BACKUP, null);
+	if (!stored || typeof stored.ts !== 'number' || !Number.isFinite(stored.ts)) return null;
+	const kind = stored.kind === 'code' || stored.kind === 'restored' ? stored.kind : 'file';
+	return { ts: stored.ts, kind };
+}
+
+export function saveBackupInfo(info: BackupInfo): void {
+	try {
+		localStorage.setItem(KEY_BACKUP, JSON.stringify(info));
+	} catch {
+		// Storage can be blocked; the reminder just stays.
+	}
+}
+
+/** Resolves when every queued database write has been committed (before a page reload). */
+export async function flushWrites(): Promise<void> {
+	await writeQueue.catch(() => {});
+}
+
 /** Removes the account from this browser. The language choice is not personal and stays. */
 export async function eraseAll(): Promise<void> {
 	erased = true; // later saves become no-ops, so nothing is written back
@@ -217,6 +244,7 @@ export async function eraseAll(): Promise<void> {
 		KEY_NOTIFY_BANNER,
 		KEY_TOMBS,
 		KEY_HX,
+		KEY_BACKUP,
 		RECENT_EMOJI_KEY
 	]) {
 		localStorage.removeItem(key);

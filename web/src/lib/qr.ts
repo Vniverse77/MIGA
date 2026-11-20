@@ -1,16 +1,19 @@
 // QR codes are only a carrier for text the app already knows how to handle:
 // `<origin>/app/#link=<code>` (add a device), `<origin>/app/#to=<address>` (add a contact) and
-// `<origin>/app/#verify=<60 digits>` (safety number check).
+// `<origin>/app/#verify=<60 digits>` (safety number check). A recovery code (key backup) is plain text, not a link.
 // Nothing here talks to a server.
 import { renderSVG } from 'uqr';
 import { isAddress, isSafetyNumber } from './crypto';
+import { normalizeRecoveryCode, parseRecoveryCode } from './backup';
 import { normalizeLinkCode } from './devices';
 
 /** What a scanned QR code may ask the app to do. Anything else is rejected. */
 export type Scanned =
 	| { kind: 'link'; code: string }
 	| { kind: 'to'; address: string; name: string }
-	| { kind: 'verify'; number: string };
+	| { kind: 'verify'; number: string }
+	/** A recovery code (backup of the key); `code` is the compact form. It is never a link. */
+	| { kind: 'recovery'; code: string };
 
 /** Dark on light with a four-module white border, so it also scans from a dark-themed screen. */
 export function qrSvg(text: string): string {
@@ -24,6 +27,7 @@ export function appUrl(origin: string, params: Record<string, string>): string {
 
 /** Accepts only our own two formats; the host is not checked, so self-hosted relays work. */
 export function parseScanned(text: string): Scanned | null {
+	if (parseRecoveryCode(text)) return { kind: 'recovery', code: normalizeRecoveryCode(text) };
 	let hash: string;
 	try {
 		hash = new URL(text.trim()).hash;
