@@ -11,6 +11,7 @@ import { MAX_BLOCKED, type Chats, type Contact, type Device, type Message, type 
 import { platform } from './platform';
 import type { PinState } from './pins';
 import type { Cursor, Tomb } from './sync';
+import type { GroupSync } from './groups';
 
 /** How long a link code stays valid. */
 export const LINK_TTL_MS = 10 * 60_000;
@@ -68,6 +69,8 @@ export type SyncMessage =
 	| { k: 'receipts'; on: boolean }
 	/** A profile photo changed. `peer` = a contact's photo, none = my own. `att` null = removed. The file itself is an encrypted relay blob. */
 	| { k: 'photo'; peer?: string; att: Att | null }
+	/** Groups (docs/PROTOCOL.md, "Groups (v1)"): record, message, delete, edit. Devices that predate groups ignore them. */
+	| GroupSync
 	| { k: 'bye'; address: string };
 
 /** 12 characters, 60 bits. The slow key derivation below is what makes that enough. */

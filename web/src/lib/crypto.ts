@@ -45,6 +45,9 @@ export type Plain = {
 	photo?: { att: Att } | { off: true };
 	/** First-contact proof of work (docs/PROTOCOL.md). Absent from old clients and from known contacts. */
 	pow?: Pow;
+	/** Group control / content (docs/PROTOCOL.md, "Groups (v1)"). Raw objects: groups.ts validates them. */
+	group?: Record<string, unknown>;
+	g?: Record<string, unknown>;
 };
 
 /**
@@ -257,6 +260,14 @@ export function cleanPhoto(value: unknown): { att: Att } | { off: true } | null 
 	return att && /^image\/(webp|jpeg|png)$/.test(att.mime) && att.size <= 200_000 ? { att } : null;
 }
 
+/**
+ * Group payload (control `group` or content `g`) sealed with the normal pairwise envelope. There is no
+ * top-level `text`, so clients that predate groups cannot read it and drop it.
+ */
+export function encryptGroup(id: Identity, peer: string, body: { group: object } | { g: object }, pow?: Pow): string {
+	return seal(id, peer, JSON.stringify({ v: 0, ts: Date.now(), ...body, ...(pow ? { pow } : {}) }));
+}
+
 function seal(id: Identity, peer: string, plaintext: string): string {
 	const json = utf8ToBytes(plaintext);
 	const padded = new Uint8Array(Math.ceil(json.length / PAD) * PAD).fill(0x20);
@@ -280,6 +291,16 @@ export function decrypt(id: Identity, peer: string, body: string): Plain | null 
 		if (parsed?.v !== 0) return null;
 		if (typeof parsed.text !== 'string') {
 			const ts = Number(parsed.ts) || Date.now();
+			const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+			if (isObj(parsed.group) || isObj(parsed.g)) {
+				return {
+					text: '',
+					ts,
+					...(isObj(parsed.group) ? { group: parsed.group } : {}),
+					...(isObj(parsed.g) ? { g: parsed.g } : {}),
+					pow: cleanPow(parsed.pow) ?? undefined
+				};
+			}
 			const del = cleanIds(parsed.del);
 			if (del.length) return { text: '', ts, del };
 			const edit = cleanEdit(parsed.edit);
