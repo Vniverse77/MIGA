@@ -13,7 +13,6 @@ import (
 	"errors"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -28,7 +27,7 @@ import (
 const (
 	// 25 MiB of content plus the per-chunk authentication tags (16 bytes per 64 KiB, about 6.4 KB).
 	defaultMaxBlob   = 25<<20 + 64<<10
-	defaultBlobQuota = 2 << 30
+	defaultBlobQuota = 1 << 30
 	blobTTL          = 30 * 24 * time.Hour
 	blobRateWindow   = 10 * time.Minute
 	blobRateLimit    = 30
@@ -56,6 +55,8 @@ type blobStore struct {
 	reserved int64 // bytes promised to uploads still in flight
 	active   int
 	rate     map[string]*ipWindow
+	rateMax  int
+	g        *guard // per-IP transfer concurrency; nil allows everything
 }
 
 type ipWindow struct {
@@ -79,7 +80,7 @@ func newBlobStore(db *sql.DB, dir string, quota int64, origins []string) (*blobS
 	return &blobStore{
 		db: db, dir: dir, maxSize: defaultMaxBlob, quota: quota, ttl: blobTTL, origins: origins,
 		trustXFF: os.Getenv("MIGA_TRUST_PROXY") == "1",
-		rate:     map[string]*ipWindow{},
+		rate:     map[string]*ipWindow{}, rateMax: blobRateLimit,
 	}, nil
 }
 
@@ -139,21 +140,7 @@ func (b *blobStore) originAllowed(u *url.URL, requestHost string) bool {
 	return false
 }
 
-func (b *blobStore) clientIP(r *http.Request) string {
-	if b.trustXFF {
-		if v := r.Header.Get("CF-Connecting-IP"); v != "" {
-			return v
-		}
-		if v := r.Header.Get("X-Forwarded-For"); v != "" {
-			return strings.TrimSpace(strings.Split(v, ",")[0])
-		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
+func (b *blobStore) clientIP(r *http.Request) string { return clientIP(r, b.trustXFF) }
 
 func (b *blobStore) allow(ip string) bool {
 	now := time.Now()
@@ -165,7 +152,7 @@ func (b *blobStore) allow(ip string) bool {
 		b.rate[ip] = w
 	}
 	w.n++
-	return w.n <= blobRateLimit
+	return w.n <= b.rateMax
 }
 
 // reserve promises `n` bytes of disk to an upload, or says why that is not possible.
@@ -216,6 +203,14 @@ func (b *blobStore) upload(w http.ResponseWriter, r *http.Request) {
 	if !b.allow(b.clientIP(r)) {
 		http.Error(w, "rate limited", http.StatusTooManyRequests)
 		return
+	}
+	if b.g != nil {
+		ip := b.clientIP(r)
+		if !b.g.uploads.acquire(ip, b.g.l.BlobPerIPUploads) {
+			http.Error(w, "busy", http.StatusTooManyRequests)
+			return
+		}
+		defer b.g.uploads.release(ip)
 	}
 	if r.ContentLength > b.maxSize {
 		http.Error(w, "too large", http.StatusRequestEntityTooLarge)
@@ -306,6 +301,14 @@ func (b *blobStore) item(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
+		if b.g != nil {
+			ip := b.clientIP(r)
+			if !b.g.reads.acquire(ip, b.g.l.BlobPerIPReads) {
+				http.Error(w, "busy", http.StatusTooManyRequests)
+				return
+			}
+			defer b.g.reads.release(ip)
+		}
 		f, err := os.Open(filepath.Join(b.dir, id))
 		if err != nil {
 			http.NotFound(w, r)

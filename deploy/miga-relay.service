@@ -1,0 +1,42 @@
+# systemd unit for the MIGA relay running as the unprivileged user "miga".
+# Install: see docs/OPS.md. Not applied automatically.
+[Unit]
+Description=MIGA relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=miga
+Group=miga
+EnvironmentFile=/etc/miga/relay.env
+ExecStart=/opt/miga/miga-relay
+Restart=on-failure
+RestartSec=2
+StateDirectory=miga
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/miga
+LimitNOFILE=4096
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/miga
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -55,6 +55,9 @@ Relay settings (environment variables):
 | `MIGA_DB` | `miga.db` | SQLite file for undelivered messages |
 | `MIGA_STATIC` | empty | directory of the built web app to serve; empty serves only `/ws` |
 | `MIGA_ORIGINS` | empty | extra allowed WebSocket origins, comma-separated (same-origin is always allowed) |
+| `MIGA_TRUST_PROXY` | empty | `1` behind a proxy: use `CF-Connecting-IP`/`X-Forwarded-For` for in-memory limits |
+
+Resource limits (per IP, queue and storage caps) and the server runbook: [docs/OPS.md](docs/OPS.md).
 
 ## Roadmap
 

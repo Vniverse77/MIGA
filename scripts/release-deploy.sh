@@ -23,6 +23,10 @@ OUT="${MIGA_OUT_ROOT:-$HOME/Projects}/MIGA-release-$V"
 AUR="${MIGA_AUR_DIR:-$HOME/Projects/aur-miga-messenger}"
 HOST="root@100.99.84.76"
 RROOT="/root/Projects/MIGA"
+# MIGA_LAYOUT=hardened (after the migration in docs/OPS.md): relay binary in /opt/miga run by the
+# systemd unit as user "miga", web build in /srv/miga/web. Default "legacy" = PM2 as root, unchanged.
+LAYOUT="${MIGA_LAYOUT:-legacy}"
+[[ "$LAYOUT" == legacy || "$LAYOUT" == hardened ]] || { echo "MIGA_LAYOUT must be legacy or hardened"; exit 2; }
 SITE="https://miga.vniverse77.com"
 REPO="Vniverse77/MIGA"
 LOG="$OUT/deploy.log"
@@ -77,6 +81,9 @@ s_release() {
   run gh "${args[@]}" "${files[@]}"
 }
 
+relay_bin() { [[ "$LAYOUT" == hardened ]] && echo /opt/miga/miga-relay || echo "$RROOT/relay/miga-relay"; }
+web_dir()   { [[ "$LAYOUT" == hardened ]] && echo /srv/miga/web || echo "$RROOT/web/build"; }
+
 OLD=""
 old_version() {
   [[ -n "$OLD" ]] && return 0
@@ -89,19 +96,29 @@ s_vds-backup() {
   old_version
   # never overwrite an older backup: add a timestamp if the name exists
   vds "set -e; s=\$(date +%H%M%S); \
-r=/root/Projects/miga-relay.bak-$OLD; [ -e \$r ] && r=\$r-\$s; cp -a $RROOT/relay/miga-relay \$r; \
-w=/root/Projects/MIGA-web-build.bak-$OLD; [ -e \$w ] && w=\$w-\$s; cp -a $RROOT/web/build \$w; ls -d \$r \$w"
+r=/root/Projects/miga-relay.bak-$OLD; [ -e \$r ] && r=\$r-\$s; cp -a $(relay_bin) \$r; \
+w=/root/Projects/MIGA-web-build.bak-$OLD; [ -e \$w ] && w=\$w-\$s; cp -a $(web_dir) \$w; ls -d \$r \$w"
 }
 s_vds-pull()    { vds "cd $RROOT && git pull --ff-only && git log -1 --oneline"; }
-s_vds-relay()   { vds "cd $RROOT/relay && CGO_ENABLED=0 go build -p 1 -o miga-relay && ls -l miga-relay"; }
-s_vds-restart() { vds "pm2 restart miga"; vds "pm2 save"; }
+s_vds-relay() {
+  vds "cd $RROOT/relay && CGO_ENABLED=0 go build -p 1 -o miga-relay && ls -l miga-relay"
+  [[ "$LAYOUT" == hardened ]] && vds "install -o root -g root -m 0755 $RROOT/relay/miga-relay /opt/miga/miga-relay.new && mv /opt/miga/miga-relay.new /opt/miga/miga-relay" || true
+}
+s_vds-restart() {
+  if [[ "$LAYOUT" == hardened ]]; then vds "systemctl restart miga-relay && systemctl is-active miga-relay"
+  else vds "pm2 restart miga"; vds "pm2 save"; fi
+}
 s_vds-web() {
   [[ $DRY -eq 1 || -f "$ROOT/web/build/version.json" ]] || { logmsg "web/build missing"; return 1; }
   if [[ $DRY -eq 0 ]]; then
     local bv; bv="$(jq -r .version "$ROOT/web/build/version.json")"
     [[ "$bv" == "$V" ]] || { logmsg "local web/build is $bv, expected $V"; return 1; }
   fi
-  run rsync -az "$ROOT/web/build/" "$HOST:$RROOT/web/build/"      # NO --delete
+  if [[ "$LAYOUT" == hardened ]]; then
+    run rsync -az --chown=root:root "$ROOT/web/build/" "$HOST:/srv/miga/web/"   # NO --delete; read-only for user miga
+  else
+    run rsync -az "$ROOT/web/build/" "$HOST:$RROOT/web/build/"      # NO --delete
+  fi
 }
 s_verify() {
   if [[ $DRY -eq 1 ]]; then

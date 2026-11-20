@@ -341,10 +341,10 @@ encrypted message. The relay stores opaque bytes and a size; it cannot tell a ph
 
 - `id` and `del` are random 128-bit values. The relay keeps only `SHA-256(del)`.
 - Errors on upload: `413` over the size limit (cut off while streaming, nothing is buffered in memory),
-  `400` empty body, `429` more than 30 uploads per 10 minutes from one IP, `503` more than 4 uploads at once,
+  `400` empty body, `429` more than 30 uploads per 10 minutes (or more than 2 at once) from one IP, `503` more than 4 uploads at once,
   `507` the storage quota is used up.
 - Limits: 25 MiB of content plus the per-chunk tags (about 25.1 MiB on the wire), 30 days TTL (hourly
-  cleanup), total quota `MIGA_BLOB_QUOTA` (default 2 GiB). Files live in `MIGA_BLOBS` (default `blobs/`
+  cleanup), total quota `MIGA_BLOB_QUOTA` (default 1 GiB). Files live in `MIGA_BLOBS` (default `blobs/`
   next to `MIGA_DB`), metadata (id, size, created, expires, token hash) in SQLite.
 - CORS follows `MIGA_ORIGINS` (same patterns as the WebSocket); the page's own origin is always allowed.
 - The client IP is used only for the in-memory rate limit. Behind a proxy set `MIGA_TRUST_PROXY=1` to read

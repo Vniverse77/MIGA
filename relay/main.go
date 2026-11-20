@@ -8,12 +8,12 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -58,12 +58,19 @@ type frame struct {
 type server struct {
 	db      *sql.DB
 	origins []string
+	g       *guard // per-IP and global limits; nil allows everything
 
 	mu      sync.RWMutex
 	clients map[string]map[*websocket.Conn]struct{}
 }
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "backup" {
+		if err := backupDB(env("MIGA_DB", "miga.db"), os.Args[2]); err != nil {
+			log.Fatalf("backup: %v", err)
+		}
+		return
+	}
 	addr := env("MIGA_ADDR", "127.0.0.1:8787")
 	dbPath := env("MIGA_DB", "miga.db")
 	static := os.Getenv("MIGA_STATIC")
@@ -88,21 +95,24 @@ func main() {
 	if o := os.Getenv("MIGA_ORIGINS"); o != "" {
 		s.origins = strings.Split(o, ",")
 	}
+	lim := limitsFromEnv()
+	s.g = newGuard(lim, os.Getenv("MIGA_TRUST_PROXY") == "1")
+	s.refreshQueueTotal()
+	go s.g.pruneLoop()
 	go s.purgeLoop()
+	go func() {
+		for { // acks free space; keep the global estimate honest
+			time.Sleep(time.Minute)
+			s.refreshQueueTotal()
+		}
+	}()
 
 	blobDir := env("MIGA_BLOBS", filepath.Join(filepath.Dir(dbPath), "blobs"))
-	quota := int64(defaultBlobQuota)
-	if v := os.Getenv("MIGA_BLOB_QUOTA"); v != "" {
-		n, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || n <= 0 {
-			log.Fatalf("MIGA_BLOB_QUOTA must be a number of bytes: %q", v)
-		}
-		quota = n
-	}
-	blobs, err := newBlobStore(db, blobDir, quota, s.origins)
+	blobs, err := newBlobStore(db, blobDir, lim.BlobQuota, s.origins)
 	if err != nil {
 		log.Fatalf("blob store: %v", err)
 	}
+	blobs.g, blobs.rateMax = s.g, lim.BlobPerWindow
 	go blobs.cleanupLoop()
 
 	mux := http.NewServeMux()
@@ -144,6 +154,15 @@ func isAddr(s string) bool {
 }
 
 func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
+	if s.g != nil {
+		ip := clientIP(r, s.g.trustProxy)
+		if !s.g.connRate.allow(ip, time.Now()) || !s.g.conns.acquire(ip, s.g.l.MaxConnsPerIP) {
+			// Before the upgrade: cheap, and clients treat a failed connect as "offline, retry later".
+			http.Error(w, "too many connections", http.StatusTooManyRequests)
+			return
+		}
+		defer s.g.conns.release(ip)
+	}
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: s.origins})
 	if err != nil {
 		return
@@ -186,6 +205,11 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	ip := ""
+	if s.g != nil {
+		ip = clientIP(r, s.g.trustProxy)
+	}
+	ipOK := func() bool { return s.g == nil || s.g.msgRate.allow(ip, time.Now()) }
 	windowStart, sent := time.Now(), 0
 	ephStart, ephSent := time.Now(), 0
 	for {
@@ -206,7 +230,7 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			sent++
 			switch {
-			case sent > rateLimit:
+			case sent > rateLimit || !ipOK():
 				send(c, frame{T: "error", Err: "rate_limited", ID: f.ID})
 			case !isAddr(f.To) || !idPattern.MatchString(f.ID):
 				send(c, frame{T: "error", Err: "bad_frame", ID: f.ID})
@@ -230,14 +254,14 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			sent++
 			switch {
-			case sent > rateLimit:
+			case sent > rateLimit || !ipOK():
 				send(c, frame{T: "error", Err: "rate_limited", ID: f.ID})
 			case !isAddr(f.To) || !idPattern.MatchString(f.ID) || f.Body == "":
 				send(c, frame{T: "error", Err: "bad_frame", ID: f.ID})
 			case len(f.Body) > maxBody:
 				send(c, frame{T: "error", Err: "too_large", ID: f.ID})
 			default:
-				s.accept(c, me, f)
+				s.accept(c, me, ip, f)
 			}
 		default:
 			send(c, frame{T: "error", Err: "bad_frame"})
@@ -246,15 +270,34 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 // accept stores a message and pushes it to the recipient if online.
-func (s *server) accept(c *websocket.Conn, from string, f frame) {
+func (s *server) accept(c *websocket.Conn, from, ip string, f frame) {
+	lim := defaultLimits()
+	if s.g != nil {
+		lim = s.g.l
+	}
+	// Queue policy: when a recipient's queue is full, NEW messages are rejected ("queue_full");
+	// queued messages are never evicted, they only leave on ack, unsend or after messageTTL.
 	var queued int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE rcpt=?`, f.To).Scan(&queued); err != nil {
+	var queuedBytes int64
+	if err := s.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(LENGTH(body)),0) FROM messages WHERE rcpt=?`, f.To).Scan(&queued, &queuedBytes); err != nil {
 		log.Printf("count queue: %v", err)
 		return
 	}
-	if queued >= maxQueue {
+	if queued >= lim.QueueMsgs || queuedBytes+int64(len(f.Body)) > lim.QueueBytes {
 		send(c, frame{T: "error", Err: "queue_full", ID: f.ID})
 		return
+	}
+	if s.g != nil {
+		if s.g.queueTotal.Load()+int64(len(f.Body)) > lim.QueueTotalBytes {
+			send(c, frame{T: "error", Err: "queue_full", ID: f.ID})
+			return
+		}
+		// A message to a recipient who has nothing queued and is not online is the cheap way to
+		// create junk queues for addresses nobody owns: budget it per IP.
+		if queued == 0 && !s.online(f.To) && !s.g.newRcpt.allow(ip, time.Now()) {
+			send(c, frame{T: "error", Err: "rate_limited", ID: f.ID})
+			return
+		}
 	}
 	ts := time.Now().UnixMilli()
 	res, err := s.db.Exec(`INSERT OR IGNORE INTO messages (rcpt, sender, id, body, ts) VALUES (?,?,?,?,?)`,
@@ -266,6 +309,9 @@ func (s *server) accept(c *websocket.Conn, from string, f frame) {
 	send(c, frame{T: "sent", ID: f.ID})
 	if n, _ := res.RowsAffected(); n == 0 {
 		return // duplicate id from a client retry; already stored and pushed
+	}
+	if s.g != nil {
+		s.g.queueTotal.Add(int64(len(f.Body)))
 	}
 
 	out := frame{T: "msg", From: from, ID: f.ID, Body: f.Body, TS: ts}
@@ -334,12 +380,32 @@ func (s *server) unregister(addr string, c *websocket.Conn) {
 	}
 }
 
+func (s *server) online(addr string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.clients[addr]) > 0
+}
+
+// refreshQueueTotal recomputes the global queued-bytes estimate from the database.
+func (s *server) refreshQueueTotal() {
+	if s.g == nil {
+		return
+	}
+	var n int64
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(LENGTH(body)),0) FROM messages`).Scan(&n); err != nil {
+		log.Printf("queue total: %v", err)
+		return
+	}
+	s.g.queueTotal.Store(n)
+}
+
 func (s *server) purgeLoop() {
 	for {
 		cutoff := time.Now().Add(-messageTTL).UnixMilli()
 		if _, err := s.db.Exec(`DELETE FROM messages WHERE ts < ?`, cutoff); err != nil {
 			log.Printf("purge: %v", err)
 		}
+		s.refreshQueueTotal()
 		time.Sleep(time.Hour)
 	}
 }
@@ -354,4 +420,21 @@ func read(ctx context.Context, c *websocket.Conn, f *frame, timeout time.Duratio
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	return wsjson.Read(ctx, c, f)
+}
+
+// backupDB writes a consistent copy of the database (safe while the relay runs) to dest, which
+// must not exist yet. Usage: MIGA_DB=/var/lib/miga/miga.db miga-relay backup /path/file.db
+func backupDB(dbPath, dest string) error {
+	if _, err := os.Stat(dest); err == nil {
+		return errors.New("destination exists")
+	}
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if _, err := db.Exec(`VACUUM INTO ?`, dest); err != nil {
+		return err
+	}
+	return os.Chmod(dest, 0o600)
 }
