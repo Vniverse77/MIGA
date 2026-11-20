@@ -5,7 +5,7 @@ import { hkdf } from '@noble/hashes/hkdf';
 import { scryptAsync } from '@noble/hashes/scrypt';
 import { sha256 } from '@noble/hashes/sha2';
 import { randomBytes, utf8ToBytes } from '@noble/hashes/utils';
-import { cleanAtt } from './attach';
+import { cleanAtt, type Att } from './attach';
 import { cleanIds, cleanReply, editTime, fromBase64, identityFromSecret, isAddress, isSafetyNumber, toBase64, type Identity } from './crypto';
 import { MAX_BLOCKED, type Chats, type Contact, type Device, type Message, type Profile } from './storage';
 import { platform } from './platform';
@@ -66,6 +66,8 @@ export type SyncMessage =
 	| { k: 'edit'; peer: string; id: string; mine: boolean; text: string; ts: number }
 	| { k: 'st'; peer: string; ids: string[]; d: 'delivered' | 'read' }
 	| { k: 'receipts'; on: boolean }
+	/** A profile photo changed. `peer` = a contact's photo, none = my own. `att` null = removed. The file itself is an encrypted relay blob. */
+	| { k: 'photo'; peer?: string; att: Att | null }
 	| { k: 'bye'; address: string };
 
 /** 12 characters, 60 bits. The slow key derivation below is what makes that enough. */
@@ -143,7 +145,7 @@ const cleanName = (value: unknown) =>
 
 export function cleanProfile(value: unknown): Profile {
 	const profile = (value ?? {}) as Partial<Profile>;
-	return { name: cleanName(profile.name), share: profile.share !== false };
+	return { name: cleanName(profile.name), share: profile.share !== false, photo: profile.photo !== false };
 }
 
 export function cleanContact(value: unknown): Contact | null {
@@ -156,6 +158,7 @@ export function cleanContact(value: unknown): Contact | null {
 		name,
 		...(contact.custom === true ? { custom: true } : {}),
 		...(contact.request === true ? { request: true } : {}),
+		...(contact.hidePhoto === true ? { hidePhoto: true } : {}),
 		...(contact.request === true && contact.unverified === true ? { unverified: true } : {}),
 		...(isSafetyNumber(contact.verified) ? { verified: contact.verified } : {})
 	};

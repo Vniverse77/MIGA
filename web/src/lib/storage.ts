@@ -28,9 +28,12 @@ export type Contact = {
 	request?: boolean;
 	/** Requests only: the first message came without proof of work (an old client, or a sender that skipped it). */
 	unverified?: boolean;
+	/** Do not send my profile photo to this contact. */
+	hidePhoto?: boolean;
 };
 /** Empty name means anonymous. `share` decides whether the name is sent to the people you write to. */
-export type Profile = { name: string; share: boolean };
+/** `photo`: also share the profile photo (only when `share` is on too). Default on. */
+export type Profile = { name: string; share: boolean; photo?: boolean };
 /** Another device of the same account. `address` is that device's own key, not the account's. */
 export type Device = { address: string; label: string; added: number };
 export type Message = {
@@ -99,7 +102,8 @@ export function loadProfile(): Profile {
 	const stored = readJson<Partial<Profile>>(KEY_PROFILE, {});
 	return {
 		name: typeof stored.name === 'string' ? stored.name.slice(0, 40) : '',
-		share: stored.share !== false
+		share: stored.share !== false,
+		photo: stored.photo !== false
 	};
 }
 
