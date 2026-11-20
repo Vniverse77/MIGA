@@ -89,19 +89,22 @@ async function videoInfo(file: Blob): Promise<{ w: number; h: number; thumb: str
  * metadata (EXIF, GPS, camera). Animated GIF/WebP/PNG and MP4/WebM go out unchanged, so the animation
  * survives; those files can carry metadata (MP4 and WebM especially), which is NOT removed.
  */
-export async function prepare(file: Blob): Promise<Prepared> {
+export async function prepare(file: Blob, opts: { maxEdge?: number; still?: boolean } = {}): Promise<Prepared> {
+	const maxEdge = opts.maxEdge ?? MAX_EDGE;
 	if (file.size > MAX_ATTACHMENT) throw new AttachError('too_big');
 	if (file.size === 0) throw new AttachError('unsupported');
 	const head = new Uint8Array(await file.slice(0, 4096).arrayBuffer());
 	const mime = sniffMime(head);
 	if (!mime) throw new AttachError('unsupported');
 
+	// `still` (link preview pictures): only a still photo is accepted, always redrawn so nothing animated or hidden survives.
+	if (opts.still && !/^image\/(jpeg|png|webp|gif)$/.test(mime)) throw new AttachError('unsupported');
 	if (mime === 'video/mp4' || mime === 'video/webm') {
 		const info = await videoInfo(file);
 		return { bytes: new Uint8Array(await file.arrayBuffer()), mime, ...info };
 	}
 	// Animated pictures are sent as they are.
-	if (isAnimated(head, mime)) {
+	if (!opts.still && isAnimated(head, mime)) {
 		const bytes = new Uint8Array(await file.arrayBuffer());
 		const bmp = await bitmapOf(new Blob([bytes], { type: mime }));
 		const out = { bytes, mime, w: bmp.width, h: bmp.height, thumb: await makeThumb(bmp, bmp.width, bmp.height) };
@@ -110,7 +113,7 @@ export async function prepare(file: Blob): Promise<Prepared> {
 	}
 	const bmp = await bitmapOf(file);
 	try {
-		const scale = Math.min(1, MAX_EDGE / Math.max(bmp.width, bmp.height));
+		const scale = Math.min(1, maxEdge / Math.max(bmp.width, bmp.height));
 		const w = Math.max(1, Math.round(bmp.width * scale));
 		const h = Math.max(1, Math.round(bmp.height * scale));
 		const c = document.createElement('canvas');

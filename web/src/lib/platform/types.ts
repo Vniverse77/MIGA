@@ -44,9 +44,19 @@ export interface NativeClipboard {
 	readImage?(): Promise<Uint8Array | null>;
 }
 
+/** Native page fetching for link previews (desktop and Android only; the browser cannot, and should not). */
+export interface LinkPreviewFetcher {
+	/** The first 512 KB of the page and its address after redirects. Rejects for private addresses, other schemes, timeouts. */
+	page(url: string): Promise<{ url: string; html: string }>;
+	/** An image of at most 300 KB. */
+	image(url: string): Promise<Uint8Array>;
+}
+
 export interface Platform {
 	/** Native clipboard of the desktop and Android shells; absent in the browser. */
 	readonly clipboard?: NativeClipboard;
+	/** Absent in the browser build: sending a link there never contacts the site. */
+	readonly linkPreview?: LinkPreviewFetcher;
 	/** Background connection setting; absent in the browser, where a closed tab cannot keep a connection. */
 	readonly background?: BackgroundControl;
 	/** Desktop: the unread total (muted chats left out) for the tray icon. */

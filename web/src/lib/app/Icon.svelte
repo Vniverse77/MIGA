@@ -17,6 +17,7 @@
 		| 'reply'
 		| 'edit'
 		| 'close'
+		| 'link'
 		| 'scan'
 		| 'device-add'
 		| 'bell'
@@ -98,6 +99,9 @@
 		<path d="M13.5 6.5l4 4" />
 	{:else if name === 'close'}
 		<path d="M6 6l12 12M18 6L6 18" />
+	{:else if name === 'link'}
+		<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1" />
+		<path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1" />
 	{:else if name === 'scan'}
 		<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" />
 		<path d="M8 12h8" />

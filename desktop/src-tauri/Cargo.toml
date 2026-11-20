@@ -20,6 +20,9 @@ tauri-plugin-notification = "2"
 tauri-plugin-clipboard-manager = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Link previews: the sender fetches the page itself. ureq lets us put the SSRF guard inside DNS resolution.
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
+base64 = "0.22"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri = { version = "2", features = ["tray-icon"] }

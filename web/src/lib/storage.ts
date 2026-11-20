@@ -9,6 +9,7 @@ import {
 	type Reply
 } from './crypto';
 import type { Att } from './attach';
+import type { Preview } from './preview';
 import { RECENT_EMOJI_KEY } from './emoji';
 import { deleteDb, openDb, req, tx, type MessageRecord } from './db';
 import { cleanPinState, type PinState } from './pins';
@@ -47,6 +48,8 @@ export type Message = {
 	reply?: Reply;
 	/** Photo, GIF or video. `text` is then the caption (may be empty). Own messages also keep the blob delete token. */
 	att?: Att;
+	/** Link preview card made by the sender's device (never fetched by the reader). Own messages keep the image delete token. */
+	preview?: Preview;
 	/** Time (ms) of the last edit; set means the bubble shows "edited". Only the latest text is kept. */
 	edited?: number;
 	/** Own messages: the peer's device stored it ('delivered') or its user looked at it ('read'). */
@@ -65,6 +68,7 @@ const KEY_DEVICES = 'miga.devices';
 const KEY_LINK = 'miga.link';
 const KEY_BLOCKED = 'miga.blocked';
 const KEY_RECEIPTS = 'miga.receipts';
+const KEY_LINKPREV = 'miga.linkpreview';
 const KEY_LIVE = 'miga.live';
 const KEY_TYPING = 'miga.typing';
 const KEY_PINS = 'miga.pins';
@@ -202,6 +206,23 @@ export function saveNotifyBannerDismissed(): void {
 	}
 }
 
+/** Link previews on this device: the website sees my IP when I send a link. On by default; only offered in the apps. */
+export function loadLinkPreviews(): boolean {
+	try {
+		return localStorage.getItem(KEY_LINKPREV) !== '0';
+	} catch {
+		return true;
+	}
+}
+
+export function saveLinkPreviews(on: boolean): void {
+	try {
+		localStorage.setItem(KEY_LINKPREV, on ? '1' : '0');
+	} catch {
+		// Kept for this session only.
+	}
+}
+
 export function saveReceipts(on: boolean): void {
 	localStorage.setItem(KEY_RECEIPTS, on ? '1' : '0');
 }
@@ -288,6 +309,7 @@ export async function eraseAll(): Promise<void> {
 		KEY_LINK,
 		KEY_BLOCKED,
 		KEY_RECEIPTS,
+		KEY_LINKPREV,
 		KEY_FILTERED,
 		KEY_UNREAD,
 		KEY_MUTED,
