@@ -124,13 +124,16 @@ export function isAnimated(head: Uint8Array, mime: string): boolean {
 	return false;
 }
 
+/** ISO-BMFF brands of still pictures (HEIC/HEIF/AVIF). Phone galleries hand these out; a WebView cannot always decode them. */
+const HEIF_BRANDS = ['heic', 'heix', 'heim', 'heis', 'hevc', 'hevx', 'hevm', 'hevs', 'mif1', 'msf1', 'heif', 'avif', 'avis'];
+
 /** Detects the type from the first bytes (the browser-given type can be empty or wrong). */
 export function sniffMime(b: Uint8Array): string {
 	if (b[0] === 0xff && b[1] === 0xd8) return 'image/jpeg';
 	if (ascii(b, 1, 'PNG')) return 'image/png';
 	if (ascii(b, 0, 'GIF8')) return 'image/gif';
 	if (ascii(b, 0, 'RIFF') && ascii(b, 8, 'WEBP')) return 'image/webp';
-	if (ascii(b, 4, 'ftyp')) return ascii(b, 8, 'heic') || ascii(b, 8, 'heix') || ascii(b, 8, 'mif1') ? 'image/heic' : 'video/mp4';
+	if (ascii(b, 4, 'ftyp')) return HEIF_BRANDS.some((x) => ascii(b, 8, x)) ? 'image/heic' : 'video/mp4';
 	if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return 'video/webm';
 	return '';
 }

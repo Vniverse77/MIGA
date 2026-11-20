@@ -254,6 +254,57 @@ class MainActivity : TauriActivity() {
       }
     }
 
+    // Decodes a picture the web view cannot read (HEIC/HEIF, very large photos) with the system decoder.
+    // In: base64 file bytes and the longest edge allowed. Out: base64 JPEG (quality 90, rotation applied, no metadata),
+    // or "" when the system cannot read it either. The page calls this only after its own decoder failed.
+    @JavascriptInterface
+    fun convertImage(base64: String, maxEdge: Int): String {
+      return try {
+        val bytes = Base64.decode(base64, Base64.DEFAULT)
+        val edge = if (maxEdge < 64) 2048 else maxEdge
+        var bmp: android.graphics.Bitmap? = null
+        if (Build.VERSION.SDK_INT >= 28) {
+          bmp = android.graphics.ImageDecoder.decodeBitmap(
+            android.graphics.ImageDecoder.createSource(java.nio.ByteBuffer.wrap(bytes))
+          ) { decoder, info, _ ->
+            decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+            val big = maxOf(info.size.width, info.size.height)
+            if (big > edge) {
+              val k = edge.toFloat() / big
+              decoder.setTargetSize(maxOf(1, (info.size.width * k).toInt()), maxOf(1, (info.size.height * k).toInt()))
+            }
+          }
+        } else {
+          val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+          android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
+          var sample = 1
+          while (maxOf(o.outWidth, o.outHeight) / (sample * 2) >= edge) sample *= 2
+          val raw = android.graphics.BitmapFactory.decodeByteArray(
+            bytes, 0, bytes.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+          )
+          val orient = try {
+            android.media.ExifInterface(java.io.ByteArrayInputStream(bytes))
+              .getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1)
+          } catch (e: Exception) { 1 }
+          val deg = when (orient) { 6 -> 90f; 3 -> 180f; 8 -> 270f; else -> 0f }
+          bmp = if (raw != null && deg != 0f) {
+            android.graphics.Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, android.graphics.Matrix().apply { postRotate(deg) }, true)
+          } else raw
+        }
+        if (bmp == null) return ""
+        val flat = android.graphics.Bitmap.createBitmap(bmp.width, bmp.height, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(flat)
+        canvas.drawColor(Color.WHITE)
+        canvas.drawBitmap(bmp, 0f, 0f, null)
+        val out = java.io.ByteArrayOutputStream()
+        flat.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
+        Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+      } catch (e: Throwable) {
+        android.util.Log.w("MigaImage", "convertImage failed: $e")
+        ""
+      }
+    }
+
     @JavascriptInterface
     fun setChrome(color: String, light: Boolean) {
       runOnUiThread {
