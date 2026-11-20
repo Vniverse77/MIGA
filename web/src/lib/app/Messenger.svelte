@@ -3056,7 +3056,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 							{/each}
 						</div>
 						<p class="hint">{t('notif_privacy')}</p>
-						<p class="hint">{t('notif_note')}</p>
+						<p class="hint">{t(platform.target === 'desktop' ? 'notif_note_desktop' : platform.target === 'web' ? 'notif_note_web' : 'notif_note_android')}</p>
 						<BackgroundSetting />
 					</section>
 
