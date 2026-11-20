@@ -7,6 +7,10 @@ Turkish version: TERMS.tr.md. Rendered at /terms in the web app; this comment is
 
 Last updated: [TO BE FILLED BY OWNER: date]
 
+> **The short version**
+> MIGA is a free, experimental, encrypted messenger. Be a decent human, send nothing illegal, do not spam or attack
+> the service, keep your key safe. There is no warranty, and nobody can recover a lost key.
+
 By using MIGA (the app, the web app at miga.vniverse77.com and the relay run by the operator) you agree to
 these terms. If you do not agree, do not use it. MIGA is an encrypted messenger, not social media: there are no
 public posts, feeds or searchable profiles.
@@ -60,7 +64,7 @@ law, without notice where urgent. To report abuse write to: [TO BE FILLED BY OWN
 
 ## 7. Requests from authorities
 
-See section 9 of the [Privacy Policy](/privacy). The operator answers valid, written legal requests as the law
+See section 11 of the [Privacy Policy](/privacy). The operator answers valid, written legal requests as the law
 requires. The operator cannot provide message plaintext, contact lists or sender IP addresses from the relay,
 because the relay does not hold them. The operator does not add backdoors or weaken the encryption.
 [TO BE FILLED BY LAWYER: check this statement is allowed.]

@@ -2952,6 +2952,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 								<button type="button" onclick={() => platform.openExternal('https://vniverse77.com/')}>Vniverse77</button>
 								<button type="button" onclick={() => platform.openExternal('https://miga.vniverse77.com/privacy')}>{t('legal_privacy')}</button>
 								<button type="button" onclick={() => platform.openExternal('https://miga.vniverse77.com/terms')}>{t('legal_terms')}</button>
+								<button type="button" onclick={() => platform.openExternal('https://miga.vniverse77.com/kvkk')}>{t('legal_kvkk')}</button>
 							</div>
 						</section>
 							{:else if curPage === 'erase'}

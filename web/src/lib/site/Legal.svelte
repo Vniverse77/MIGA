@@ -7,34 +7,43 @@
 	import privacyTr from '../../../../docs/legal/PRIVACY.tr.md?raw';
 	import termsEn from '../../../../docs/legal/TERMS.md?raw';
 	import termsTr from '../../../../docs/legal/TERMS.tr.md?raw';
+	import kvkkEn from '../../../../docs/legal/KVKK.md?raw';
+	import kvkkTr from '../../../../docs/legal/KVKK.tr.md?raw';
 
-	let { doc }: { doc: 'privacy' | 'terms' } = $props();
+	let { doc }: { doc: 'privacy' | 'terms' | 'kvkk' } = $props();
 
 	// Only English and Turkish texts exist; Turkmen and Russian readers get English.
-	const html = $derived(
-		renderMarkdown(
-			doc === 'privacy' ? (getLanguage() === 'tr' ? privacyTr : privacyEn) : getLanguage() === 'tr' ? termsTr : termsEn
-		)
-	);
+	// The KVKK notice is binding in Turkish; a link switches between the Turkish text and the English summary.
+	const texts = { privacy: [privacyEn, privacyTr], terms: [termsEn, termsTr], kvkk: [kvkkEn, kvkkTr] } as const;
+	let swap = $state(false);
+	const turkish = $derived((getLanguage() === 'tr') !== (doc === 'kvkk' && swap));
+	const html = $derived(renderMarkdown(texts[doc][turkish ? 1 : 0]));
+	const titles = { privacy: 'MIGA Privacy', terms: 'MIGA Terms', kvkk: 'MIGA KVKK' };
 </script>
 
 <svelte:head>
-	<title>{doc === 'privacy' ? 'MIGA Privacy' : 'MIGA Terms'}</title>
+	<title>{titles[doc]}</title>
 	<meta name="robots" content="noindex" />
 </svelte:head>
 
 <header class="top">
 	<div class="wrap bar">
 		<a class="brand" href="/"><Logo size={26} /><span>MIGA</span></a>
-		<nav>
-			<a href="/privacy" aria-current={doc === 'privacy' ? 'page' : undefined}>{t('legal_privacy')}</a>
-			<a href="/terms" aria-current={doc === 'terms' ? 'page' : undefined}>{t('legal_terms')}</a>
-			<LangSelect />
-		</nav>
+		<LangSelect />
 	</div>
 </header>
 
 <main class="wrap doc">
+	<nav class="tabs" aria-label="Legal">
+		<a href="/privacy" aria-current={doc === 'privacy' ? 'page' : undefined}>{t('legal_privacy')}</a>
+		<a href="/terms" aria-current={doc === 'terms' ? 'page' : undefined}>{t('legal_terms')}</a>
+		<a href="/kvkk" aria-current={doc === 'kvkk' ? 'page' : undefined}>{t('legal_kvkk')}</a>
+	</nav>
+	{#if doc === 'kvkk'}
+		<p class="alt">
+			<button type="button" onclick={() => (swap = !swap)}>{turkish ? t('legal_en_summary') : t('legal_tr_full')}</button>
+		</p>
+	{/if}
 	{@html html}
 	<p class="back"><a href="/">&larr; {t('legal_back')}</a></p>
 </main>
@@ -64,19 +73,61 @@
 		font-weight: 600;
 		text-decoration: none;
 	}
-	nav {
+	.tabs {
 		display: flex;
-		align-items: center;
-		gap: 1rem;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+		border-bottom: 0.5px solid var(--line);
+		margin-bottom: 2rem;
 	}
-	nav a {
+	.tabs a {
+		padding: 0.5rem 0.9rem;
 		color: var(--dim);
 		text-decoration: none;
 		font-size: 0.9rem;
+		border-bottom: 2px solid transparent;
+		margin-bottom: -1px;
 	}
-	nav a:hover,
-	nav a[aria-current] {
+	.tabs a:hover {
 		color: var(--link);
+	}
+	.tabs a[aria-current] {
+		color: var(--heading);
+		font-weight: 600;
+		border-color: var(--link);
+	}
+	.alt {
+		margin: 0 0 1rem;
+		font-size: 0.85rem;
+	}
+	.alt button {
+		background: none;
+		border: 0;
+		padding: 0;
+		color: var(--link);
+		text-decoration: underline;
+		cursor: pointer;
+		font: inherit;
+	}
+	.doc :global(.date) {
+		font-size: 0.8rem;
+		color: var(--dim);
+		margin: 0 0 1.5rem;
+	}
+	.doc :global(.short) {
+		border: 0.5px solid var(--line);
+		background: var(--panel);
+		border-radius: var(--radius);
+		padding: 0.9rem 1rem;
+		margin-bottom: 1.5rem;
+	}
+	.doc :global(.short strong) {
+		display: block;
+		color: var(--heading);
+		margin-bottom: 0.35rem;
+	}
+	.doc :global(.short p) {
+		margin: 0;
 	}
 	.doc {
 		padding-block: 2rem 4rem;
@@ -85,7 +136,9 @@
 	}
 	.doc :global(h1) {
 		color: var(--heading);
-		font-size: 1.6rem;
+		font-size: 2rem;
+		line-height: 1.2;
+		margin: 0 0 0.4rem;
 	}
 	.doc :global(h2) {
 		color: var(--heading);

@@ -32,6 +32,13 @@ export function renderMarkdown(src: string): string {
 				body.map((r) => '<tr>' + r.map((c) => `<td>${inline(c)}</td>`).join('') + '</tr>').join('') + '</tbody></table></div>');
 			continue;
 		}
+		if (line.startsWith('>')) {
+			const q: string[] = [];
+			while (i < lines.length && lines[i].startsWith('>')) q.push(lines[i++].replace(/^>\s?/, '').trim());
+			const [first, ...rest] = q;
+			out.push(`<div class="short">${inline(first)}<p>${inline(rest.join(' '))}</p></div>`);
+			continue;
+		}
 		if (/^[-*]\s/.test(line)) {
 			const items: string[] = [];
 			while (i < lines.length && lines[i].trim()) {
@@ -43,8 +50,9 @@ export function renderMarkdown(src: string): string {
 			continue;
 		}
 		const para: string[] = [];
-		while (i < lines.length && lines[i].trim() && !/^(#{1,3}\s|\||[-*]\s)/.test(lines[i])) para.push(lines[i++].trim());
-		out.push(`<p>${inline(para.join(' '))}</p>`);
+		while (i < lines.length && lines[i].trim() && !/^(#{1,3}\s|\||>|[-*]\s)/.test(lines[i])) para.push(lines[i++].trim());
+		const text = para.join(' ');
+		out.push(/^(Last updated|Son güncelleme):/.test(text) ? `<p class="date">${inline(text)}</p>` : `<p>${inline(text)}</p>`);
 	}
 	return out.join('\n');
 }

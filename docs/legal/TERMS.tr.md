@@ -7,6 +7,10 @@ orada görünmez.
 
 Son güncelleme: [TO BE FILLED BY OWNER: tarih]
 
+> **Kısaca**
+> MIGA ücretsiz, deneysel, şifreli bir mesajlaşma uygulamasıdır. Düzgün davran, yasa dışı bir şey gönderme, spam yapma
+> ve hizmete saldırma, anahtarını güvende tut. Garanti yoktur ve kaybolan anahtar kurtarılamaz.
+
 MIGA'yı (uygulama, miga.vniverse77.com web uygulaması ve işleticinin çalıştırdığı relay) kullanarak bu
 koşulları kabul edersiniz. Kabul etmiyorsanız kullanmayın. MIGA şifreli bir mesajlaşma uygulamasıdır, sosyal medya
 değildir: herkese açık paylaşım, akış ya da aranabilir profil yoktur.
@@ -63,7 +67,7 @@ durumlarda haber vermeden erişimi askıya alabilir. Kötüye kullanımı bildir
 
 ## 7. Makam talepleri
 
-Gizlilik Politikası'nın 9. bölümüne bakın. İşletici geçerli, yazılı yasal taleplere kanunun gerektirdiği şekilde
+Gizlilik Politikası'nın 11. bölümüne bakın. İşletici geçerli, yazılı yasal taleplere kanunun gerektirdiği şekilde
 yanıt verir. Relay'de olmadığı için mesaj metnini, kişi listelerini ya da göndericinin IP adresini veremez. İşletici
 arka kapı koymaz ve şifrelemeyi zayıflatmaz. [TO BE FILLED BY LAWYER: bu ifadenin uygunluğunu doğrula.]
 

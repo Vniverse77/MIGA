@@ -95,6 +95,7 @@
 			<a href="https://github.com/Vniverse77/MIGA">GitHub</a>
 			<a href="/privacy">{t('legal_privacy')}</a>
 			<a href="/terms">{t('legal_terms')}</a>
+			<a href="/kvkk">{t('legal_kvkk')}</a>
 		</nav>
 	</div>
 </footer>
