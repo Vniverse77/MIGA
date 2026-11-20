@@ -1,0 +1,7 @@
+[Unit]
+Description=MIGA relay backup
+
+[Service]
+Type=oneshot
+ExecStart=/opt/miga/backup.sh
+Nice=10

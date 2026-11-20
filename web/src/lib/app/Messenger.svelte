@@ -701,6 +701,16 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 			onError: (code, id) => {
 				// An older relay does not know the `unsend` frame and answers bad_frame without an id.
 				if (code === 'bad_frame' && !id) return;
+				if (code === 'rate_limited' || code === 'queue_full') {
+					// Temporary pressure on the relay: keep the message pending and send it again shortly.
+					notice = t('n_relay_busy');
+					clearTimeout(busyRetry);
+					busyRetry = setTimeout(() => {
+						const me = identity;
+						if (me) resendPending(me);
+					}, 30_000);
+					return;
+				}
 				if (id) setMessageState(id, 'failed');
 				notice = t('n_relay_rejected', { code });
 			}
@@ -1470,6 +1480,8 @@ import ConfirmDialog, { ask, askText, confirmOpen, dismissConfirm } from './Conf
 		}
 		return null;
 	}
+
+	let busyRetry: ReturnType<typeof setTimeout> | undefined;
 
 	function resendPending(me: Identity): void {
 		for (const [address, list] of Object.entries(chats)) {
