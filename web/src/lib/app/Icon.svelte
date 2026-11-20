@@ -45,7 +45,13 @@
 		| 'alert'
 		| 'upload'
 		| 'lock'
-		| 'inbox';
+		| 'inbox'
+		| 'users'
+		| 'user-plus'
+		| 'crown'
+		| 'at'
+		| 'logout'
+		| 'undo';
 
 	let { name, size = 20 }: { name: IconName; size?: number } = $props();
 </script>
@@ -178,6 +184,22 @@
 		<path d="M12 10v4.5M12 17.2h.01" />
 	{:else if name === 'upload'}
 		<path d="M12 16V5M7 9l5-5 5 5M5 20h14" />
+	{:else if name === 'users'}
+		<circle cx="9" cy="8" r="3.5" />
+		<path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8" />
+	{:else if name === 'user-plus'}
+		<circle cx="9" cy="8" r="4" />
+		<path d="M2 20a7 7 0 0 1 12-4.5M19 8v6M16 11h6" />
+	{:else if name === 'crown'}
+		<path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z" />
+	{:else if name === 'at'}
+		<circle cx="12" cy="12" r="3.5" />
+		<path d="M15.5 12v1.5a2.5 2.5 0 0 0 5 0V12a8.5 8.5 0 1 0-3.4 6.8" />
+	{:else if name === 'logout'}
+		<path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M15 8l4 4-4 4M19 12H9" />
+	{:else if name === 'undo'}
+		<path d="M9 14 4 9l5-5" />
+		<path d="M4 9h9a7 7 0 0 1 0 14h-2" />
 	{:else if name === 'lock'}
 		<rect x="5" y="11" width="14" height="9" rx="2" />
 		<path d="M8 11V8a4 4 0 0 1 8 0v3" />

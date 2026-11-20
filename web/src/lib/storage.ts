@@ -299,6 +299,11 @@ export async function eraseAll(): Promise<void> {
 	db?.close();
 	db = null;
 	await deleteDb();
+	try {
+		localStorage.removeItem('miga.gunread');
+	} catch {
+		// nothing stored
+	}
 	for (const key of [
 		KEY_IDENTITY,
 		KEY_CONTACTS,

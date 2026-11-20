@@ -12,7 +12,14 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	import { MAX_ATTACHMENT, cleanAtt, type Att } from '../attach';
 	import { AttachError, deleteMedia, deleteRemote, fetchMedia, mediaIds, prepare, saveMedia, upload, type Prepared } from '../media';
 	import PhotoCrop from './PhotoCrop.svelte';
-	import { avatarUrl } from '../avatar';
+	import { avatarUrl, groupAvatarUrl } from '../avatar';
+	import { GroupsController } from './groups.svelte';
+	import GroupCreate from './GroupCreate.svelte';
+	import GroupSettings from './GroupSettings.svelte';
+	import MentionPicker from './MentionPicker.svelte';
+	import { GroupError, MAX_MEMBERS, type GroupMessage, type GroupRecord, type SysLine } from '../groups';
+	import type { Notify } from '../group-engine';
+	import { canWrite, filterCandidates, insertMention, memberColor, mentionParts, mentionQuery, parseMentions, pickableContacts, rowPreview, type MemberAction } from '../group-ui';
 	import { PHOTO_SIZE, hashBytes, clearOwnPhoto, clearPeerPhoto, loadOwnPhoto, loadPeerPhoto, loadPhotoSent, openImage, saveOwnPhoto, savePeerPhoto, savePhotoSent, type OwnPhoto } from '../photo';
 	import Scanner from './Scanner.svelte';
 	import { GLOBAL_LIMIT, messageKey, searchAll, searchMessages, segments, snippet } from '../search';
@@ -198,6 +205,16 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		typingIn[peer] = true;
 		typingTimers.set(peer, setTimeout(() => setTypingIn(peer, false), TYPING_EXPIRE_MS));
 	}
+	/** Small private groups: one engine, mirrored by the controller (see groups.svelte.ts). */
+	let gc = $state.raw<GroupsController | null>(null);
+	let gCreateOpen = $state(false);
+	let gSettingsOpen = $state(false);
+	let newMenu = $state(false);
+	let gMenu = $state<{ kind: 'sheet' | 'menu'; x: number; y: number; message: GroupMessage } | null>(null);
+	let gMenuEl = $state<HTMLElement | null>(null);
+	let caret = $state(0);
+	let mentionIdx = $state(0);
+	let mentionOff = $state(-1);
 	/** The chat row long-press sheet (touch). */
 	let chatSheet = $state<string | null>(null);
 	/** What the open chat's other side is typing right now (never stored, never a message). */
@@ -354,8 +371,10 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		if (sheetOpen()) return dismissSheet(), true;
 		if (nudge) return true;
 		if (viewer) return (viewer = null), true;
-		if (msgMenu || ctx || menuOpen) {
+		if (msgMenu || gMenu || newMenu || ctx || menuOpen) {
 			msgMenu = null;
+			gMenu = null;
+			newMenu = false;
 			ctx = null;
 			menuOpen = false;
 			return true;
@@ -451,7 +470,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 
 	// Navigation layers: sheet/picker/menu (1) > settings or other sub screen (1) > open chat (1) > list. One count drives the
 	// browser history (web at phone width), the native back state (Android) and the screen transitions.
-	const overlayCount = $derived((layers.lang || confirmOpen() || sheetOpen() || msgMenu || ctx || menuOpen || viewer ? 1 : 0) + (emojiOpen || gifOpen ? 1 : 0));
+	const overlayCount = $derived((layers.lang || confirmOpen() || sheetOpen() || msgMenu || gMenu || newMenu || gCreateOpen || gSettingsOpen || ctx || menuOpen || viewer ? 1 : 0) + (emojiOpen || gifOpen ? 1 : 0));
 	const depth = $derived((active ? 1 : 0) + (view !== 'chat' ? 1 : 0) + (view === 'settings' && phoneLayout && setPage ? 1 : 0) + overlayCount);
 	const screen = $derived(view !== 'chat' ? 'sub' : active ? 'chat' : 'list');
 
@@ -610,6 +629,30 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	const ACK_MS = 1000;
 
 	const requests = $derived(contacts.filter((c) => c.request));
+	const gInvites = $derived(gc?.invites ?? []);
+	const reqCount = $derived(requests.length + gInvites.length);
+	const activeGroup = $derived(active && gc ? (gc.chats.find((g) => g.state.id === active) ?? null) : null);
+	const gTimeline = $derived(activeGroup && gc ? gc.timeline : []);
+	const gName = (a: string): string => (a === identity?.address ? t('you') : (gc?.nameOf(a) ?? shortAddress(a)));
+	const gCands = $derived(
+		activeGroup ? activeGroup.state.members.filter((a) => a !== identity?.address).map((address) => ({ address, name: gName(address) })) : []
+	);
+	const mq = $derived(activeGroup && canWrite(activeGroup) && !editing ? mentionQuery(draft, caret) : null);
+	const mItems = $derived(
+		activeGroup && mq && mq.start !== mentionOff
+			? filterCandidates(gCands, mq.query).map((c) => ({ ...c, color: memberColor(activeGroup.state.members, c.address), src: avSrc(c.address) }))
+			: []
+	);
+	const gTypingNames = $derived(activeGroup && gc ? (gc.typing[activeGroup.state.id] ?? []).map(gName) : []);
+	/** Chat list rows: contacts and groups together. Without any group the old order stays; with groups it is pinned first, then newest activity. */
+	const chatRows = $derived.by(() => {
+		const cs = chatContacts.map((c) => ({ key: c.address, c, g: undefined as GroupRecord | undefined, ts: chats[c.address]?.at(-1)?.ts ?? 0, pin: pins.c.indexOf(c.address) }));
+		const gl = gc?.chats ?? [];
+		if (!gl.length || !gc) return cs;
+		const gs = gl.map((g) => ({ key: g.state.id, c: undefined, g, ts: gc!.last[g.state.id]?.ts ?? g.since, pin: pins.c.indexOf(g.state.id) }));
+		const all = [...cs, ...gs];
+		return [...all.filter((r) => r.pin >= 0).sort((a, b) => a.pin - b.pin), ...all.filter((r) => r.pin < 0).sort((a, b) => b.ts - a.ts)];
+	});
 	const chatContacts = $derived(orderWithPins(contacts.filter((c) => !c.request), pins.c));
 	const activeContact = $derived(chatContacts.find((c) => c.address === active) ?? null);
 	/** Safety number with the open contact; the same digits show on the contact's device. */
@@ -618,8 +661,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	);
 	const activeMessages = $derived(active ? (chats[active] ?? []) : []);
 	/** The open chat's pinned messages that are still here, newest pin first. */
+	const pinSource = $derived<{ id: string; mine: boolean; text: string; att?: unknown }[]>(activeGroup ? gTimeline.filter((m) => !m.sys) : activeMessages);
 	const pinnedMsgs = $derived(
-		active ? (pins.m[active] ?? []).flatMap((k) => activeMessages.filter((m) => pinKey(m) === k)) : []
+		active ? (pins.m[active] ?? []).flatMap((k) => pinSource.filter((m) => pinKey(m) === k)) : []
 	);
 	let pinCursor = $state(0);
 	const myName = $derived(profile.name.trim().replace(/\s+/g, ' ').slice(0, 40));
@@ -742,9 +786,24 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		sync = syncKey(me);
 		void initPhotos();
 
+		gc = new GroupsController({
+			me,
+			send: (to, id, body) => relay?.send(to, id, body) ?? false,
+			sendLive: (to, body) => relay?.sendLive(to, body) ?? false,
+			syncAll: (m) => syncAll(m),
+			contactOf: (a) => contacts.find((c) => c.address === a),
+			isBlocked: (a) => blocked.includes(a),
+			strict: () => strict,
+			ownName: () => sharedName,
+			viewing: (gid) => view === 'chat' && active === gid && visible,
+			announce: (rec, m, notify) => announceGroup(rec, m, notify),
+			invited: () => noteRequest()
+		});
+
 		relay = new RelayClient(relayUrl(), me, {
 			onStatus: (s) => (status = s),
 			onReady: () => {
+				gc?.resend();
 				resendPending(me);
 				flushAcks();
 				checkSeen();
@@ -754,6 +813,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				if (blocked.includes(f.from) || contacts.find((c) => c.address === f.from)?.request) return;
 				const plain = decrypt(me, f.from, f.body);
 				if (!plain) return; // also what an old client does with a `typing` frame
+				if (plain.g) return gc?.handleLive(f.from, plain);
 				// The relay forwards ephemeral frames concurrently, so two can swap places: the sender's clock decides.
 				if (plain.ts < (ephTs.get(f.from) ?? 0)) return;
 				ephTs.set(f.from, plain.ts);
@@ -784,6 +844,11 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				if (!plain) return true;
 				// Live typing is ephemeral; one that still came as a normal message (old relay) is dropped.
 				if (plain.live !== undefined || plain.typing !== undefined) return true;
+				// Group payloads (`group` / `g`) belong to the GroupEngine (docs/PROTOCOL.md, "Groups (v1)"), never to 1:1 chats.
+				if (plain.group || plain.g) {
+					void gc?.handle(m.from, plain, m.ts);
+					return true;
+				}
 				// A delete request: only messages that came from this very sender can go.
 				if (plain.del) {
 					const items = plain.del.map((id) => ({ id, mine: false }));
@@ -867,6 +932,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				return true;
 			},
 			onSent: (id) => {
+				if (gc?.engine.owns(id)) return void gc.sent(id);
 				retryTrack.delete(id);
 				const found = setMessageState(id, 'sent');
 				if (found) syncAll({ k: 'msg', peer: found.peer, message: $state.snapshot(found.message) });
@@ -1002,6 +1068,12 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				persist();
 				break;
 			}
+			case 'grp':
+			case 'gmsg':
+			case 'gdel':
+			case 'gedit':
+				void gc?.applySync(message);
+				break;
 			case 'hxq': {
 				if (!ID_RE.test(message.sid ?? '') || !ID_RE.test(message.q ?? '')) break;
 				const after = message.after === null ? null : cleanCursor(message.after);
@@ -1177,6 +1249,8 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		for (let i = 0; i < all.length; i += 50) {
 			syncSend(to, { k: 'state', contacts: all.slice(i, i + 50) });
 		}
+		// Groups: records first, then their messages (the sync kinds are idempotent).
+		void gc?.snapshot().then((items) => items.forEach((m) => syncSend(to, m)));
 		// The history itself is pulled page by page by the new device (see 'hxq'), so it can resume.
 	}
 
@@ -1547,7 +1621,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 
 	// Typing indicator (sender side): a tiny `typing` frame, at most every 3 s, plus a stop frame.
 	let typingState: TypingState = TYPING_IDLE;
-	const sendable = () => composerFocused && visible && view === 'chat' && !editing && active && !blocked.includes(active) && !contacts.find((c) => c.address === active)?.request;
+	const sendable = () => composerFocused && visible && view === 'chat' && !editing && active && !activeGroup && !blocked.includes(active) && !contacts.find((c) => c.address === active)?.request;
 	$effect(() => {
 		const peer = typingMode === 'typing' && sendable() ? active : null;
 		const has = draft.trim().length > 0;
@@ -1560,11 +1634,23 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 
 	$effect(() => {
 		const peer =
-			liveOn && composerFocused && visible && view === 'chat' && !editing && active && !blocked.includes(active)
+			liveOn && composerFocused && visible && view === 'chat' && !editing && active && !activeGroup && !blocked.includes(active)
 				? active
 				: null;
 		const text = draft.slice(0, MAX_TEXT);
 		untrack(() => liveUpdate(peer, text));
+	});
+
+	// Groups: only the "typing" frame (never live text), sent to the members that are online.
+	let gTypingState: TypingState = TYPING_IDLE;
+	$effect(() => {
+		const gid = typingMode !== 'off' && activeGroup && canWrite(activeGroup) && composerFocused && visible && view === 'chat' && !editing ? active : null;
+		const has = draft.trim().length > 0;
+		untrack(() => {
+			const step = typingStep(gTypingState, gid, has, Date.now());
+			gTypingState = step.state;
+			for (const f of step.frames) gc?.engine.sendTyping(f.to, f.typing);
+		});
 	});
 
 	// A live line belongs to the chat that is open.
@@ -1587,7 +1673,8 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	let baseTitle = 'MIGA';
 	/** Muted chats are left out of the title: they count in the list but must not nag. */
 	const unreadTotal = $derived(
-		Object.entries(unread).reduce((sum, [peer, n]) => (muted.includes(peer) ? sum : sum + n), 0)
+		Object.entries(unread).reduce((sum, [peer, n]) => (muted.includes(peer) ? sum : sum + n), 0) +
+			Object.entries(gc?.unread ?? {}).reduce((sum, [gid, u]) => (gc?.get(gid)?.muted ? sum : sum + u.n), 0)
 	);
 
 	$effect(() => {
@@ -1680,6 +1767,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	function toggleMute(address: string): void {
 		menuOpen = false;
 		ctx = null;
+		chatSheet = null;
+		const g = gc?.get(address);
+		if (g) return void gc?.engine.setMuted(address, !g.muted);
 		muted = muted.includes(address) ? muted.filter((a) => a !== address) : [...muted, address].slice(0, MAX_BLOCKED);
 		saveMuted($state.snapshot(muted));
 		syncAll({ k: 'state', muted: $state.snapshot(muted) });
@@ -1707,7 +1797,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	}
 
 	/** What a chat list row, a reply quote or a notification shows for a message. */
-	const previewOf = (m: Message): string => m.text || (m.att ? t('att_photo') : '');
+	const previewOf = (m: { text: string; att?: unknown }): string => m.text || (m.att ? t('att_photo') : '');
 
 	/** `request` set: a new address becomes a message request (it stays out of the chat list until accepted). */
 	// ── Profile photos ─────────────────────────────────────────────────────────────────────
@@ -1952,6 +2042,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 
 	/** Once a second: pending messages whose retry is due are sent again; after 24 h they become `failed`. */
 	function pumpRetries(): void {
+		gc?.resend();
 		const me = identity;
 		if (!me) return;
 		const now = Date.now();
@@ -2115,6 +2206,8 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		menuOpen = false;
 		ctx = null;
 		msgMenu = null;
+		gMenu = null;
+		newMenu = false;
 		if (emojiOpen) return closeEmoji();
 		if (gifOpen) return closeGif();
 		if (editing) return cancelEdit();
@@ -2139,7 +2232,14 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	/** Enter sends, Shift+Enter starts a new line. A key press that only confirms an IME candidate is left alone. */
 	function onComposerKey(e: KeyboardEvent): void {
 		if (e.key === 'ArrowUp' && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.isComposing && !draft && !editing && shortcutsOn()) {
-			const last = active ? chats[active]?.findLast((m) => m.mine && m.state === 'sent' && m.text) : undefined;
+			if (activeGroup) {
+				const mine = gTimeline.findLast((m) => m.mine && !m.sys && m.text);
+				if (mine) {
+					e.preventDefault();
+					return startGroupEdit(mine);
+				}
+			}
+			const last = active && !activeGroup ? chats[active]?.findLast((m) => m.mine && m.state === 'sent' && m.text) : undefined;
 			if (last) {
 				e.preventDefault();
 				return startEdit(last);
@@ -2177,6 +2277,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	async function sendMessage(event: SubmitEvent): Promise<void> {
 		event.preventDefault();
 		const text = draft.trim();
+		if (activeGroup) return void groupSend(text);
 		if (editing) return saveEdit(text);
 		if (!text || !active || !identity || previewSending) return;
 		if (text.length > MAX_TEXT) {
@@ -2286,6 +2387,14 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			return;
 		}
 		const peer = item.peer;
+		if (gc?.get(peer)) {
+			// A group: the file is uploaded once; every member gets the same metadata (the delete token stays with me).
+			void saveMedia(att.blob, new Blob([data.prepared.bytes as BlobPart], { type: att.mime }), att.mime);
+			uploads = uploads.filter((u) => u.key !== key);
+			uploadData.delete(key);
+			await groupDeliver(peer, { text: item.caption, att, reply: item.reply });
+			return;
+		}
 		const id = randomId();
 		if (!chats[peer]) chats[peer] = [];
 		chats[peer].push({ id, mine: true, text: item.caption, ts: Date.now(), state: 'pending', att, ...(item.reply ? { reply: item.reply } : {}) });
@@ -2710,6 +2819,318 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		notice = '';
 	}
 
+	// ── Groups ──────────────────────────────────────────────────────────────────────────────
+
+	$effect(() => {
+		if (!gc) return;
+		gc.open = activeGroup ? active : null;
+		untrack(() => void gc?.reloadTimeline());
+	});
+
+	// A group chat on screen is read: its counter and "@" mark go away.
+	$effect(() => {
+		if (!gc || !activeGroup || view !== 'chat' || !visible || !gc.unread[activeGroup.state.id]) return;
+		const gid = activeGroup.state.id;
+		untrack(() => {
+			gc?.clearUnread(gid);
+			platform.notifier.close('chat-' + gid);
+		});
+	});
+
+	function sysText(s: SysLine): string {
+		return t(`g_sys_${s.k}` as MessageKey, { by: s.by ? gName(s.by) : '', who: s.who ? gName(s.who) : '', name: s.name ?? '' });
+	}
+	const gPreview = (m: GroupMessage | undefined): string => rowPreview(m, gName, sysText, t('att_photo'), t('you'));
+
+	function toggleNewMenu(): void {
+		newMenu = !newMenu;
+		menuOpen = false;
+	}
+	function newChat(): void {
+		newMenu = false;
+		openNew();
+	}
+	function newGroup(): void {
+		newMenu = false;
+		gCreateOpen = true;
+	}
+
+	async function createGroup(name: string, picked: string[], gid: string): Promise<void> {
+		if (!gc) return;
+		try {
+			await gc.engine.create(name, picked, {}, gid);
+			gCreateOpen = false;
+			openChat(gid);
+		} catch (e) {
+			gCreateOpen = false;
+			notice = t('g_err', { code: e instanceof GroupError ? e.code : 'error' });
+		}
+	}
+
+	const gUnreadOf = (gid: string) => gc?.unread[gid];
+
+	async function acceptGroup(gid: string): Promise<void> {
+		if (!gc) return;
+		try {
+			await gc.engine.accept(gid);
+			openChat(gid);
+		} catch {
+			notice = t('g_err', { code: 'accept' });
+		}
+	}
+
+	/** Delete an invite: the others are told that I am out, then the record goes. */
+	async function declineGroup(gid: string): Promise<void> {
+		if (!gc) return;
+		try {
+			await gc.engine.leave(gid);
+		} catch {
+			// Already gone: nothing to tell anybody.
+		}
+		gc.tidy(gid);
+	}
+
+	async function blockGroupInvite(gid: string): Promise<void> {
+		const rec = gc?.get(gid);
+		if (!rec) return;
+		const admin = rec.state.admin;
+		const ok = await ask({ body: t('q_block', { name: gName(admin) }), confirm: t('block'), danger: true });
+		if (!ok) return;
+		if (!blocked.includes(admin)) {
+			blocked = [...blocked, admin].slice(0, MAX_BLOCKED);
+			saveBlocked($state.snapshot(blocked));
+			syncAll({ k: 'state', blocked: $state.snapshot(blocked) });
+		}
+		await declineGroup(gid);
+	}
+
+	/** Sends one group message (text, or a file already uploaded) and refreshes the screen. */
+	async function groupDeliver(gid: string, input: { text: string; att?: Att; reply?: Reply; mentions?: string[] }): Promise<void> {
+		if (!gc) return;
+		try {
+			const m = await gc.engine.sendMessage(gid, input);
+			gc.last = { ...gc.last, [gid]: m };
+			await gc.reloadTimeline();
+			stickToBottom();
+		} catch (e) {
+			notice = t('g_err', { code: e instanceof GroupError ? e.code : 'send' });
+		}
+	}
+
+	async function groupSend(text: string): Promise<void> {
+		const g = activeGroup;
+		if (!g || !gc || !canWrite(g)) return;
+		const gid = g.state.id;
+		if (editing) {
+			const edit = editing;
+			if (!text) {
+				notice = t('n_edit_empty');
+				return;
+			}
+			const mine = gTimeline.find((m) => m.mine && m.id === edit.id);
+			if (!mine || text === mine.text) return cancelEdit();
+			if (await gc.engine.sendEdit(gid, edit.id, text)) {
+				editing = null;
+				draft = '';
+				await gc.reloadTimeline();
+			}
+			return;
+		}
+		if (!text) return;
+		if (text.length > MAX_TEXT) {
+			notice = t('n_too_long', { max: MAX_TEXT });
+			return;
+		}
+		const reply = replyTo ?? undefined;
+		const mentions = parseMentions(text, gCands);
+		draft = '';
+		replyTo = null;
+		await groupDeliver(gid, { text, reply, mentions });
+	}
+
+	function startGroupEdit(message: GroupMessage): void {
+		gMenu = null;
+		if (!active || !message.mine || message.sys) return;
+		replyTo = null;
+		emojiOpen = false;
+		gifOpen = false;
+		editing = { peer: active, id: message.id, text: message.text };
+		draft = message.text;
+		tick().then(() => composerInput?.focus());
+	}
+
+	function startGroupReply(message: GroupMessage): void {
+		gMenu = null;
+		const preview = cleanReply({ id: message.id, from: message.from, text: previewOf(message) });
+		if (!preview) return;
+		replyTo = preview;
+		composerInput?.focus();
+	}
+
+	async function groupDeleteMe(message: GroupMessage): Promise<void> {
+		gMenu = null;
+		if (!active || !gc) return;
+		const ok = await ask({ body: t('q_delete_me'), confirm: t('delete_msg_me'), danger: true });
+		if (!ok) return;
+		await gc.engine.deleteForMe(active, [message.id]);
+		dropPins(active, [{ id: message.id, mine: message.mine }]);
+		await gc.reloadTimeline();
+	}
+
+	async function groupDeleteAll(message: GroupMessage): Promise<void> {
+		gMenu = null;
+		if (!active || !gc || !message.mine) return;
+		const ok = await ask({ body: t('g_q_delete_all'), confirm: t('delete_msg_all'), danger: true });
+		if (!ok) return;
+		const gone = await gc.engine.sendDelete(active, [message.id]);
+		for (const m of gone) if (m.att) void deleteRemote($state.snapshot(m.att));
+		dropPins(active, [{ id: message.id, mine: true }]);
+		await gc.reloadTimeline();
+	}
+
+	function openGroupMenu(x: number, y: number, message: GroupMessage, kind: 'sheet' | 'menu' = 'menu'): void {
+		if (message.sys) return;
+		gMenu = { kind, x, y, message };
+		if (kind === 'sheet') return;
+		tick().then(() => {
+			const el = gMenuEl;
+			if (!el || !gMenu) return;
+			const { width, height } = el.getBoundingClientRect();
+			const vw = document.documentElement.clientWidth;
+			const vh = document.documentElement.clientHeight;
+			const nx = Math.max(8, Math.min(x, vw - width - 8));
+			const ny = y + height + 8 > vh ? Math.max(8, y - height - 8) : y;
+			gMenu = { ...gMenu, x: nx, y: Math.max(8, Math.min(ny, vh - height - 8)) };
+			el.querySelector<HTMLElement>('button')?.focus();
+		});
+	}
+
+	function groupPressStart(event: PointerEvent, message: GroupMessage): void {
+		if (event.pointerType !== 'touch') return;
+		clearTimeout(pressTimer);
+		pressAt = { x: event.clientX, y: event.clientY };
+		pressTimer = setTimeout(() => {
+			platform.haptic?.();
+			openGroupMenu(pressAt.x, pressAt.y, message, 'sheet');
+		}, 450);
+	}
+
+	function groupContext(e: MouseEvent, message: GroupMessage): void {
+		const type = (e as PointerEvent).pointerType;
+		if (type === 'touch' || (!type && matchMedia('(pointer: coarse)').matches)) return void e.preventDefault();
+		if (getSelection()?.toString() || (e.target as Element | null)?.closest?.('a, input, textarea, [contenteditable]')) return;
+		e.preventDefault();
+		openGroupMenu(e.clientX, e.clientY, message, 'menu');
+	}
+
+	async function copyGroupMessage(message: GroupMessage): Promise<void> {
+		gMenu = null;
+		try {
+			await navigator.clipboard.writeText(message.text);
+			notice = t('dl_copied');
+		} catch {
+			// Clipboard blocked: the text stays selectable on a mouse device.
+		}
+	}
+
+	/** The newest member copy state of my own message: any failure shows, then any pending, else sent. */
+	function groupState(m: GroupMessage): 'sent' | 'pending' | 'failed' {
+		const states = Object.values(m.to ?? {});
+		if (states.includes('failed')) return 'failed';
+		return states.includes('pending') ? 'pending' : 'sent';
+	}
+
+	function announceGroup(rec: GroupRecord, m: GroupMessage, notify: Notify): void {
+		if (blocked.includes(m.from)) return;
+		const sender = gName(m.from);
+		const mention = notify === 'mention';
+		platform.notifier.show({
+			tag: 'chat-' + rec.state.id,
+			title: notifyMode === 'generic' ? 'MIGA' : rec.state.name,
+			body: notifyMode === 'generic' ? t('notif_new_message') : mention ? t('g_notif_mention', { name: sender }) : notifyMode === 'full' ? `${sender}: ${previewOf(m)}`.slice(0, 140) : t('notif_new_message'),
+			onClick: () => {
+				window.focus();
+				openChat(rec.state.id);
+			}
+		});
+	}
+
+	// Mentions: the picker follows the caret; arrows, Enter/Tab and Escape work from the keyboard.
+	function trackCaret(): void {
+		caret = composerInput?.selectionStart ?? draft.length;
+	}
+	function pickMention(address: string): void {
+		const c = gCands.find((x) => x.address === address);
+		if (!c || !mq) return;
+		const r = insertMention(draft, mq.start, caret, c.name);
+		draft = r.text;
+		mentionIdx = 0;
+		tick().then(() => {
+			composerInput?.focus();
+			composerInput?.setSelectionRange(r.caret, r.caret);
+			caret = r.caret;
+		});
+	}
+	function onGroupComposerKey(e: KeyboardEvent): void {
+		if (mItems.length && !e.isComposing) {
+			if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+				e.preventDefault();
+				mentionIdx = (mentionIdx + (e.key === 'ArrowDown' ? 1 : -1) + mItems.length) % mItems.length;
+				return;
+			}
+			if (e.key === 'Enter' || e.key === 'Tab') {
+				e.preventDefault();
+				return pickMention(mItems[Math.min(mentionIdx, mItems.length - 1)].address);
+			}
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				mentionOff = mq?.start ?? -1;
+				return;
+			}
+		}
+		onComposerKey(e);
+	}
+	$effect(() => {
+		void mq?.query;
+		mentionIdx = 0;
+		if (!mq) mentionOff = -1;
+	});
+
+	/** Group settings actions (admin). Each one returns when the new signed state is stored. */
+	async function groupMemberAction(action: MemberAction, address: string): Promise<void> {
+		const gid = active;
+		if (!gid || !gc) return;
+		try {
+			if (action === 'remove') await gc.engine.remove(gid, address);
+			else if (action === 'ban') await gc.engine.ban(gid, address);
+			else await gc.engine.transferAdmin(gid, address);
+		} catch (e) {
+			notice = t('g_err', { code: e instanceof GroupError ? e.code : 'error' });
+		}
+	}
+	async function groupLeave(): Promise<void> {
+		const gid = active;
+		if (!gid || !gc) return;
+		try {
+			await gc.engine.leave(gid);
+		} catch (e) {
+			notice = t('g_err', { code: e instanceof GroupError ? e.code : 'error' });
+			return;
+		}
+		gSettingsOpen = false;
+		active = null;
+		gc.tidy(gid);
+	}
+	async function groupDelete(): Promise<void> {
+		const gid = active;
+		if (!gid || !gc) return;
+		gSettingsOpen = false;
+		active = null;
+		await gc.engine.deleteLocal(gid);
+		gc.records = gc.engine.list();
+		gc.clearUnread(gid);
+	}
+
 	// ── Message requests ────────────────────────────────────────────────────────────────
 
 	/** Accept: the chat moves to the chat list, and only now the sender gets "delivered" for what it sent. */
@@ -2774,10 +3195,11 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		syncAll({ k: 'state', pins: snapshot });
 	}
 
-	const pinnedNow = (m: Message) => isPinned(pins.m, active ?? '', pinKey(m));
+	const pinnedNow = (m: { id: string; mine: boolean }) => isPinned(pins.m, active ?? '', pinKey(m));
 
-	function toggleMessagePin(message: Message): void {
+	function toggleMessagePin(message: { id: string; mine: boolean }): void {
 		msgMenu = null;
+		gMenu = null;
 		if (!active) return;
 		togglePin(pins.m, active, pinKey(message));
 		pinCursor = 0;
@@ -2802,7 +3224,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	$effect(() => {
 		const peer = active;
 		if (!peer || hx || !pins.m[peer]) return;
-		const have = new Set(activeMessages.map(pinKey));
+		const have = new Set(pinSource.map(pinKey));
 		if (prunePins(pins.m, peer, have)) untrack(() => savePins($state.snapshot(pins)));
 	});
 
@@ -2819,7 +3241,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		menuOpen = false;
 		ctx = null;
 		chatSheet = null;
-		pins.c = pins.c.filter((a) => contacts.some((c) => c.address === a));
+		pins.c = pins.c.filter((a) => contacts.some((c) => c.address === a) || gc?.get(a));
 		toggleChatPin(pins.c, address);
 		savePinsAndSync();
 	}
@@ -2966,7 +3388,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	/** Who wrote a quoted message: "You" for our own account, else the contact's name. */
 	function quoteName(from: string): string {
 		if (from === identity?.address) return t('you');
-		return contacts.find((c) => c.address === from)?.name ?? shortAddress(from);
+		return contacts.find((c) => c.address === from)?.name ?? gc?.sharedNames[from] ?? shortAddress(from);
 	}
 
 	/** Scrolls to the original and flashes it. Does nothing when it is no longer in this chat. */
@@ -3075,6 +3497,107 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	<title>MIGA</title>
 </svelte:head>
 
+{#snippet composerArea(address: string, group: boolean)}
+	{@const isOff = !group && blocked.includes(address)}
+				{#if replyTo}
+					<div class="replybar">
+						<div class="quote-text">
+							<strong>{replyTo.from === identity?.address ? t('replying_to_self') : t('replying_to', { name: quoteName(replyTo.from) })}</strong>
+							<span>{replyTo.text}</span>
+						</div>
+						<button type="button" aria-label={t('cancel_reply')} title={t('cancel_reply')} onclick={() => (replyTo = null)}><Icon name="close" size={16} /></button>
+					</div>
+				{/if}
+				{#if editing}
+					<div class="replybar editbar">
+						<div class="quote-text">
+							<strong>{t('editing_msg')}</strong>
+							<span>{editing.text}</span>
+						</div>
+						<button type="button" aria-label={t('cancel_edit')} title={t('cancel_edit')} onclick={cancelEdit}><Icon name="close" size={16} /></button>
+					</div>
+				{/if}
+				{#if powBusy.includes(address)}
+					<p class="pow-note" role="status"><i class="pow-spin" aria-hidden="true"></i>{t('pow_preparing')}</p>
+				{/if}
+				{#if emojiOpen && EmojiPicker && !isOff}
+					<EmojiPicker onpick={insertEmoji} />
+				{/if}
+				{#if gifOpen && GifPanel && !isOff}
+					<GifPanel onsend={sendGif} onnotice={showGifNotice} />
+				{/if}
+				{#if (emojiOpen || gifOpen) && !isOff}
+					<div class="picker-bar" role="tablist" aria-label={t('picker_btn')}>
+						<button type="button" role="tab" class="ptab" class:on={emojiOpen} aria-selected={emojiOpen} aria-label={t('emoji_btn')} title={t('emoji_btn')} onclick={() => showPicker('emoji')}>
+							<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<circle cx="12" cy="12" r="9" />
+								<path d="M8.5 14a4 4 0 0 0 7 0" />
+								<path d="M9 9.5h.01M15 9.5h.01" />
+							</svg>
+						</button>
+						<button type="button" role="tab" class="ptab gif" class:on={gifOpen} aria-selected={gifOpen} aria-label={t('gif_btn')} title={t('gif_btn')} disabled={!!editing} onclick={() => showPicker('gif')}>GIF</button>
+						<span class="grow"></span>
+						{#if emojiOpen}
+							<button type="button" class="ptab" aria-label={t('picker_backspace')} title={t('picker_backspace')} onclick={pickerBackspace}>
+								<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<path d="M21 5H9l-6 7 6 7h12z" />
+									<path d="M13 9.5l5 5M18 9.5l-5 5" />
+								</svg>
+							</button>
+						{/if}
+					</div>
+				{/if}
+				{#if group && activeGroup && !canWrite(activeGroup)}
+					<div class="replybar blocked-bar" data-not-member>
+						<div class="quote-text"><span>{t('g_not_member')}</span></div>
+					</div>
+				{:else if isOff}
+					<div class="replybar blocked-bar">
+						<div class="quote-text"><span>{t('blocked_banner')}</span></div>
+						<button type="button" onclick={() => toggleBlock(address)}>{t('unblock')}</button>
+					</div>
+				{:else}
+				{#if group && mItems.length}<MentionPicker items={mItems} index={mentionIdx} onpick={pickMention} />{/if}
+				{#if attError}<p class="att-error" role="alert">{attError}</p>{/if}
+				{#if draftPreview && !group}
+					<div class="prevbar"><LinkCard preview={draftPreview.preview} src={draftPreview.src} onremove={removeDraftPreview} /></div>
+				{/if}
+				<form class="composer" onsubmit={sendMessage}>
+					<button type="button" class="attach-btn" aria-label={t('att_btn')} title={t('att_btn')} disabled={!!editing} onclick={pickFiles}>
+						<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M21 12.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l9-9a3.7 3.7 0 0 1 5.2 5.2l-9 9a1.8 1.8 0 0 1-2.6-2.6l8.2-8.2" />
+						</svg>
+					</button>
+					<button
+						type="button"
+						class="emoji-btn"
+						aria-label={t('picker_btn')}
+						title={t('picker_btn')}
+						aria-haspopup="dialog"
+						aria-expanded={emojiOpen || gifOpen}
+						onclick={togglePicker}
+					>
+						<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<circle cx="12" cy="12" r="9" />
+							<path d="M8.5 14a4 4 0 0 0 7 0" />
+							<path d="M9 9.5h.01M15 9.5h.01" />
+						</svg>
+					</button>
+					<textarea class="composer-input" rows="1" bind:this={composerInput} bind:value={draft} oninput={() => (growComposer(), group && trackCaret())} onkeyup={() => group && trackCaret()} onclick={() => group && trackCaret()} onkeydown={group ? onGroupComposerKey : onComposerKey} onfocus={() => (composerFocused = true)} onblur={() => (composerFocused = false)} onpaste={onPaste} placeholder={t('ph_message')} enterkeyhint="send" autocomplete="off" autocapitalize="sentences" maxlength={MAX_TEXT}></textarea>
+					<button
+						type="submit"
+						class="ibtn primary send-btn"
+						title={editing ? t('save_edit') : t('send')}
+						aria-label={editing ? t('save_edit') : t('send')}
+						disabled={!draft.trim() && !editing}
+					>
+						<Icon name={editing ? 'check' : 'send'} />
+					</button>
+				</form>
+				<input bind:this={fileInput} class="file-input" type="file" multiple accept="image/*,video/mp4,video/webm" tabindex="-1" aria-hidden="true" onchange={(e) => { void attachFiles([...(e.currentTarget.files ?? [])]); e.currentTarget.value = ''; }} />
+				{/if}
+{/snippet}
+
 {#snippet verifiedMark(size: number)}
 	<span class="verified-mark" title={t('safety_verified')}>
 		<svg viewBox="0 0 24 24" width={size} height={size} role="img" aria-label={t('safety_verified')} fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -3084,17 +3607,57 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	</span>
 {/snippet}
 
+{#snippet groupRow(g: GroupRecord, side: boolean)}
+	{@const gid = g.state.id}
+	{@const last = gc?.last[gid]}
+	{@const u = gUnreadOf(gid)}
+	{@const typers = (gc?.typing[gid] ?? []).map(gName)}
+	<li data-group={gid}>
+		<button
+			type="button"
+			class="contact"
+			class:selected={view === 'chat' && gid === active}
+			onclick={() => rowClick(gid)}
+			oncontextmenu={(e) => (side ? openMenu(e, gid) : (e.preventDefault(), !isDesktop && (chatSheet = gid)))}
+			onpointerdown={(e) => rowPressStart(e, gid)}
+			onpointerup={rowPressEnd}
+			onpointercancel={rowPressEnd}
+			onpointermove={rowPressMove}
+		>
+			<span class="avatar" aria-hidden="true"><img src={groupAvatarUrl(gid)} alt="" class="px" /></span>
+			<span class="who">
+				<strong>{g.state.name}</strong>
+				{#if typers.length}<small class="typing-sub" data-typing>{t(typers.length > 1 ? 'g_typing_many' : 'g_typing_one', { name: typers.join(', ') })}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></small>{:else}<small data-preview>{last ? gPreview(last) : t('g_members_n', { n: g.state.members.length })}</small>{/if}
+			</span>
+			<span class="meta">
+				{#if last}<small class="when">{timeOf(last.ts)}</small>{/if}
+				<span class="marks">
+					{#if pins.c.includes(gid)}<span class="pin-mark" role="img" aria-label={t('pinned_chat')} title={t('pinned_chat')}><Icon name="pin" size={13} /></span>{/if}
+					{#if g.muted}
+						<svg class="mute-icon" viewBox="0 0 24 24" width="13" height="13" role="img" aria-label={t('muted_label')} fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<title>{t('muted_label')}</title>
+							<path d="M6 8a6 6 0 0 1 9.3-5M18 8c0 3 .7 5 2 7H5M10 21a2 2 0 0 0 4 0M3 3l18 18" />
+						</svg>
+					{/if}
+					{#if u?.at}<span class="badge at" data-mention-badge aria-label={t('g_mention_badge')} title={t('g_mention_badge')}>@</span>{/if}
+					{#if u}<span class="badge" class:quiet={g.muted} data-unread={u.n} aria-label={t('unread_count', { n: u.n })}>{u.n > 99 ? '99+' : u.n}</span>{/if}
+				</span>
+			</span>
+		</button>
+	</li>
+{/snippet}
+
 {#snippet requestsRow()}
-	{#if requests.length || filtered}
+	{#if reqCount || filtered}
 		<li class="req-row">
-			<button type="button" class="contact req" class:selected={view === 'requests'} data-requests={requests.length} onclick={() => (view = 'requests')}>
+			<button type="button" class="contact req" class:selected={view === 'requests'} data-requests={reqCount} onclick={() => (view = 'requests')}>
 				<span class="avatar req-avatar" aria-hidden="true"><Icon name="inbox" size={20} /></span>
 				<span class="who">
 					<strong>{t('requests')}</strong>
-					<small>{requests.length ? t('req_waiting', { n: requests.length }) : t('req_filtered_n', { n: filtered })}</small>
+					<small>{reqCount ? t('req_waiting', { n: reqCount }) : t('req_filtered_n', { n: filtered })}</small>
 				</span>
 				<span class="meta"><span class="marks">
-					{#if requests.length}<span class="badge" aria-label={t('req_waiting', { n: requests.length })}>{requests.length > 99 ? '99+' : requests.length}</span>{/if}
+					{#if reqCount}<span class="badge" aria-label={t('req_waiting', { n: reqCount })}>{reqCount > 99 ? '99+' : reqCount}</span>{/if}
 				</span></span>
 			</button>
 		</li>
@@ -3308,7 +3871,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				<span class="status {status}">{t(`status_${status}`)}</span>
 				<button type="button" class="ibtn" data-gsearch title={t('search_all')} aria-label={t('search_all')} aria-pressed={gOpen} onclick={toggleGlobal}><Icon name="search" /></button>
 				{#if contacts.length}
-				<button type="button" class="ibtn" title={t('new_conversation')} aria-label={t('new_conversation')} onclick={openNew}>
+				<button type="button" class="ibtn" title={t('new_conversation')} aria-label={t('new_conversation')} aria-haspopup="menu" aria-expanded={newMenu} data-new onclick={toggleNewMenu}>
 					<Icon name="plus" />
 				</button>
 				{/if}
@@ -3318,7 +3881,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			{#if gResults === null}{@render backupBanner()}{@render hxBanner()}{@render notifyBanner()}{/if}
 			<ul class="contacts side-list" class:hidden={gResults !== null}>
 				{@render requestsRow()}
-				{#each chatContacts as contact (contact.address)}
+				{#each chatRows as row (row.key)}
+					{#if row.g}{@render groupRow(row.g, true)}{:else if row.c}
+					{@const contact = row.c}
 					{@const last = chats[contact.address]?.at(-1)}
 					<li>
 						<button
@@ -3340,6 +3905,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 							{@render rowMeta(contact.address, last)}
 						</button>
 					</li>
+					{/if}
 				{:else}
 					<li class="empty">
 						<p>{t('no_conversations')}</p>
@@ -3410,7 +3976,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				<span class="head-actions">
 				<button type="button" class="ibtn" data-gsearch title={t('search_all')} aria-label={t('search_all')} aria-pressed={gOpen} onclick={toggleGlobal}><Icon name="search" /></button>
 				{#if contacts.length}
-				<button type="button" class="ibtn primary" title={t('new_conversation')} aria-label={t('new_conversation')} onclick={openNew}>
+				<button type="button" class="ibtn primary" title={t('new_conversation')} aria-label={t('new_conversation')} aria-haspopup="menu" aria-expanded={newMenu} data-new onclick={toggleNewMenu}>
 					<Icon name="plus" />
 				</button>
 				{/if}
@@ -3428,7 +3994,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			{#if gResults === null}{@render backupBanner()}{@render hxBanner()}{@render notifyBanner()}{/if}
 			<ul class="contacts" class:hidden={gResults !== null}>
 				{@render requestsRow()}
-				{#each chatContacts as contact (contact.address)}
+				{#each chatRows as row (row.key)}
+					{#if row.g}{@render groupRow(row.g, false)}{:else if row.c}
+					{@const contact = row.c}
 					{@const last = chats[contact.address]?.at(-1)}
 					<li>
 						<button
@@ -3450,6 +4018,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 							{@render rowMeta(contact.address, last)}
 						</button>
 					</li>
+					{/if}
 				{:else}
 					<li class="empty">
 						<p>{t('no_conversations')}</p>
@@ -3458,7 +4027,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				{/each}
 			</ul>
 			{#if contacts.length}
-				<button type="button" class="fab" class:away={fabHidden} title={t('new_conversation')} aria-label={t('new_conversation')} onclick={openNew}>
+				<button type="button" class="fab" class:away={fabHidden} title={t('new_conversation')} aria-label={t('new_conversation')} aria-haspopup="menu" aria-expanded={newMenu} data-new onclick={toggleNewMenu}>
 					<Icon name="plus" size={24} />
 				</button>
 			{/if}
@@ -3722,8 +4291,32 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 					</button>
 				</header>
 
-				<div class="settings req-page" data-requests={requests.length}>
+				<div class="settings req-page" data-requests={reqCount}>
 					<p class="hint">{t('req_intro')}</p>
+					{#each gInvites as g (g.state.id)}
+						<section class="card req-card" data-group-invite={g.state.id}>
+							<div class="req-head">
+								<span class="avatar" aria-hidden="true"><img class="px" src={groupAvatarUrl(g.state.id)} alt="" /></span>
+								<div class="who">
+									<strong>{g.state.name}</strong>
+									<small>{t('g_invited_by', { name: gName(g.state.admin) })}</small>
+								</div>
+								{#if g.request && g.unverified}
+									<span class="req-badge" title={t('req_unverified_help')}><Icon name="alert" size={13} />{t('req_unverified')}</span>
+								{:else if g.request}
+									<span class="req-badge ok" title={t('req_verified_help')}><Icon name="shield" size={13} />{t('req_verified')}</span>
+								{/if}
+							</div>
+							<ul class="req-msgs">
+								<li><span><Icon name="users" size={14} /> {g.state.members.map(gName).join(', ')}</span><small>{g.state.members.length}/{MAX_MEMBERS}</small></li>
+							</ul>
+							<div class="req-actions" role="group" aria-label={t('requests')}>
+								<button type="button" class="ibtn req-accept" title={t('req_accept')} aria-label={t('req_accept')} onclick={() => acceptGroup(g.state.id)}><Icon name="check" size={22} /></button>
+								<button type="button" class="ibtn req-delete" title={t('req_delete')} aria-label={t('req_delete')} onclick={() => declineGroup(g.state.id)}><Icon name="trash" size={22} /></button>
+								<button type="button" class="ibtn req-block" title={t('block')} aria-label={t('block')} onclick={() => blockGroupInvite(g.state.id)}><Icon name="block" size={22} /></button>
+							</div>
+						</section>
+					{/each}
 					{#each requests as r (r.address)}
 						{@const msgs = (chats[r.address] ?? []).filter((m) => !m.mine)}
 						<section class="card req-card" data-address={r.address}>
@@ -3757,9 +4350,10 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 								<button type="button" class="ibtn req-block" title={t('block')} aria-label={t('block')} onclick={() => blockRequest(r.address)}><Icon name="block" size={22} /></button>
 							</div>
 						</section>
-					{:else}
-						<div class="req-empty"><Icon name="inbox" size={28} /><p>{t('req_none')}</p></div>
 					{/each}
+					{#if !requests.length && !gInvites.length}
+						<div class="req-empty"><Icon name="inbox" size={28} /><p>{t('req_none')}</p></div>
+					{/if}
 					{#if filtered}
 						<p class="req-filtered" role="status">
 							<Icon name="shield" size={16} /><span>{t('req_filtered_n', { n: filtered })}</span>
@@ -3830,6 +4424,147 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 						{#if notice}<p class="notice" role="status">{notice}</p>{/if}
 					</section>
 				</div>
+			{:else if activeGroup}
+				{@const g = activeGroup}
+				{@const gst = g.state}
+				<header class="chat-head" data-group-head={gst.id}>
+					<button type="button" class="ibtn back" title={t('back')} aria-label={t('back')} onclick={() => (active = null)}><Icon name="back" /></button>
+					<span class="avatar" aria-hidden="true"><img class="px" src={groupAvatarUrl(gst.id)} alt="" /></span>
+					<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+					<div class="who gwho" onclick={() => (gSettingsOpen = true)}>
+						<strong>{gst.name}</strong>
+						{#if gTypingNames.length}<small class="typing-sub" data-typing>{t(gTypingNames.length > 1 ? 'g_typing_many' : 'g_typing_one', { name: gTypingNames.join(', ') })}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></small>{:else}<small data-members>{t('g_members_n', { n: gst.members.length })}</small>{/if}
+					</div>
+					<button type="button" class="ibtn" data-group-open title={t('g_settings')} aria-label={t('g_settings')} onclick={() => (gSettingsOpen = true)}><Icon name="users" /></button>
+					<div class="menu-wrap">
+						<button type="button" class="ibtn kebab" aria-label={t('chat_menu')} aria-haspopup="menu" aria-expanded={menuOpen} onclick={() => (menuOpen = !menuOpen)}><Icon name="more-v" /></button>
+						{#if menuOpen}
+							<div class="menu" role="menu">
+								<button type="button" role="menuitem" onclick={() => togglePinnedChat(gst.id)}>
+									<Icon name={pins.c.includes(gst.id) ? 'pin-off' : 'pin'} size={16} />{t(pins.c.includes(gst.id) ? 'unpin_chat' : 'pin_chat')}
+								</button>
+								<button type="button" role="menuitem" onclick={() => toggleMute(gst.id)}>
+									<Icon name={g.muted ? 'bell' : 'bell-off'} size={16} />{t(g.muted ? 'unmute_chat' : 'mute_chat')}
+								</button>
+							</div>
+						{/if}
+					</div>
+				</header>
+
+				{#if pinnedMsgs.length}
+					{@const shown = pinnedMsgs[pinCursor % pinnedMsgs.length]}
+					<div class="pinbar" data-pinbar>
+						<button type="button" class="pin-main" aria-label={t('pinned_msg')} title={t('pinned_msg')} onclick={jumpToPin}>
+							<span class="pin-ico"><Icon name="pin" size={16} /></span>
+							<span class="pin-text">
+								{#if pinnedMsgs.length > 1}<small class="pin-n">{t('pinned_of', { i: (pinCursor % pinnedMsgs.length) + 1, n: pinnedMsgs.length })}</small>{/if}
+								<span class="pin-prev">{previewOf(shown)}</span>
+							</span>
+						</button>
+						<button type="button" class="ibtn pin-x" data-unpin aria-label={t('unpin_msg')} title={t('unpin_msg')} onclick={() => active && unpinMessage(active, pinKey(shown))}><Icon name="pin-off" size={18} /></button>
+					</div>
+				{/if}
+
+				<div class="messages" bind:this={scroller} onscroll={onMessagesScroll} data-group-messages>
+					{#each gTimeline as message, i (message.id)}
+						{#if message.sys}
+							<div class="sysline" data-sys={message.sys.k}><span>{sysText(message.sys)}</span></div>
+						{:else}
+							{@const prev = gTimeline[i - 1]}
+							{@const showSender = !message.mine && !(prev && !prev.sys && prev.from === message.from)}
+							<div
+								class="bubble"
+								class:mine={message.mine}
+								class:mentioned={message.mentionsMe}
+								class:emoji-only={isEmojiOnly(message.text)}
+								class:flash={highlighted === (message.mine ? 'm' : 't') + message.id}
+								class:sel={gMenu?.message.id === message.id}
+								data-key={(message.mine ? 'm' : 't') + message.id}
+								data-from={message.from}
+								role="group"
+								oncontextmenu={(e) => groupContext(e, message)}
+								use:swipeReply={{ onreply: () => startGroupReply(message), haptic: () => platform.haptic?.() }}
+								onpointerdown={(e) => groupPressStart(e, message)}
+								onpointerup={pressEnd}
+								onpointercancel={pressEnd}
+								onpointermove={pressMove}
+							>
+								{#if showSender}
+									<div class="sender">
+										<img class="px" src={avSrc(message.from)} alt="" />
+										<strong style:color="var(--gm-{memberColor(gst.members, message.from)})">{gName(message.from)}</strong>
+									</div>
+								{/if}
+								{#if message.reply}
+									<button type="button" class="quote" onclick={() => message.reply && jumpTo(message.reply)}>
+										<strong>{quoteName(message.reply.from)}</strong>
+										<span>{message.reply.text}</span>
+									</button>
+								{/if}
+								{#if message.att}
+									<Attachment att={message.att} onview={(url, a) => (viewer = { url, mime: a.mime })} />
+								{/if}
+								{#if message.text || !message.att}
+									<p class="selectable">{#each mentionParts(message.text, message.mentions, (a) => (a === identity?.address ? myName || t('you') : gName(a))) as part, pi (pi)}{#if part.mention}<span class="mention" class:me={part.mention === identity?.address} data-mention-chip={part.mention}>{part.t}</span>{:else}{#each linkify(part.t) as lp, li (li)}{#if lp.url}<a href={lp.url} target="_blank" rel="noopener noreferrer" onclick={(e) => (e.preventDefault(), platform.openExternal(lp.url as string))}>{lp.t}</a>{:else}{lp.t}{/if}{/each}{/if}{/each}</p>
+								{/if}
+								<div class="foot">
+									<small>
+										{#if message.edited}<span class="edited">{t('edited')}</span>{' · '}{/if}{timeOf(message.ts)}{#if message.mine}{' · '}{@const st = groupState(message)}{#if st === 'sent'}<span class="ticks sent" data-level="sent" role="img" aria-label={t('state_sent')} title={t('state_sent')}><svg viewBox="0 0 32 24" width="22" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l4.5 4.5L16.5 8" /></svg></span>{:else if st === 'pending'}<span class="pending" role="img" data-state="pending" aria-label={t('state_pending')} title={t('state_pending')}><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg></span>{:else}<span class="gfail" role="img" aria-label={t('state_failed')} title={t('state_failed')}><Icon name="alert" size={14} /></span>{/if}{/if}
+									</small>
+								</div>
+								<div class="cluster" role="toolbar" aria-label={t('msg_actions')}>
+									<button type="button" aria-label={t('reply')} title={t('reply')} onclick={() => startGroupReply(message)}><Icon name="reply" size={16} /></button>
+									<button type="button" class:on={pinnedNow(message)} aria-pressed={pinnedNow(message)} aria-label={t(pinnedNow(message) ? 'unpin_msg' : 'pin_msg')} title={t(pinnedNow(message) ? 'unpin_msg' : 'pin_msg')} onclick={() => toggleMessagePin(message)}><Icon name={pinnedNow(message) ? 'pin-off' : 'pin'} size={16} /></button>
+									<button
+										type="button"
+										class="act-btn"
+										aria-label={t('msg_actions')}
+										aria-haspopup="menu"
+										title={t('msg_actions')}
+										onclick={(e) => {
+											const r = e.currentTarget.getBoundingClientRect();
+											openGroupMenu(r.left, r.bottom + 4, message, 'menu');
+										}}
+									>
+										<Icon name="more" size={16} />
+									</button>
+								</div>
+							</div>
+						{/if}
+					{:else}
+						{#if !uploads.some((u) => u.peer === active)}<p class="empty-box">{t('no_messages')}</p>{/if}
+					{/each}
+					{#each uploads.filter((u) => u.peer === active) as u (u.key)}
+						<div class="bubble mine uploading" class:failed={u.state === 'failed'} data-upload={u.state}>
+							<div class="up-box" style:aspect-ratio={u.w / u.h} style:--ratio={u.w / u.h}>
+								{#if u.thumb}<img src={u.thumb} alt="" aria-hidden="true" />{/if}
+								<div class="up-over">
+									{#if u.state === 'failed'}
+										<p role="alert">{t(u.error === 'quota' || u.error === 'rate' || u.error === 'network' ? (`att_${u.error}` as 'att_network') : 'att_failed')}</p>
+										<div class="row">
+											<button type="button" onclick={() => sendUpload(u.key)}>{t('att_retry')}</button>
+											<button type="button" onclick={() => cancelUpload(u.key)}>{t('att_remove')}</button>
+										</div>
+									{:else}
+										<p>{u.state === 'preparing' ? t('att_preparing') : t('att_sending', { pct: Math.round(u.progress * 100) })}</p>
+										<progress max="1" value={u.state === 'preparing' ? undefined : u.progress}></progress>
+										<button type="button" onclick={() => cancelUpload(u.key)}>{t('att_cancel')}</button>
+									{/if}
+								</div>
+							</div>
+							{#if u.caption}<p class="selectable">{u.caption}</p>{/if}
+						</div>
+					{/each}
+					{#if gTypingNames.length}
+						<div class="typing-row" data-typing-row role="status"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="sr">{t(gTypingNames.length > 1 ? 'g_typing_many' : 'g_typing_one', { name: gTypingNames.join(', ') })}</span></div>
+					{/if}
+					{#if farFromBottom}
+						<div class="jump-wrap">
+							<button type="button" class="jump" title={t('jump_latest')} aria-label={t('jump_latest')} onclick={jumpToLatest}><Icon name="chevron-down" size={22} /></button>
+						</div>
+					{/if}
+				</div>
+				{@render composerArea(gst.id, true)}
 			{:else if activeContact}
 				<header class="chat-head">
 					<button type="button" class="ibtn back" title={t('back')} aria-label={t('back')} onclick={() => (active = null)}><Icon name="back" /></button>
@@ -4059,98 +4794,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 					{/if}
 				</div>
 
-				{#if replyTo}
-					<div class="replybar">
-						<div class="quote-text">
-							<strong>{replyTo.from === identity?.address ? t('replying_to_self') : t('replying_to', { name: quoteName(replyTo.from) })}</strong>
-							<span>{replyTo.text}</span>
-						</div>
-						<button type="button" aria-label={t('cancel_reply')} title={t('cancel_reply')} onclick={() => (replyTo = null)}><Icon name="close" size={16} /></button>
-					</div>
-				{/if}
-				{#if editing}
-					<div class="replybar editbar">
-						<div class="quote-text">
-							<strong>{t('editing_msg')}</strong>
-							<span>{editing.text}</span>
-						</div>
-						<button type="button" aria-label={t('cancel_edit')} title={t('cancel_edit')} onclick={cancelEdit}><Icon name="close" size={16} /></button>
-					</div>
-				{/if}
-				{#if powBusy.includes(activeContact.address)}
-					<p class="pow-note" role="status"><i class="pow-spin" aria-hidden="true"></i>{t('pow_preparing')}</p>
-				{/if}
-				{#if emojiOpen && EmojiPicker && !blocked.includes(activeContact.address)}
-					<EmojiPicker onpick={insertEmoji} />
-				{/if}
-				{#if gifOpen && GifPanel && !blocked.includes(activeContact.address)}
-					<GifPanel onsend={sendGif} onnotice={showGifNotice} />
-				{/if}
-				{#if (emojiOpen || gifOpen) && !blocked.includes(activeContact.address)}
-					<div class="picker-bar" role="tablist" aria-label={t('picker_btn')}>
-						<button type="button" role="tab" class="ptab" class:on={emojiOpen} aria-selected={emojiOpen} aria-label={t('emoji_btn')} title={t('emoji_btn')} onclick={() => showPicker('emoji')}>
-							<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-								<circle cx="12" cy="12" r="9" />
-								<path d="M8.5 14a4 4 0 0 0 7 0" />
-								<path d="M9 9.5h.01M15 9.5h.01" />
-							</svg>
-						</button>
-						<button type="button" role="tab" class="ptab gif" class:on={gifOpen} aria-selected={gifOpen} aria-label={t('gif_btn')} title={t('gif_btn')} disabled={!!editing} onclick={() => showPicker('gif')}>GIF</button>
-						<span class="grow"></span>
-						{#if emojiOpen}
-							<button type="button" class="ptab" aria-label={t('picker_backspace')} title={t('picker_backspace')} onclick={pickerBackspace}>
-								<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-									<path d="M21 5H9l-6 7 6 7h12z" />
-									<path d="M13 9.5l5 5M18 9.5l-5 5" />
-								</svg>
-							</button>
-						{/if}
-					</div>
-				{/if}
-				{#if blocked.includes(activeContact.address)}
-					<div class="replybar blocked-bar">
-						<div class="quote-text"><span>{t('blocked_banner')}</span></div>
-						<button type="button" onclick={() => toggleBlock(activeContact.address)}>{t('unblock')}</button>
-					</div>
-				{:else}
-				{#if attError}<p class="att-error" role="alert">{attError}</p>{/if}
-				{#if draftPreview}
-					<div class="prevbar"><LinkCard preview={draftPreview.preview} src={draftPreview.src} onremove={removeDraftPreview} /></div>
-				{/if}
-				<form class="composer" onsubmit={sendMessage}>
-					<button type="button" class="attach-btn" aria-label={t('att_btn')} title={t('att_btn')} disabled={!!editing} onclick={pickFiles}>
-						<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<path d="M21 12.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l9-9a3.7 3.7 0 0 1 5.2 5.2l-9 9a1.8 1.8 0 0 1-2.6-2.6l8.2-8.2" />
-						</svg>
-					</button>
-					<button
-						type="button"
-						class="emoji-btn"
-						aria-label={t('picker_btn')}
-						title={t('picker_btn')}
-						aria-haspopup="dialog"
-						aria-expanded={emojiOpen || gifOpen}
-						onclick={togglePicker}
-					>
-						<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<circle cx="12" cy="12" r="9" />
-							<path d="M8.5 14a4 4 0 0 0 7 0" />
-							<path d="M9 9.5h.01M15 9.5h.01" />
-						</svg>
-					</button>
-					<textarea class="composer-input" rows="1" bind:this={composerInput} bind:value={draft} oninput={growComposer} onkeydown={onComposerKey} onfocus={() => (composerFocused = true)} onblur={() => (composerFocused = false)} onpaste={onPaste} placeholder={t('ph_message')} enterkeyhint="send" autocomplete="off" autocapitalize="sentences" maxlength={MAX_TEXT}></textarea>
-					<button
-						type="submit"
-						class="ibtn primary send-btn"
-						title={editing ? t('save_edit') : t('send')}
-						aria-label={editing ? t('save_edit') : t('send')}
-						disabled={!draft.trim() && !editing}
-					>
-						<Icon name={editing ? 'check' : 'send'} />
-					</button>
-				</form>
-				<input bind:this={fileInput} class="file-input" type="file" multiple accept="image/*,video/mp4,video/webm" tabindex="-1" aria-hidden="true" onchange={(e) => { void attachFiles([...(e.currentTarget.files ?? [])]); e.currentTarget.value = ''; }} />
-				{/if}
+				{@render composerArea(activeContact.address, false)}
 			{:else}
 <div class="welcome">
 					{#if !isDesktop}
@@ -4172,6 +4816,15 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 
 {#if ctx}
 	<div class="menu ctx" role="menu" style:left="{ctx.x}px" style:top="{ctx.y}px">
+	{#if gc?.get(ctx.address)}
+		{@const gr = gc.get(ctx.address)}
+		<button type="button" role="menuitem" onclick={() => ctx && togglePinnedChat(ctx.address)}>
+			<Icon name={ctx && pins.c.includes(ctx.address) ? 'pin-off' : 'pin'} size={16} />{t(ctx && pins.c.includes(ctx.address) ? 'unpin_chat' : 'pin_chat')}
+		</button>
+		<button type="button" role="menuitem" onclick={() => ctx && toggleMute(ctx.address)}>
+			<Icon name={gr?.muted ? 'bell' : 'bell-off'} size={16} />{t(gr?.muted ? 'unmute_chat' : 'mute_chat')}
+		</button>
+	{:else}
 		<button type="button" role="menuitem" onclick={() => ctx && openVerify(ctx.address)}>
 			<Icon name="shield" size={16} />{t('verify_safety')}
 		</button>
@@ -4193,6 +4846,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		<button type="button" role="menuitem" onclick={() => ctx && toggleBlock(ctx.address)}>
 			<Icon name="block" size={16} />{t(ctx && blocked.includes(ctx.address) ? 'unblock' : 'block')}
 		</button>
+	{/if}
 	</div>
 {/if}
 
@@ -4200,7 +4854,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	{@const addr = chatSheet}
 	{@const who = contacts.find((c) => c.address === addr)}
 	<MessageSheet
-		preview={who?.name ?? ''}
+		preview={who?.name ?? gc?.get(addr)?.state.name ?? ''}
 		onclose={() => (chatSheet = null)}
 		actions={[
 			{ icon: pins.c.includes(addr) ? 'pin-off' : 'pin', label: t(pins.c.includes(addr) ? 'unpin_chat' : 'pin_chat'), run: () => togglePinnedChat(addr) },
@@ -4259,6 +4913,74 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			</button>
 		{/if}
 	</div>
+{/if}
+
+{#if gMenu?.kind === 'sheet'}
+	{@const target = gMenu.message}
+	<MessageSheet
+		preview={previewOf(target)}
+		onclose={() => (gMenu = null)}
+		actions={[
+			{ icon: 'reply', label: t('reply'), run: () => startGroupReply(target) },
+			{ icon: pinnedNow(target) ? 'pin-off' : 'pin', label: t(pinnedNow(target) ? 'unpin_msg' : 'pin_msg'), run: () => toggleMessagePin(target) },
+			...(target.text ? [{ icon: 'copy' as const, label: t('msg_copy'), run: () => void copyGroupMessage(target) }] : []),
+			...(target.mine && activeGroup && canWrite(activeGroup) ? [{ icon: 'edit' as const, label: t('edit_msg'), run: () => startGroupEdit(target) }] : []),
+			{ icon: 'trash', label: t('delete_msg_me'), danger: true, run: () => void groupDeleteMe(target) },
+			...(target.mine ? [{ icon: 'trash' as const, label: t('delete_msg_all'), danger: true, run: () => void groupDeleteAll(target) }] : [])
+		]}
+	/>
+{:else if gMenu}
+	{@const target = gMenu.message}
+	<div class="menu ctx msg-menu" role="menu" tabindex="-1" bind:this={gMenuEl} style:left="{gMenu.x}px" style:top="{gMenu.y}px" onkeydown={menuKey}>
+		<button type="button" role="menuitem" onclick={() => startGroupReply(target)}><Icon name="reply" size={16} />{t('reply')}</button>
+		<button type="button" role="menuitem" onclick={() => toggleMessagePin(target)}>
+			<Icon name={pinnedNow(target) ? 'pin-off' : 'pin'} size={16} />{t(pinnedNow(target) ? 'unpin_msg' : 'pin_msg')}
+		</button>
+		{#if target.text}<button type="button" role="menuitem" onclick={() => void copyGroupMessage(target)}><Icon name="copy" size={16} />{t('msg_copy')}</button>{/if}
+		{#if target.mine && activeGroup && canWrite(activeGroup)}<button type="button" role="menuitem" onclick={() => startGroupEdit(target)}><Icon name="edit" size={16} />{t('edit_msg')}</button>{/if}
+		<button type="button" role="menuitem" class="danger" onclick={() => void groupDeleteMe(target)}><Icon name="trash" size={16} />{t('delete_msg_me')}</button>
+		{#if target.mine}<button type="button" role="menuitem" class="danger" onclick={() => void groupDeleteAll(target)}><Icon name="trash" size={16} />{t('delete_msg_all')}</button>{/if}
+	</div>
+{/if}
+
+{#if newMenu}
+	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+	<div class="newmenu-backdrop" onclick={() => (newMenu = false)}></div>
+	<div class="menu newmenu" role="menu" data-new-menu>
+		<button type="button" role="menuitem" data-new-chat onclick={newChat}><Icon name="user-plus" size={18} />{t('new_conversation')}</button>
+		<button type="button" role="menuitem" data-new-group onclick={newGroup}><Icon name="users" size={18} />{t('g_new')}</button>
+	</div>
+{/if}
+
+{#if gCreateOpen}
+	<GroupCreate contacts={pickableContacts(contacts, blocked).map((c) => ({ address: c.address, name: c.name }))} {avSrc} oncreate={createGroup} onclose={() => (gCreateOpen = false)} />
+{/if}
+
+{#if gSettingsOpen && activeGroup && identity && gc}
+	{@const gr = activeGroup}
+	{@const gid = gr.state.id}
+	<GroupSettings
+		rec={gr}
+		me={identity.address}
+		nameOf={gName}
+		{avSrc}
+		muted={!!gr.muted}
+		addable={pickableContacts(contacts, blocked).filter((c) => !gr.state.members.includes(c.address) && !gr.state.banned.includes(c.address)).map((c) => ({ address: c.address, name: c.name }))}
+		onrename={async (name) => void (await gc?.engine.rename(gid, name))}
+		onmember={groupMemberAction}
+		onunban={async (a) => void (await gc?.engine.unban(gid, a))}
+		oninvite={async (a) => {
+			try {
+				await gc?.engine.invite(gid, a);
+			} catch (e) {
+				notice = t('g_err', { code: e instanceof GroupError ? e.code : 'error' });
+			}
+		}}
+		onmute={() => toggleMute(gid)}
+		onleave={groupLeave}
+		ondelete={groupDelete}
+		onclose={() => (gSettingsOpen = false)}
+	/>
 {/if}
 
 {#if viewer}
@@ -5084,6 +5806,10 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		font-weight: 700;
 		line-height: 1.2rem;
 		text-align: center;
+	}
+	.badge.at {
+		padding: 0 0.3rem;
+		background: var(--accent-2);
 	}
 	.badge.quiet {
 		background: var(--panel-2);
@@ -6900,5 +7626,81 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	.shell:not(.desktop) .req-row .avatar {
 		width: 2rem;
 		height: 2rem;
+	}
+
+	/* Groups */
+	.sysline {
+		align-self: center;
+		max-width: 90%;
+		padding: 0.15rem 0.7rem;
+		border-radius: 999px;
+		background: var(--panel);
+		color: var(--muted);
+		font-size: var(--fs-cap);
+		line-height: 1.5;
+		text-align: center;
+		overflow-wrap: anywhere;
+	}
+	.sender {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin: 0 0 0.2rem;
+		min-width: 0;
+	}
+	.sender img {
+		flex: none;
+		width: 20px;
+		height: 20px;
+		border-radius: 50%;
+		object-fit: cover;
+	}
+	.sender strong {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-size: var(--fs-small);
+	}
+	.bubble.mentioned:not(.mine) {
+		border-color: var(--accent-2);
+	}
+	.mention {
+		padding: 0 0.25em;
+		border-radius: 4px;
+		background: color-mix(in srgb, var(--accent-2) 22%, transparent);
+		color: var(--accent-2);
+		font-weight: 600;
+	}
+	.mention.me {
+		background: color-mix(in srgb, var(--accent-2) 40%, transparent);
+		color: var(--heading);
+	}
+	.gwho {
+		cursor: pointer;
+	}
+	.gfail {
+		display: inline-grid;
+		vertical-align: middle;
+		color: var(--danger);
+	}
+	.newmenu-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 40;
+	}
+	.newmenu {
+		position: fixed;
+		z-index: 41;
+		top: 3.6rem;
+		left: 0.75rem;
+		min-width: 12rem;
+	}
+	@media (hover: none), (pointer: coarse) {
+		.newmenu {
+			top: auto;
+			left: auto;
+			right: 1rem;
+			bottom: calc(5rem + env(safe-area-inset-bottom));
+		}
 	}
 </style>
