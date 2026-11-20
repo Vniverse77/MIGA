@@ -329,7 +329,7 @@
 			<div class="pin">
 				<div class="wrap head">
 					<h2>{t('lp_how_title')}</h2>
-					<p class="section-lead">{t('lp_how_lead')}</p>
+					<p class="section-lead"><span class="lead-scroll">{t('lp_how_lead')}</span><span class="lead-steps">{t('lp_how_lead_short')}</span></p>
 				</div>
 				<div class="wrap caps">
 					{#each howSteps as [title, body], i (i)}
@@ -646,6 +646,9 @@
 		margin: 0 0 2rem;
 		max-width: 38rem;
 		color: var(--muted);
+	}
+	.lead-steps {
+		display: none;
 	}
 	.tag {
 		vertical-align: middle;
@@ -1074,6 +1077,12 @@
 	@media (max-width: 820px) {
 		.wrap {
 			padding: 0 1rem;
+		}
+		.lead-scroll {
+			display: none;
+		}
+		.lead-steps {
+			display: inline;
 		}
 		.hero {
 			grid-template-columns: 1fr;

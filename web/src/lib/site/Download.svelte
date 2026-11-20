@@ -127,7 +127,6 @@
 							<h2>Windows</h2>
 							<span class="arch">{t('dl_soon')}</span>
 						</header>
-						<span class="btn disabled" aria-disabled="true">{t('dl_soon')}</span>
 					</article>
 				{/if}
 			{/each}
@@ -347,11 +346,6 @@
 	.btn.outline:hover {
 		background: var(--accent);
 		color: var(--accent-ink);
-	}
-	.btn.disabled {
-		border-color: var(--line-strong);
-		color: var(--muted);
-		cursor: not-allowed;
 	}
 	.ext {
 		opacity: 0.75;
