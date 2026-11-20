@@ -2,20 +2,6 @@
 	import { VERSION_LABEL } from '../version';
 	import SiteHeader from './SiteHeader.svelte';
 	import { t } from '../i18n.svelte';
-	import { URLS, YAY, FLATPAK_CMD } from './release';
-
-	const FLATPAK_URL = URLS.flatpak;
-	const APK_URL = URLS.apk;
-	let copied = $state('');
-	async function copy(text: string) {
-		try {
-			await navigator.clipboard.writeText(text);
-			copied = text;
-			setTimeout(() => (copied = ''), 1800);
-		} catch {
-			/* clipboard blocked: the command stays selectable */
-		}
-	}
 </script>
 
 <svelte:head>
@@ -73,52 +59,12 @@
 		</div>
 	</section>
 
-	<section class="wrap" id="downloads">
+	<section class="wrap dl-cta" id="downloads">
 		<h2>{t('dl_title')} <span class="ver">{VERSION_LABEL}</span></h2>
-		<p class="section-lead">{t('dl_lead')} <a href="/download/">{t('dp_all_downloads')} →</a></p>
-		<div class="grid">
-			<article class="card dl">
-				<h3>{t('dl_web_title')}</h3>
-				<p>{t('dl_web_text')}</p>
-				<div class="dl-actions">
-					<a class="btn primary" href="/app/">{t('dl_web_btn')}</a>
-				</div>
-			</article>
-			<article class="card dl">
-				<h3>{t('dl_desktop_title')}</h3>
-				<p>{t('dl_arch')}</p>
-				<div class="cmd">
-					<code>{YAY}</code>
-					<button type="button" class="copy" onclick={() => copy(YAY)}>
-						{copied === YAY ? t('dl_copied') : t('dl_copy')}
-					</button>
-				</div>
-				<a class="txt" href="https://aur.archlinux.org/packages/miga-messenger">{t('dl_aur_link')} →</a>
-				<p class="gap">{t('dl_flatpak')}</p>
-				<a class="txt" href={FLATPAK_URL}>{t('dl_flatpak_link')} →</a>
-				<p class="note">{t('dl_flatpak_then')}</p>
-				<div class="cmd">
-					<code>{FLATPAK_CMD}</code>
-					<button type="button" class="copy" onclick={() => copy(FLATPAK_CMD)}>
-						{copied === FLATPAK_CMD ? t('dl_copied') : t('dl_copy')}
-					</button>
-				</div>
-				<p class="gap">{t('dl_deb')}</p>
-				<a class="txt" href="https://github.com/Vniverse77/MIGA/releases/latest">{t('dl_deb_link')} →</a>
-				<p class="note">{t('dl_desktop_note')}</p>
-			</article>
-			<article class="card dl">
-				<h3>{t('dl_android_title')} <span class="ver">beta</span></h3>
-				<p>{t('dl_android_text')}</p>
-				<div class="dl-actions">
-					<a class="btn primary" href={APK_URL} download>{t('dl_android_btn')}</a>
-				</div>
-				<p class="note">{t('dl_android_beta')}</p>
-				<p class="note">{t('dl_android_note')}</p>
-			</article>
-			<article class="card dl dl-soon">
-				<h3>Windows <span class="soon" aria-disabled="true">{t('dl_soon')}</span></h3>
-			</article>
+		<p class="section-lead">{t('dl_lead')}</p>
+		<div class="cta">
+			<a class="btn primary" href="/download/">{t('dp_nav')}<kbd aria-hidden="true">D</kbd></a>
+			<a class="btn outline" href="/app/">{t('dl_web_btn')}</a>
 		</div>
 	</section>
 
@@ -326,97 +272,32 @@
 		color: var(--link);
 	}
 
-	/* Downloads */
+	/* Downloads CTA */
 	#downloads {
 		scroll-margin-top: 3.5rem;
+	}
+	.dl-cta .section-lead {
+		margin-bottom: 1.25rem;
 	}
 	h2 .ver {
 		vertical-align: middle;
 		font-size: 0.75rem;
 		font-weight: 500;
 	}
-	.dl {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		min-width: 0;
-	}
-	.dl .gap {
-		margin-top: 1.1rem;
-	}
-	.dl .note {
-		margin-top: auto;
-		padding-top: 1rem;
-		font-size: 0.8rem;
-	}
-	.dl-actions {
-		margin: 1rem 0 0;
-	}
-	.cmd {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		width: 100%;
-		margin: 0.6rem 0 0.4rem;
-		padding: 0 0 0 0.75rem;
-		border: 0.5px solid var(--line-strong);
-		border-radius: var(--radius);
-		background: var(--bg);
-	}
-	.cmd code {
-		flex: 1;
-		min-width: 0;
-		overflow-x: auto;
-		white-space: nowrap;
-		color: var(--text);
-		font-size: 0.85rem;
-	}
-	.copy {
-		min-width: 5.5rem;
-		min-height: 2.75rem;
-		padding: 0 0.8rem;
-		border: 0;
-		border-left: 0.5px solid var(--line-strong);
-		border-radius: 0 var(--radius) var(--radius) 0;
-		background: transparent;
-		color: var(--link);
-		font: inherit;
-		font-size: 0.85rem;
-		cursor: pointer;
-	}
-	.copy:hover {
-		background: var(--accent);
-		color: var(--accent-ink);
-	}
-	.txt {
+	kbd {
 		display: inline-flex;
 		align-items: center;
-		min-height: 2.75rem;
-		color: var(--link);
-		font-size: 0.9rem;
-		text-decoration: none;
-	}
-	.txt:hover {
-		text-decoration: underline;
-	}
-	.dl-soon {
-		pointer-events: none;
-		user-select: none;
-	}
-	.dl-soon h3 {
-		color: var(--muted);
-	}
-	.soon {
-		display: inline-block;
-		vertical-align: middle;
-		margin-left: 0.4rem;
-		padding: 0.1rem 0.5rem;
-		border: 0.5px solid var(--line-strong);
+		justify-content: center;
+		min-width: 1.35rem;
+		height: 1.35rem;
+		margin-left: 0.5rem;
+		padding: 0 0.3rem;
+		border: 0.5px solid currentColor;
 		border-radius: var(--radius);
-		color: var(--muted);
+		font: inherit;
 		font-size: 0.7rem;
 		font-weight: 500;
-		letter-spacing: 0.02em;
+		line-height: 1;
 	}
 
 	/* Footer */
