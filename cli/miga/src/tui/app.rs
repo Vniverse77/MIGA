@@ -9,6 +9,12 @@ use miga_core::identity::is_address;
 use miga_core::js::{js_trim, utf16_len};
 use miga_core::payload::{Reply, MAX_TEXT};
 use ratatui::layout::Rect;
+
+/// Every `:command` the composer and the command popup understand.
+const COMMANDS: &[&str] = &[
+    "q", "quit", "help", "h", "address", "bell", "add", "link", "devices", "search", "gsearch", "qr", "attach", "mute",
+    "unmute", "block", "unblock", "verify", "unverify", "safety", "delete",
+];
 use serde_json::{json, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -691,7 +697,7 @@ impl App {
             return vec![];
         }
         let Some(c) = self.chat() else { return vec![] };
-        if c.editing.is_some() || c.composer.text().starts_with('/') {
+        if c.editing.is_some() || c.composer.text().starts_with('/') || c.composer.text().starts_with(':') {
             return vec![];
         }
         let (text, peer) = (c.composer.text().to_string(), c.address.clone());
@@ -952,6 +958,22 @@ impl App {
             return vec![];
         }
         let peer = chat.address.clone();
+        // A `:command` typed in the composer runs the command and is never sent; `::text` sends ":text".
+        let mut text = text;
+        if chat.editing.is_none() && !text.contains('\n') {
+            if let Some(rest) = text.strip_prefix("::") {
+                text = format!(":{rest}");
+            } else if let Some(body) = text.strip_prefix(':') {
+                let name = body.split_whitespace().next().unwrap_or_default();
+                if !name.is_empty() && !COMMANDS.contains(&name) {
+                    self.say(format!("Unknown command :{name}, use ::text to send a literal colon"));
+                    return vec![];
+                }
+                self.chat_mut().expect("chat").composer.take();
+                self.offset = 0;
+                return self.run_command(&text);
+            }
+        }
         if let Some(rest) = text.strip_prefix("/attach ") {
             let (path, caption) = match rest.split_once(" | ") {
                 Some((p, c)) => (p.trim(), c.trim()),
@@ -1314,7 +1336,7 @@ impl App {
                     _ => self.say("Usage: :delete chat | :delete contact"),
                 }
             }
-            other => self.say(format!("Unknown command: {other}")),
+            other => self.say(format!("Unknown command :{other}, use ::text to send a literal colon")),
         }
         vec![]
     }
@@ -1830,5 +1852,80 @@ pub mod tests {
         assert!(a.narrow());
         a.size = (100, 24);
         assert!(!a.narrow());
+    }
+
+    fn composer_line(a: &mut App, line: &str) -> Vec<Intent> {
+        a.set_composer(line);
+        a.handle_key(key(KeyCode::Enter))
+    }
+
+    #[test]
+    fn composer_colon_commands_run_and_are_never_sent() {
+        for cmd in [
+            ":link",
+            ":devices",
+            ":qr",
+            ":address",
+            ":help",
+            ":h",
+            ":search hello",
+            ":gsearch hello",
+            ":mute",
+            ":unmute",
+            ":block",
+            ":unblock",
+            ":verify",
+            ":unverify",
+            ":safety",
+            ":delete chat",
+            ":delete contact",
+            ":bell off",
+            ":attach /tmp/x.png | cap",
+            ":add",
+            ":quit",
+            ":q",
+        ] {
+            let mut a = two();
+            let out = composer_line(&mut a, cmd);
+            assert!(!out.iter().any(|i| matches!(i, Intent::Send { .. })), "{cmd} was sent: {out:?}");
+            assert!(a.chat().unwrap().composer.is_empty(), "{cmd} left in the composer");
+            assert!(!a.notice.as_ref().is_some_and(|n| n.0.starts_with("Unknown")), "{cmd} not recognised");
+        }
+        let mut a = two();
+        assert_eq!(composer_line(&mut a, ":link"), vec![Intent::AddDevice]);
+        let mut a = two();
+        assert_eq!(composer_line(&mut a, ":qr"), vec![Intent::ShowQr(QrKind::Address)]);
+        let mut a = two();
+        composer_line(&mut a, ":safety");
+        assert!(matches!(a.popup, Popup::Safety { .. }));
+    }
+
+    #[test]
+    fn composer_unknown_colon_command_is_kept_and_not_sent() {
+        let mut a = two();
+        let out = composer_line(&mut a, ":linkk");
+        assert!(out.is_empty());
+        assert_eq!(a.composer_text(), ":linkk");
+        assert!(a.notice.as_ref().unwrap().0.contains("::text"));
+    }
+
+    #[test]
+    fn composer_double_colon_sends_a_literal_colon() {
+        let mut a = two();
+        let out = composer_line(&mut a, "::link");
+        assert_eq!(out, vec![Intent::Send { peer: BORIS.into(), text: ":link".into(), reply: None }]);
+        let mut b = two();
+        let out = composer_line(&mut b, "::: x");
+        assert!(matches!(&out[0], Intent::Send { text, .. } if text == ":: x"));
+    }
+
+    #[test]
+    fn colon_text_inside_a_message_is_still_sent() {
+        let mut a = two();
+        let out = composer_line(&mut a, "note: link");
+        assert!(matches!(&out[0], Intent::Send { .. }));
+        let mut b = two();
+        let out = composer_line(&mut b, ":link\nmore");
+        assert!(matches!(&out[0], Intent::Send { .. }));
     }
 }

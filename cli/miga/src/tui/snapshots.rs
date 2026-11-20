@@ -285,3 +285,23 @@ fn confirm_delete_chat_command() {
     let intents = a.handle_key(key(KeyCode::Char('y')));
     assert!(matches!(intents.first(), Some(super::app::Intent::DeleteChat { .. })));
 }
+
+#[test]
+fn composer_colon_command_queues_nothing() {
+    let mut a;
+    for cmd in [":link", ":qr", ":address", ":safety", ":devices", ":search x", ":mute", ":block", ":attach /x.png"] {
+        a = sample();
+        a.focus = Focus::Composer;
+        a.set_composer(cmd);
+        let intents = a.handle_key(key(KeyCode::Enter));
+        assert!(!intents.iter().any(|i| matches!(i, super::app::Intent::Send { .. })), "{cmd}: {intents:?}");
+        assert!(a.composer_text().is_empty(), "{cmd}");
+        let screen = render(&mut a, 100, 24);
+        assert!(!screen.contains(&format!("You: {cmd}")), "{cmd} shows as a sent message\n{screen}");
+    }
+    a = sample();
+    a.focus = Focus::Composer;
+    a.set_composer(":nope");
+    assert!(a.handle_key(key(KeyCode::Enter)).is_empty());
+    check("composer_unknown_command", &render(&mut a, 100, 24));
+}
