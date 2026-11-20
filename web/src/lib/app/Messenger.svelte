@@ -784,6 +784,10 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				if (!plain) return true;
 				// Live typing is ephemeral; one that still came as a normal message (old relay) is dropped.
 				if (plain.live !== undefined || plain.typing !== undefined) return true;
+				// Group payloads (`group` / `g`) are handled by GroupEngine (docs/PROTOCOL.md, "Groups (v1)"); the UI
+				// that owns an engine arrives in phase 2. Until then they are acknowledged and dropped here, so
+				// they can never become an empty 1:1 message from a stranger.
+				if (plain.group || plain.g) return true;
 				// A delete request: only messages that came from this very sender can go.
 				if (plain.del) {
 					const items = plain.del.map((id) => ({ id, mine: false }));

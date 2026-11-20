@@ -9,9 +9,11 @@
 //   meta      key name; small values such as the blocked list and the migration marker.
 //   media     key id; local copies of sent and received attachments (P6).
 //   gifs      key id; the user's own GIF library ("My GIFs"), device only (v2).
+//   groups    key gid; group records (v3). gmessages key [gid, id]: group messages. gout key wid: copies of group
+//             payloads still to be delivered. Kept apart from `messages`, so the 1:1 chat code never sees them.
 
 const DB_NAME = 'miga';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export type MessageRecord = { chat: string; id: string; i: number; ts: number } & Record<string, unknown>;
 
@@ -30,6 +32,9 @@ export function openDb(): Promise<IDBDatabase> {
 			if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
 			if (!db.objectStoreNames.contains('media')) db.createObjectStore('media', { keyPath: 'id' });
 			if (!db.objectStoreNames.contains('gifs')) db.createObjectStore('gifs', { keyPath: 'id' });
+			if (!db.objectStoreNames.contains('groups')) db.createObjectStore('groups', { keyPath: 'gid' });
+			if (!db.objectStoreNames.contains('gmessages')) db.createObjectStore('gmessages', { keyPath: ['gid', 'id'] });
+			if (!db.objectStoreNames.contains('gout')) db.createObjectStore('gout', { keyPath: 'wid' });
 		};
 		req.onsuccess = () => resolve(req.result);
 		req.onerror = () => reject(req.error);
