@@ -1,6 +1,6 @@
 // Current release, used by the landing page and /download. scripts/release-build.sh rewrites these
 // two constants on every version bump; every download link below is derived from them.
-export const RELEASE_VERSION = '0.9.1';
+export const RELEASE_VERSION = '0.9.2';
 export const RELEASE_DATE = '2026-11-20';
 
 const REPO = 'https://github.com/Vniverse77/MIGA';
