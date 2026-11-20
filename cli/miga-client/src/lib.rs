@@ -1,7 +1,9 @@
 //! MIGA relay client (WebSocket, rustls) and a simple file store.
 #![forbid(unsafe_code)]
 
+pub mod devices;
 pub mod engine;
+pub mod hub;
 pub mod relay;
 pub mod store;
 

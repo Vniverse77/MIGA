@@ -102,6 +102,16 @@ impl Relay {
         self.write(json!({"t": "send", "to": to, "id": id, "body": body})).await
     }
 
+    /// Live typing frame: ephemeral, no id, never queued by the relay.
+    pub async fn send_eph(&mut self, to: &str, body: &str) -> Result<()> {
+        self.write(json!({"t": "send", "to": to, "eph": true, "body": body})).await
+    }
+
+    /// Asks the relay to drop a queued message we sent (after "delete for everyone").
+    pub async fn unsend(&mut self, to: &str, id: &str) -> Result<()> {
+        self.write(json!({"t": "unsend", "to": to, "id": id})).await
+    }
+
     pub async fn ack(&mut self, from: &str, id: &str) -> Result<()> {
         self.write(json!({"t": "ack", "from": from, "id": id})).await
     }

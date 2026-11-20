@@ -1,4 +1,5 @@
 //! Receive pipeline (ENGINE.md section 9) and send helpers on top of the store.
+use crate::devices;
 use crate::store::Store;
 use crate::{now_ms, Error, Result};
 use miga_core::crypto::pair_key;
@@ -8,6 +9,7 @@ use miga_core::payload::{
     apply_edit, clean_reply, decrypt, encrypt, encrypt_delete, encrypt_edit, encrypt_receipt, seal_json_with_nonce,
     text_json, Reply, MAX_TEXT,
 };
+use miga_core::sync::{Tomb, TombKind};
 use serde_json::{json, Value};
 
 /// What the caller should do after a `msg` frame was processed.
@@ -21,6 +23,8 @@ pub struct Handled {
     pub receipt: Option<String>,
     /// Other things worth telling the user (edit, delete, receipt).
     pub notes: Vec<String>,
+    /// Sync messages for the other devices (`None` = all of them).
+    pub forward: Vec<(Option<String>, Value)>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -53,6 +57,9 @@ pub fn handle_incoming(
     relay_ts: f64,
 ) -> Result<Handled> {
     let mut out = Handled { ack: true, ..Handled::default() };
+    if store.addresses("blocked").iter().any(|b| b == from) {
+        return Ok(out);
+    }
     let Some(plain) = decrypt(me, from, body, now_ms() as f64) else { return Ok(out) };
     if plain.live.is_some() {
         return Ok(out);
@@ -65,18 +72,34 @@ pub fn handle_incoming(
             store.save_chat(from, &list)?;
             out.notes.push(format!("{} deleted {} message(s)", label(store, from), before - list.len()));
         }
+        let now = now_ms();
+        let items: Vec<Tomb> = plain
+            .del
+            .iter()
+            .map(|id| Tomb { chat: from.into(), kind: TombKind::Message, id: Some(id.clone()), mine: false, ts: now })
+            .collect();
+        out.forward.extend(devices::remember_deletes(store, &items)?);
         return Ok(out);
     }
     if let Some(edit) = &plain.edit {
         let mut list = store.chat(from)?;
         if apply_edit(&mut list, &edit.id, false, &edit.text, plain.ts, now_ms() as f64) {
             store.save_chat(from, &list)?;
+            out.forward.push((
+                None,
+                json!({"k": "edit", "peer": from, "id": edit.id, "mine": false, "text": edit.text, "ts": plain.ts}),
+            ));
             out.notes.push(format!("{} edited a message: {}", label(store, from), edit.text));
         }
         return Ok(out);
     }
     if !plain.ack.is_empty() || !plain.seen.is_empty() {
         for (ids, level) in [(&plain.ack, "delivered"), (&plain.seen, "read")] {
+            // Like the app: with read receipts off nobody else's are shown either.
+            if level == "read" && !store.receipts_on() {
+                continue;
+            }
+            let mut changed_ids = Vec::new();
             for mid in ids.iter() {
                 let rank = |d: Option<&str>| match d {
                     Some("delivered") => 1,
@@ -92,25 +115,25 @@ pub fn handle_incoming(
                     }
                 })?;
                 if changed {
+                    changed_ids.push(mid.clone());
                     out.notes.push(format!("{} {level} message {}", label(store, from), &mid[..mid.len().min(8)]));
                 }
+            }
+            if !changed_ids.is_empty() {
+                out.forward.push((None, json!({"k": "st", "peer": from, "ids": changed_ids, "d": level})));
             }
         }
         return Ok(out);
     }
-    // An ordinary message. Unknown senders become contacts.
-    let name = peer_name(plain.name.as_deref(), from);
-    let placeholder = format!("{}...", &from[..8]);
-    match store.contacts()?.iter().find(|c| c.address == from) {
-        None => {
-            store.upsert_contact(from, &name)?;
-        }
-        // Like the web app: a shared name replaces a placeholder, never a name the user typed.
-        Some(c) if c.name == placeholder && name != placeholder => {
-            store.upsert_contact(from, &name)?;
-        }
-        Some(_) => {}
+    // Deleted earlier (a re-delivery after "delete for me"): acknowledged and dropped.
+    let all_tombs = devices::tombs(store);
+    if miga_core::sync::tomb_filter(&all_tombs)(from, id, false, relay_ts) {
+        return Ok(out);
     }
+    devices::revive_contact(store, from, relay_ts)?;
+    // An ordinary message. Unknown senders become contacts; a shared name never replaces a typed one.
+    let _ = peer_name;
+    devices::ensure_contact(store, from, plain.name.as_deref())?;
     let ts = if relay_ts.is_finite() { relay_ts } else { f64::NAN };
     let mut message = json!({
         "id": id, "mine": false, "text": miga_core::js::slice_units_lossy(&plain.text, MAX_TEXT), "ts": miga_core::js::num_value(ts),
@@ -122,7 +145,10 @@ pub fn handle_incoming(
     if let Some(a) = &plain.att {
         message["att"] = a.to_value();
     }
-    let added = store.merge(from, &[message])?;
+    let added = store.merge(from, std::slice::from_ref(&message))?;
+    if added {
+        out.forward.push((None, json!({"k": "msg", "peer": from, "message": message, "name": plain.name})));
+    }
     let contact_name = label(store, from);
     out.shown = added.then(|| Shown {
         from: from.into(),

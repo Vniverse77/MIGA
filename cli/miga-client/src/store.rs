@@ -22,6 +22,10 @@ pub struct Store {
 pub struct Contact {
     pub address: String,
     pub name: String,
+    /// The user typed this name (a shared name never replaces it).
+    pub custom: bool,
+    /// The safety number the user marked as verified.
+    pub verified: Option<String>,
 }
 
 fn xdg(var: &str, fallback: &str) -> Result<PathBuf> {
@@ -140,6 +144,8 @@ impl Store {
                         Some(Contact {
                             address: c.get("address")?.as_str()?.into(),
                             name: c.get("name")?.as_str()?.into(),
+                            custom: c.get("custom").and_then(Value::as_bool).unwrap_or(false),
+                            verified: c.get("verified").and_then(Value::as_str).map(str::to_string),
                         })
                     })
                     .collect()
@@ -147,9 +153,21 @@ impl Store {
             .unwrap_or_default())
     }
 
-    fn save_contacts(&self, list: &[Contact]) -> Result<()> {
+    pub fn save_contacts(&self, list: &[Contact]) -> Result<()> {
         private_dir(&self.data)?;
-        let v: Vec<Value> = list.iter().map(|c| json!({"address": c.address, "name": c.name})).collect();
+        let v: Vec<Value> = list
+            .iter()
+            .map(|c| {
+                let mut v = json!({"address": c.address, "name": c.name});
+                if c.custom {
+                    v["custom"] = true.into();
+                }
+                if let Some(n) = &c.verified {
+                    v["verified"] = n.clone().into();
+                }
+                v
+            })
+            .collect();
         write_atomic(
             &self.data.join("contacts.json"),
             serde_json::to_string_pretty(&v).expect("json").as_bytes(),
@@ -166,7 +184,7 @@ impl Store {
                 false
             }
             None => {
-                list.push(Contact { address: address.into(), name: name.into() });
+                list.push(Contact { address: address.into(), name: name.into(), custom: false, verified: None });
                 true
             }
         };
@@ -261,5 +279,132 @@ impl Store {
     }
 }
 
+impl Store {
+    // ---- account, device and sync metadata ---------------------------------------------------
+
+    fn device_path(&self) -> PathBuf {
+        self.config.join("device.json")
+    }
+
+    /// This device's own key (never shared); made on first use.
+    pub fn device(&self) -> Result<Identity> {
+        if let Some(v) = read_json(&self.device_path())? {
+            return Ok(Identity::from_seed_hex(v.get("seed").and_then(Value::as_str).unwrap_or_default())?);
+        }
+        private_dir(&self.config)?;
+        let id = Identity::generate()?;
+        write_atomic(&self.device_path(), json!({"seed": id.seed_hex()}).to_string().as_bytes(), 0o600)?;
+        Ok(id)
+    }
+
+    /// Makes this profile a copy of an existing account (device linking). Refuses to overwrite.
+    pub fn adopt_account(&self, seed_hex: &str, name: Option<&str>) -> Result<Identity> {
+        if self.identity_path().exists() {
+            return Err(Error::Invalid("an identity already exists here; refusing to overwrite it".into()));
+        }
+        let id = Identity::from_seed_hex(seed_hex)?;
+        private_dir(&self.config)?;
+        let mut v = json!({"seed": id.seed_hex()});
+        if let Some(n) = name.filter(|n| !n.is_empty()) {
+            v["name"] = n.into();
+        }
+        write_atomic(&self.identity_path(), v.to_string().as_bytes(), 0o600)?;
+        Ok(id)
+    }
+
+    pub fn has_identity(&self) -> bool {
+        self.identity_path().exists()
+    }
+
+    /// Changes the shared display name (empty clears it).
+    pub fn set_profile_name(&self, name: &str) -> Result<()> {
+        let mut v = read_json(&self.identity_path())?.ok_or_else(|| Error::Invalid("no identity yet".into()))?;
+        if name.is_empty() {
+            v.as_object_mut().map(|o| o.remove("name"));
+        } else {
+            v["name"] = name.into();
+        }
+        write_atomic(&self.identity_path(), v.to_string().as_bytes(), 0o600)
+    }
+
+    pub fn meta(&self, key: &str) -> Value {
+        read_json(&self.data.join("meta.json")).ok().flatten().and_then(|v| v.get(key).cloned()).unwrap_or(Value::Null)
+    }
+
+    pub fn set_meta(&self, key: &str, value: Value) -> Result<()> {
+        private_dir(&self.data)?;
+        let path = self.data.join("meta.json");
+        let mut all = read_json(&path)?.filter(Value::is_object).unwrap_or_else(|| json!({}));
+        if value.is_null() {
+            all.as_object_mut().map(|o| o.remove(key));
+        } else {
+            all[key] = value;
+        }
+        write_atomic(&path, all.to_string().as_bytes(), 0o600)
+    }
+
+    pub fn meta_list(&self, key: &str) -> Vec<Value> {
+        self.meta(key).as_array().cloned().unwrap_or_default()
+    }
+
+    pub fn addresses(&self, key: &str) -> Vec<String> {
+        self.meta_list(key).iter().filter_map(|v| v.as_str().map(str::to_string)).collect()
+    }
+
+    pub fn receipts_on(&self) -> bool {
+        self.meta("receipts").as_bool().unwrap_or(true)
+    }
+
+    /// Every stored conversation, keyed by peer address.
+    pub fn all_chats(&self) -> serde_json::Map<String, Value> {
+        let mut out = serde_json::Map::new();
+        if let Ok(dir) = fs::read_dir(self.data.join("chats")) {
+            for e in dir.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if let Some(peer) = name.strip_suffix(".json") {
+                    if let Ok(Some(Value::Array(list))) = read_json(&e.path()) {
+                        if !list.is_empty() {
+                            out.insert(peer.to_string(), Value::Array(list));
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    pub fn delete_chat(&self, peer: &str) -> Result<()> {
+        match fs::remove_file(self.chat_path(peer)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+            _ => Ok(()),
+        }
+    }
+
+    pub fn remove_contact(&self, address: &str) -> Result<()> {
+        let list: Vec<Contact> = self.contacts()?.into_iter().filter(|c| c.address != address).collect();
+        self.save_contacts(&list)
+    }
+
+    /// Directory for received files.
+    pub fn files_dir(&self) -> PathBuf {
+        self.data.join("files")
+    }
+
+    pub fn data_dir(&self) -> &Path {
+        &self.data
+    }
+
+    pub fn config_dir(&self) -> &Path {
+        &self.config
+    }
+}
+
 /// Longest message the CLI sends (UTF-16 units, like the web client).
 pub const MAX_SEND: usize = MAX_TEXT;
+
+impl Store {
+    /// A second handle on the same directories (the hub task owns one).
+    pub fn open_like(other: &Store) -> Store {
+        Store { config: other.config.clone(), data: other.data.clone() }
+    }
+}

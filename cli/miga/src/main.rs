@@ -1,20 +1,16 @@
 //! `miga`: headless MIGA client. Subcommands: init, address, add, contacts, send, listen, log.
 #![forbid(unsafe_code)]
 
+mod headless;
+mod qr;
 mod tui;
 
 use clap::{Parser, Subcommand};
-use miga_client::engine::{self, Handled};
-use miga_client::relay::{Event, Relay};
+use miga_client::engine;
 use miga_client::store::{Contact, Store};
-use miga_client::{now_ms, Error, Result, DEFAULT_RELAY};
+use miga_client::{Error, Result, DEFAULT_RELAY};
 use miga_core::crypto::{group_safety, safety_number};
 use miga_core::identity::Identity;
-use std::collections::BTreeMap;
-use std::io::IsTerminal;
-use std::time::{Duration, Instant};
-use tokio::io::AsyncReadExt;
-use tokio::time::{interval, sleep, timeout};
 
 #[derive(Parser)]
 #[command(name = "miga", version, about = "MIGA terminal client (protocol v0)")]
@@ -59,6 +55,19 @@ enum Command {
     },
     /// Show the stored conversation with a contact
     Log { contact: String },
+    /// Show a link code and QR code so another device (the phone or the web app) can join this account
+    Link {
+        /// Keep serving the history copy this many seconds after the device joined
+        #[arg(long, default_value_t = 120)]
+        stay: u64,
+    },
+    /// Join an existing account with the link code shown by another device
+    Join { code: String },
+    /// List the devices of this account (or remove one with --remove)
+    Devices {
+        #[arg(long)]
+        remove: Option<String>,
+    },
 }
 
 fn main() {
@@ -106,16 +115,19 @@ async fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Command::Contacts => {
-            for Contact { address, name } in store.contacts()? {
+            for Contact { address, name, .. } in store.contacts()? {
                 println!("{name}\t{address}");
             }
             Ok(())
         }
+        Command::Join { code } => headless::join(&store, &cli.relay, &code).await,
+        Command::Link { stay } => headless::link(&store, &cli.relay, stay).await,
+        Command::Devices { remove } => headless::devices(&store, &cli.relay, remove).await,
         Command::Send { .. } | Command::Listen { .. } if store.ui_running() => Err(Error::Invalid(
             "the miga chat UI is open for this profile; use it to send and receive (sending from another process while it runs arrives with a local socket in M3)".into(),
         )),
-        Command::Send { contact, text } => send(&store, &cli.relay, &contact, text).await,
-        Command::Listen { timeout, count } => listen(&store, &cli.relay, timeout, count).await,
+        Command::Send { contact, text } => headless::send(&store, &cli.relay, &contact, text).await,
+        Command::Listen { timeout, count } => headless::listen(&store, &cli.relay, timeout, count).await,
         Command::Log { contact } => {
             let peer = resolve(&store, &store.identity()?, &contact)?;
             for m in store.chat(&peer)? {
@@ -137,7 +149,7 @@ async fn run(cli: Cli) -> Result<()> {
 }
 
 /// A contact by name, address or unique prefix; a full valid address is added on the spot.
-fn resolve(store: &Store, me: &Identity, query: &str) -> Result<String> {
+pub(crate) fn resolve(store: &Store, me: &Identity, query: &str) -> Result<String> {
     if let Some(c) = store.find_contact(query)? {
         return Ok(c.address);
     }
@@ -147,154 +159,8 @@ fn resolve(store: &Store, me: &Identity, query: &str) -> Result<String> {
     }
 }
 
-async fn send(store: &Store, relay_url: &str, contact: &str, words: Vec<String>) -> Result<()> {
-    let me = store.identity()?;
-    let peer = resolve(store, &me, contact)?;
-    if store.find_contact(&peer)?.is_none() {
-        store.upsert_contact(&peer, &format!("{}...", &peer[..8]))?;
-    }
-    let mut text = words.join(" ");
-    if text.is_empty() && !std::io::stdin().is_terminal() {
-        tokio::io::stdin().read_to_string(&mut text).await?;
-    }
-    engine::check_peer(&me, &peer)?;
-    let out = engine::prepare_text(store, &me, &peer, &text)?;
-    let mut relay = match Relay::connect(relay_url, &me).await {
-        Ok(r) => r,
-        Err(e) => {
-            return Err(Error::Relay(format!(
-                "{e}; the message is saved as pending and goes out on the next `miga listen`"
-            )))
-        }
-    };
-    relay.send(&peer, &out.id, &out.body).await?;
-    let wait = async {
-        loop {
-            match relay.next().await? {
-                Event::Sent { id } if id == out.id => {
-                    store.update_own(&peer, &id, |m| m["state"] = "sent".into())?;
-                    return Ok(());
-                }
-                Event::Error { err, id: Some(id) } if id == out.id => {
-                    store.update_own(&peer, &id, |m| m["state"] = "failed".into())?;
-                    return Err(Error::Relay(format!("relay refused the message: {err}")));
-                }
-                Event::Error { err, id: None } if err != "bad_frame" => {
-                    return Err(Error::Relay(format!("relay error: {err}")))
-                }
-                _ => {}
-            }
-        }
-    };
-    timeout(Duration::from_secs(20), wait).await.map_err(|_| Error::Relay("no answer from the relay".into()))??;
-    relay.close().await;
-    println!("sent {}", &out.id[..8]);
-    Ok(())
-}
-
-async fn listen(store: &Store, relay_url: &str, limit: Option<u64>, count: Option<usize>) -> Result<()> {
-    let me = store.identity()?;
-    let deadline = limit.map(|s| Instant::now() + Duration::from_secs(s));
-    let mut received = 0usize;
-    let mut backoff = 1u64;
-    eprintln!("listening as {} on {relay_url}", me.address());
-    loop {
-        if deadline.is_some_and(|d| Instant::now() >= d) {
-            return Ok(());
-        }
-        let mut relay = match Relay::connect(relay_url, &me).await {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("miga: {e}; retrying in {backoff}s");
-                sleep(Duration::from_secs(backoff)).await;
-                backoff = (backoff * 2).min(30);
-                continue;
-            }
-        };
-        backoff = 1;
-        match session(store, &me, &mut relay, deadline, count, &mut received).await {
-            Ok(()) => return Ok(()),
-            Err(e) => eprintln!("miga: connection lost ({e}); reconnecting"),
-        }
-    }
-}
-
-/// Runs one connection. `Ok` means we are done (deadline or count reached).
-async fn session(
-    store: &Store,
-    me: &Identity,
-    relay: &mut Relay,
-    deadline: Option<Instant>,
-    count: Option<usize>,
-    received: &mut usize,
-) -> Result<()> {
-    // Resend anything that never got a `sent` (fresh nonce and ts, same id).
-    for c in store.contacts()? {
-        for m in store.pending(&c.address)? {
-            let out = engine::reseal_pending(store, me, &c.address, &m)?;
-            relay.send(&c.address, &out.id, &out.body).await?;
-        }
-    }
-    let mut owed: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let mut tick = interval(Duration::from_secs(1));
-    loop {
-        if count.is_some_and(|n| *received >= n) {
-            flush(me, relay, &mut owed).await?;
-            return Ok(());
-        }
-        let remaining = deadline.map(|d| d.saturating_duration_since(Instant::now()));
-        if remaining == Some(Duration::ZERO) {
-            flush(me, relay, &mut owed).await?;
-            return Ok(());
-        }
-        let wait = remaining.unwrap_or(Duration::from_secs(3600));
-        tokio::select! {
-            event = relay.next() => match event? {
-                Event::Msg { from, id, body, ts } => {
-                    let handled = engine::handle_incoming(store, me, &from, &id, &body, ts)?;
-                    // Durable first, then acknowledge.
-                    if handled.ack {
-                        relay.ack(&from, &id).await?;
-                    }
-                    report(&handled, received);
-                    if let Some(r) = handled.receipt {
-                        owed.entry(from).or_default().push(r);
-                    }
-                }
-                Event::Error { err, id } => eprintln!("miga: relay error {err}{}", id.map(|i| format!(" (message {})", &i[..i.len().min(8)])).unwrap_or_default()),
-                _ => {}
-            },
-            _ = tick.tick() => flush(me, relay, &mut owed).await?,
-            () = sleep(wait) => {}
-        }
-    }
-}
-
-/// Sends the delivery receipts that are owed, at most 50 ids per message.
-async fn flush(me: &Identity, relay: &mut Relay, owed: &mut BTreeMap<String, Vec<String>>) -> Result<()> {
-    for (peer, ids) in std::mem::take(owed) {
-        for chunk in ids.chunks(50) {
-            let body = engine::delivery_receipt(me, &peer, chunk)?;
-            relay.send(&peer, &miga_core::random_id()?, &body).await?;
-            sleep(Duration::from_millis(400)).await;
-        }
-    }
-    Ok(())
-}
-
-fn report(h: &Handled, received: &mut usize) {
-    if let Some(m) = &h.shown {
-        *received += 1;
-        let att = if m.has_attachment { " [attachment: not supported yet]" } else { "" };
-        println!("[{}] {}: {}{att}", stamp(m.ts), m.name, m.text);
-    }
-    for n in &h.notes {
-        println!("[{}] {n}", stamp(now_ms() as f64));
-    }
-}
-
 /// `YYYY-MM-DD HH:MM:SS` in UTC.
-fn stamp(ms: f64) -> String {
+pub(crate) fn stamp(ms: f64) -> String {
     if !ms.is_finite() {
         return "unknown time".into();
     }

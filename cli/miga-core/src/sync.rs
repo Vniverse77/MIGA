@@ -333,3 +333,8 @@ pub fn history_page(chats: &Map<String, Value>, after: Option<&Cursor>, max_byte
     }
     Page { chats: out, next: None, count }
 }
+
+/// Timestamp of the contact tombstone of `address`, or 0.
+pub fn contact_tomb_ts(tombs: &[Tomb], address: &str) -> i64 {
+    tombs.iter().filter(|t| t.kind == TombKind::Contact && t.chat == address).map(|t| t.ts).max().unwrap_or(0)
+}
