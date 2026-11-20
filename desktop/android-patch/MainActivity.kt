@@ -6,11 +6,15 @@ import android.graphics.ColorFilter
 import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.drawable.Drawable
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.util.Base64
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -38,6 +42,25 @@ class MainActivity : TauriActivity() {
     override fun getOpacity(): Int = PixelFormat.OPAQUE
   }
   private val backdrop = TwoTone()
+
+  // Saving a key backup: the system "create document" screen lets the person pick where the file goes, so the
+  // app needs no storage permission. The bytes wait here until a location is chosen; nothing is uploaded.
+  private var pendingSave: ByteArray? = null
+  private val createDocument = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+    val bytes = pendingSave
+    pendingSave = null
+    val uri: Uri? = result.data?.data
+    val answer = when {
+      bytes == null || result.resultCode != RESULT_OK || uri == null -> "cancelled"
+      else -> try {
+        contentResolver.openOutputStream(uri, "wt")?.use { it.write(bytes) } ?: throw java.io.IOException("no stream")
+        "saved"
+      } catch (e: Exception) {
+        "error"
+      }
+    }
+    web?.evaluateJavascript("window.__migaSaved && window.__migaSaved('$answer')", null)
+  }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
@@ -84,6 +107,25 @@ class MainActivity : TauriActivity() {
     @JavascriptInterface
     fun haptic() {
       runOnUiThread { window.decorView.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK) }
+    }
+
+    // platform.saveFile: base64 bytes of a file; the answer comes back through window.__migaSaved.
+    @JavascriptInterface
+    fun saveFile(name: String, base64: String, mime: String) {
+      runOnUiThread {
+        try {
+          pendingSave = Base64.decode(base64, Base64.DEFAULT)
+          val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mime
+            putExtra(Intent.EXTRA_TITLE, name)
+          }
+          createDocument.launch(intent)
+        } catch (e: Exception) {
+          pendingSave = null
+          web?.evaluateJavascript("window.__migaSaved && window.__migaSaved('error')", null)
+        }
+      }
     }
 
     @JavascriptInterface

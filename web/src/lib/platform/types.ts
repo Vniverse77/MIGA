@@ -50,6 +50,12 @@ export interface Platform {
 	setCanGoBack?(can: boolean): void;
 	/** A light tick when a long-press starts a menu. Absent where the device has no way to do it. */
 	haptic?(): void;
+	/**
+	 * Hands a file to the person: a save dialog on desktop, the system "create document" screen on Android,
+	 * a download in a browser. Resolves `cancelled` when they closed the dialog, rejects when writing failed.
+	 * Nothing is uploaded anywhere.
+	 */
+	saveFile(name: string, data: Uint8Array, mime: string): Promise<'saved' | 'cancelled'>;
 	/** Android only: in-app screens take part in the system history, so the Back gesture steps back inside the app. */
 	readonly appHistory?: boolean;
 }

@@ -6,6 +6,7 @@ import {
 	sendNotification
 } from '@tauri-apps/plugin-notification';
 import { PUBLIC_ORIGIN, PUBLIC_RELAY, type Notifier, type NotifyPermission, type Platform } from './types';
+import { browserDownload } from './download';
 import { webNotifier } from './webnotify';
 
 /** True inside the Tauri shell; false when this build is opened in an ordinary browser. */
@@ -41,6 +42,23 @@ const nativeNotifier: Notifier = {
 	close() {}
 };
 
+/**
+ * Native save dialog (official dialog plugin), then one write to the path the person chose (fs plugin).
+ * The dialog adds that single path to the fs scope; the app has no other file access.
+ */
+async function saveFile(name: string, data: Uint8Array, mime: string): Promise<'saved' | 'cancelled'> {
+	if (!inTauri()) return browserDownload(name, data, mime);
+	const { save } = await import('@tauri-apps/plugin-dialog');
+	const { writeFile } = await import('@tauri-apps/plugin-fs');
+	const extension = name.includes('.') ? name.split('.').pop()! : '';
+	const path = await save({
+		defaultPath: name,
+		filters: extension ? [{ name: extension.toUpperCase(), extensions: [extension] }] : undefined
+	});
+	if (!path) return 'cancelled';
+	await writeFile(path, data);
+	return 'saved';
+}
 
 export const platform: Platform = {
 	target: 'desktop',
@@ -56,7 +74,8 @@ export const platform: Platform = {
 	relayUrl: () => PUBLIC_RELAY,
 	publicOrigin: () => PUBLIC_ORIGIN,
 	openExternal: (url) => void window.open(url, '_blank', 'noopener,noreferrer'),
-	setupWindow
+	setupWindow,
+	saveFile
 };
 
 const TEXT_FIELD = 'input, textarea, [contenteditable]';
