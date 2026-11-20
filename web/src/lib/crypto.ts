@@ -12,6 +12,7 @@ import { sha256, sha512 } from '@noble/hashes/sha2';
 import { bytesToHex, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils';
 import { cleanAtt, type Att } from './attach.ts';
 import type { Message } from './storage';
+import { cleanPow, type Pow } from './pow';
 
 export type Identity = { secret: Uint8Array; address: string };
 /** A quoted message. It travels inside the ciphertext only; `text` is a short preview. */
@@ -35,6 +36,8 @@ export type Plain = {
 	att?: Att;
 	/** Live typing (ephemeral, no bubble): the sender's unfinished text; empty = cleared. */
 	live?: string;
+	/** First-contact proof of work (docs/PROTOCOL.md). Absent from old clients and from known contacts. */
+	pow?: Pow;
 };
 /**
  * Shown by clients that predate attachments (v0.5.0 needs a string `text` or it drops the message).
@@ -132,7 +135,8 @@ export function encrypt(
 	text: string,
 	name?: string,
 	reply?: Reply,
-	att?: Att
+	att?: Att,
+	pow?: Pow
 ): string {
 	// With an attachment, `text` is the old-client fallback and `cap` the real caption.
 	const wire = att
@@ -146,7 +150,8 @@ export function encrypt(
 			...wire,
 			ts: Date.now(),
 			...(name ? { name } : {}),
-			...(reply ? { reply } : {})
+			...(reply ? { reply } : {}),
+			...(pow ? { pow } : {})
 		})
 	);
 }
@@ -262,7 +267,8 @@ export function decrypt(id: Identity, peer: string, body: string): Plain | null 
 			...(att ? { att } : {}),
 			ts: Number(parsed.ts) || Date.now(),
 			name: typeof parsed.name === 'string' ? parsed.name : undefined,
-			reply: cleanReply(parsed.reply) ?? undefined
+			reply: cleanReply(parsed.reply) ?? undefined,
+			pow: cleanPow(parsed.pow) ?? undefined
 		};
 	} catch {
 		return null;

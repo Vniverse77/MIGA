@@ -40,7 +40,8 @@
 		| 'eye-off'
 		| 'alert'
 		| 'upload'
-		| 'lock';
+		| 'lock'
+		| 'inbox';
 
 	let { name, size = 20 }: { name: IconName; size?: number } = $props();
 </script>
@@ -95,6 +96,9 @@
 		<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 21h4" />
 	{:else if name === 'bell-off'}
 		<path d="M8.7 4.6A6 6 0 0 1 18 11v4M6 11v5l-2 2h13M10 21h4M3 3l18 18" />
+	{:else if name === 'inbox'}
+		<path d="M3 13l3-8h12l3 8v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+		<path d="M3 13h5l1 3h6l1-3h5" />
 	{:else if name === 'check'}
 		<path d="M5 12.5l4.5 4.5L19 7" />
 	{:else if name === 'shield'}

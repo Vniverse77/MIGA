@@ -98,6 +98,10 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		loadData,
 		loadLive,
 		saveLive,
+		loadFiltered,
+		saveFiltered,
+		loadStrict,
+		saveStrict,
 		loadDevice,
 		loadDevices,
 		loadIdentity,
@@ -130,6 +134,8 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		type Profile,
 		type Unread
 	} from '../storage';
+	import { powDay, solvePow, type Pow } from '../pow';
+	import { classify, needsPow, powKey } from '../requests';
 
 	/** Sync traffic is paced to stay well under the relay's limit of 30 sends per 10 seconds. */
 	const OUTBOX_MS = 400;
@@ -143,6 +149,12 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	let profile = $state<Profile>({ name: '', share: true });
 	let devices = $state<Device[]>([]);
 	let blocked = $state<string[]>([]);
+	/** Message requests: unknown senders wait in Requests until accepted. `filtered` counts messages dropped for a bad or missing proof of work. */
+	let filtered = $state(0);
+	let strict = $state(false);
+	/** Solved first-contact proofs (memory only) and the recipients being solved for right now. */
+	const powCache = new Map<string, Pow>();
+	let powBusy = $state<string[]>([]);
 	/** Read receipts: send mine and show theirs. Off by default (anonymity first). */
 	let receipts = $state(false);
 	/** Send what I type live (ephemeral frames). This device only, off by default. */
@@ -161,7 +173,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	/** document.visibilityState === 'visible'; read receipts are only sent while the chat can be seen. */
 	let visible = $state(true);
 	let active = $state<string | null>(null);
-	let view = $state<'chat' | 'settings' | 'new' | 'verify'>('chat');
+	let view = $state<'chat' | 'settings' | 'new' | 'verify' | 'requests'>('chat');
 	/** Result of the last scan on the safety number screen. */
 	let verifyResult = $state<'match' | 'mismatch' | null>(null);
 	let menuOpen = $state(false);
@@ -301,7 +313,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		if (!platform.appHistory) return;
 		try {
 			const saved = JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null') as { active?: string; draft?: string } | null;
-			if (saved?.active && contacts.some((c) => c.address === saved.active)) {
+			if (saved?.active && chatContacts.some((c) => c.address === saved.active)) {
 				active = saved.active;
 				draft = saved.draft ?? '';
 			}
@@ -509,7 +521,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	let ackTimer: ReturnType<typeof setTimeout> | undefined;
 	const ACK_MS = 1000;
 
-	const activeContact = $derived(contacts.find((c) => c.address === active) ?? null);
+	const requests = $derived(contacts.filter((c) => c.request));
+	const chatContacts = $derived(contacts.filter((c) => !c.request));
+	const activeContact = $derived(chatContacts.find((c) => c.address === active) ?? null);
 	/** Safety number with the open contact; the same digits show on the contact's device. */
 	const activeSafety = $derived(
 		identity && activeContact ? safetyNumber(identity.address, activeContact.address) : ''
@@ -575,6 +589,8 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			blocked = data.blocked;
 			receipts = loadReceipts();
 			liveOn = loadLive();
+			filtered = loadFiltered();
+			strict = loadStrict();
 			unread = data.unread;
 			muted = data.muted;
 			tombs = data.tombs;
@@ -639,7 +655,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			},
 			onLive: (f) => {
 				// Receiving does not depend on my own setting: the sender chooses. Only the open chat shows it.
-				if (blocked.includes(f.from) || f.from !== active) return;
+				if (blocked.includes(f.from) || f.from !== active || contacts.find((c) => c.address === f.from)?.request) return;
 				const plain = decrypt(me, f.from, f.body);
 				if (!plain || plain.live === undefined) return;
 				clearTimeout(liveInTimer);
@@ -692,13 +708,28 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				// Deleted earlier (a re-delivery after "delete for me", or a conversation that was cleared): acknowledged and dropped.
 				if (tombFilter(tombs)(m.from, { id: m.id, mine: false, ts: m.ts })) return true;
 				reviveContact(m.from, m.ts);
+				// Strangers: a valid proof of work (or none, from an old client) lands in Requests; a bad one is only counted.
+				const verdict = classify({
+					contact: contacts.find((c) => c.address === m.from),
+					pow: plain.pow,
+					from: m.from,
+					me: me.address,
+					ts: m.ts,
+					strict
+				});
+				if (verdict === 'filtered') {
+					filtered++;
+					saveFiltered(filtered);
+					return true;
+				}
+				const asRequest = verdict === 'request' || verdict === 'unverified';
 				// The real message replaces the live line (control messages such as receipts do not).
 				if (liveIn?.peer === m.from) {
 					clearTimeout(liveInTimer);
 					liveIn = null;
 				}
 				// A shared name is only a label chosen by the sender; the address stays the identity.
-				ensureContact(m.from, plain.name);
+				ensureContact(m.from, plain.name, asRequest ? { unverified: verdict === 'unverified' } : undefined);
 				const message: Message = {
 					id: m.id,
 					mine: false,
@@ -710,12 +741,15 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				};
 				// Every online device gets the message from the relay; offline ones get this copy.
 				if (addMessages(m.from, [message])) {
-					syncAll({ k: 'msg', peer: m.from, message, name: plain.name });
-					noteIncoming(m.from, previewOf(message), true);
+					const waiting = contacts.find((c) => c.address === m.from)?.request === true;
+					syncAll({ k: 'msg', peer: m.from, message, name: plain.name, ...(waiting ? { req: true } : {}) });
+					if (waiting) noteRequest();
+					else noteIncoming(m.from, previewOf(message), true);
 				}
 				persist();
 				// Stored: tell the sender (also for a re-delivery, in case the first ack was lost).
-				queueAck(m.from, m.id);
+				// A request gets nothing back: no "delivered" until it is accepted (the relay's own ack is enough).
+				if (!asRequest) queueAck(m.from, m.id);
 				return true;
 			},
 			onSent: (id) => {
@@ -902,6 +936,15 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				applyRemoteTombs(message.items);
 				break;
 			}
+			case 'accept': {
+				const waiting = isAddress(message.peer) ? contacts.find((c) => c.address === message.peer) : undefined;
+				if (waiting?.request) {
+					delete waiting.request;
+					delete waiting.unverified;
+					persist();
+				}
+				break;
+			}
 			case 'read': {
 				if (!isAddress(message.peer) || !Number.isFinite(Number(message.upTo))) break;
 				const upTo = Number(message.upTo);
@@ -926,9 +969,11 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				if (!clean || !isAddress(message.peer)) break;
 				if (tombFilter(tombs)(message.peer, clean)) break;
 				reviveContact(message.peer, clean.ts);
-				ensureContact(message.peer, clean.mine ? undefined : message.name);
+				ensureContact(message.peer, clean.mine ? undefined : message.name, message.req === true && !clean.mine ? {} : undefined);
 				// A copy from another device (it was offline when this arrived): counted, never notified.
-				if (addMessages(message.peer, [clean]) && !clean.mine) noteIncoming(message.peer, previewOf(clean), false);
+				if (addMessages(message.peer, [clean]) && !clean.mine && !contacts.find((c) => c.address === message.peer)?.request) {
+					noteIncoming(message.peer, previewOf(clean), false);
+				}
 				persist();
 				break;
 			}
@@ -1418,6 +1463,20 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		});
 	}
 
+	/** A request never shows its sender or text in a notification, and it never counts as an unread chat. */
+	function noteRequest(): void {
+		if (document.hasFocus()) return;
+		platform.notifier.show({
+			tag: 'requests',
+			title: 'MIGA',
+			body: t('req_notify'),
+			onClick: () => {
+				window.focus();
+				view = 'requests';
+			}
+		});
+	}
+
 	// Opening a chat that is on screen clears its counter and removes its notification.
 	$effect(() => {
 		if (!active || view !== 'chat' || !visible || !unread[active]) return;
@@ -1483,11 +1542,16 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	/** What a chat list row, a reply quote or a notification shows for a message. */
 	const previewOf = (m: Message): string => m.text || (m.att ? t('att_photo') : '');
 
-	function ensureContact(address: string, name?: string): void {
+	/** `request` set: a new address becomes a message request (it stays out of the chat list until accepted). */
+	function ensureContact(address: string, name?: string, request?: { unverified?: boolean }): void {
 		const clean = name?.trim().replace(/\s+/g, ' ').slice(0, 40);
 		const known = contacts.find((c) => c.address === address);
 		if (!known) {
-			contacts.push({ address, name: clean || t('name_unknown') + ' ' + address.slice(0, 6) });
+			contacts.push({
+				address,
+				name: clean || t('name_unknown') + ' ' + address.slice(0, 6),
+				...(request ? { request: true, ...(request.unverified ? { unverified: true } : {}) } : {})
+			});
 		} else if (!known.custom && clean) {
 			known.name = clean;
 		}
@@ -1521,9 +1585,31 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	/** Puts one own message on the wire (same id every time, so nobody gets it twice). */
 	function transmit(me: Identity, peer: string, m: Message): boolean {
 		if (!relay?.isReady) return false;
-		const ok = relay.send(peer, m.id, encrypt(me, peer, m.text, sharedName, m.reply, m.att));
+		// First contact: a proof of work goes along (solved once per recipient and day, in a Web Worker).
+		let pow: Pow | undefined;
+		if (needsPow(chats[peer])) {
+			pow = powCache.get(powKey(peer, powDay()));
+			if (!pow) {
+				void preparePow(me, peer);
+				return false;
+			}
+		}
+		const ok = relay.send(peer, m.id, encrypt(me, peer, m.text, sharedName, m.reply, m.att, pow));
 		if (ok) retryTrack.set(m.id, afterSend(retryTrack.get(m.id), Date.now()));
 		return ok;
+	}
+
+	/** Solves the first-contact proof for `peer` off the main thread, then sends what is waiting for it. */
+	async function preparePow(me: Identity, peer: string): Promise<void> {
+		if (powBusy.includes(peer)) return;
+		powBusy.push(peer);
+		const day = powDay();
+		try {
+			powCache.set(powKey(peer, day), await solvePow(me.address, peer, day));
+		} finally {
+			powBusy = powBusy.filter((a) => a !== peer);
+		}
+		for (const m of chats[peer] ?? []) if (m.mine && m.state === 'pending') transmit(me, peer, m);
 	}
 
 	/** After every (re)connect and after a "relay busy" pause: everything still pending goes out now. */
@@ -1892,7 +1978,10 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			notice = t('n_own_address');
 			return;
 		}
-		if (!contacts.some((c) => c.address === address)) {
+		const waiting = contacts.find((c) => c.address === address);
+		// Adding someone who already wrote to me accepts the request.
+		if (waiting?.request) acceptRequest(address, false);
+		else if (!waiting) {
 			const typed = newName.trim();
 			const contact: Contact = {
 				address,
@@ -2139,7 +2228,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	let gQuery = $state('');
 	let gTimer: ReturnType<typeof setTimeout> | undefined;
 	let gFields = $state<HTMLInputElement[]>([]);
-	const gResults = $derived(gQuery.trim() ? searchAll(chats, gQuery) : null);
+	const gResults = $derived(gQuery.trim() ? searchAll(Object.fromEntries(Object.entries(chats).filter(([a]) => !contacts.find((c) => c.address === a)?.request)), gQuery) : null);
 	const nameOf = (address: string) => contacts.find((c) => c.address === address)?.name ?? shortAddress(address);
 
 	function onGlobalInput(): void {
@@ -2175,6 +2264,12 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	}
 
 	function openChat(address: string): void {
+		// A request has no chat: it is looked at (and accepted or removed) in Requests.
+		if (contacts.find((c) => c.address === address)?.request) {
+			menuOpen = false;
+			view = 'requests';
+			return;
+		}
 		replyTo = null;
 		editing = null;
 		emojiOpen = false;
@@ -2202,10 +2297,10 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		newChat: () => openNew(),
 		settings: () => toggleSettings(),
 		step(delta) {
-			if (!contacts.length) return;
-			const i = contacts.findIndex((c) => c.address === active);
-			const next = i < 0 ? (delta > 0 ? 0 : contacts.length - 1) : Math.min(contacts.length - 1, Math.max(0, i + delta));
-			openChat(contacts[next].address);
+			if (!chatContacts.length) return;
+			const i = chatContacts.findIndex((c) => c.address === active);
+			const next = i < 0 ? (delta > 0 ? 0 : chatContacts.length - 1) : Math.min(chatContacts.length - 1, Math.max(0, i + delta));
+			openChat(chatContacts[next].address);
 			void tick().then(() => document.querySelector('.contact.selected')?.scrollIntoView({ block: 'nearest' }));
 		},
 		find() {
@@ -2229,6 +2324,61 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		view = 'new';
 		menuOpen = false;
 		notice = '';
+	}
+
+	// ── Message requests ────────────────────────────────────────────────────────────────
+
+	/** Accept: the chat moves to the chat list, and only now the sender gets "delivered" for what it sent. */
+	function acceptRequest(address: string, open = true): void {
+		const contact = contacts.find((c) => c.address === address);
+		if (!contact?.request) return;
+		delete contact.request;
+		delete contact.unverified;
+		const list = chats[address] ?? [];
+		const unseen = list.filter((m) => !m.mine && !m.seen).length;
+		if (unseen) {
+			unread[address] = unseen;
+			saveUnread($state.snapshot(unread));
+		}
+		for (const m of list) if (!m.mine) queueAck(address, m.id);
+		flushAcks();
+		persist();
+		syncAll({ k: 'accept', peer: address });
+		syncAll({ k: 'state', contacts: [$state.snapshot(contact)] });
+		if (open) openChat(address);
+	}
+
+	/** Delete: the request and its messages are removed here and on my other devices. Writing again makes a new request. */
+	function denyRequest(address: string): void {
+		if (!contacts.find((c) => c.address === address)?.request) return;
+		contacts = contacts.filter((c) => c.address !== address);
+		delete chats[address];
+		clearUnread(address);
+		rememberDeletes([{ c: address, s: 'k', ts: Date.now() }]);
+		persist();
+	}
+
+	/** Block: asks first, then the address is blocked everywhere and its request disappears. */
+	async function blockRequest(address: string): Promise<void> {
+		const contact = contacts.find((c) => c.address === address);
+		if (!contact?.request) return;
+		const ok = await ask({
+			body: t('q_block', { name: shortAddress(address) }),
+			confirm: t('block'),
+			danger: true
+		});
+		if (!ok) return;
+		if (!blocked.includes(address)) {
+			blocked = [...blocked, address].slice(0, MAX_BLOCKED);
+			saveBlocked($state.snapshot(blocked));
+			syncAll({ k: 'state', blocked: $state.snapshot(blocked) });
+		}
+		denyRequest(address);
+	}
+
+	function setStrict(on: boolean): void {
+		strict = on;
+		saveStrict(on);
 	}
 
 	/** Clears the messages of one conversation on this device only; the contact stays. */
@@ -2460,6 +2610,23 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	</span>
 {/snippet}
 
+{#snippet requestsRow()}
+	{#if requests.length || filtered}
+		<li class="req-row">
+			<button type="button" class="contact req" class:selected={view === 'requests'} data-requests={requests.length} onclick={() => (view = 'requests')}>
+				<span class="avatar req-avatar" aria-hidden="true"><Icon name="inbox" size={20} /></span>
+				<span class="who">
+					<strong>{t('requests')}</strong>
+					<small>{requests.length ? t('req_waiting', { n: requests.length }) : t('req_filtered_n', { n: filtered })}</small>
+				</span>
+				<span class="meta"><span class="marks">
+					{#if requests.length}<span class="badge" aria-label={t('req_waiting', { n: requests.length })}>{requests.length > 99 ? '99+' : requests.length}</span>{/if}
+				</span></span>
+			</button>
+		</li>
+	{/if}
+{/snippet}
+
 {#snippet rowMeta(address: string, last: Message | undefined)}
 	<span class="meta">
 		{#if last}<small class="when">{timeOf(last.ts)}</small>{/if}
@@ -2661,7 +2828,8 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			{@render globalBar(0)}
 			{#if gResults === null}{@render backupBanner()}{@render hxBanner()}{@render notifyBanner()}{/if}
 			<ul class="contacts side-list" class:hidden={gResults !== null}>
-				{#each contacts as contact (contact.address)}
+				{@render requestsRow()}
+				{#each chatContacts as contact (contact.address)}
 					{@const last = chats[contact.address]?.at(-1)}
 					<li>
 						<button
@@ -2766,7 +2934,8 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 
 			{#if gResults === null}{@render backupBanner()}{@render hxBanner()}{@render notifyBanner()}{/if}
 			<ul class="contacts" class:hidden={gResults !== null}>
-				{#each contacts as contact (contact.address)}
+				{@render requestsRow()}
+				{#each chatContacts as contact (contact.address)}
 					{@const last = chats[contact.address]?.at(-1)}
 					<li>
 						<button
@@ -2902,6 +3071,15 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 						<p class="hint">{t('receipts_note')}</p>
 					</section>
 
+					<section class="card" id="message-requests">
+						<h2>{t('requests')}</h2>
+						<label class="check">
+							<input type="checkbox" checked={strict} onchange={(e) => setStrict(e.currentTarget.checked)} />
+							<span>{t('req_strict')}</span>
+						</label>
+						<p class="hint">{t('req_strict_note')}</p>
+					</section>
+
 					<section class="card" id="live-typing">
 						<h2>{t('live_title')}</h2>
 						<label class="check">
@@ -3024,6 +3202,61 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 							{/if}
 						</div>
 						{/key}
+					{/if}
+				</div>
+			{:else if view === 'requests'}
+				<header class="chat-head">
+					<button type="button" class="ibtn back" title={t('back')} aria-label={t('back')} onclick={() => (view = 'chat')}><Icon name="back" /></button>
+					<div class="who title"><Icon name="inbox" size={18} /><strong>{t('requests')}</strong></div>
+					<button type="button" class="ibtn close" aria-label={t('close')} title={t('close')} onclick={() => (view = 'chat')}>
+						<Icon name="close" />
+					</button>
+				</header>
+
+				<div class="settings req-page" data-requests={requests.length}>
+					<p class="hint">{t('req_intro')}</p>
+					{#each requests as r (r.address)}
+						{@const msgs = (chats[r.address] ?? []).filter((m) => !m.mine)}
+						<section class="card req-card" data-address={r.address}>
+							<div class="req-head">
+								<span class="avatar" aria-hidden="true">{initial(r.name)}</span>
+								<div class="who">
+									<strong>{r.name}</strong>
+									<code class="selectable" title={r.address}>{shortAddress(r.address)}</code>
+								</div>
+								{#if r.unverified}
+									<span class="req-badge" title={t('req_unverified_help')}><Icon name="alert" size={13} />{t('req_unverified')}</span>
+								{:else}
+									<span class="req-badge ok" title={t('req_verified_help')}><Icon name="shield" size={13} />{t('req_verified')}</span>
+								{/if}
+							</div>
+							<ul class="req-msgs">
+								{#each msgs.slice(-3) as m (m.id)}
+									<li><span>{previewOf(m)}</span><small>{timeOf(m.ts)}</small></li>
+								{/each}
+								{#if msgs.length > 3}<li class="more">{t('req_more', { n: msgs.length - 3 })}</li>{/if}
+							</ul>
+							{#if identity}
+								<details class="req-safety">
+									<summary>{t('safety_title')}</summary>
+									<code class="selectable">{groupSafety(safetyNumber(identity.address, r.address))}</code>
+								</details>
+							{/if}
+							<div class="req-actions" role="group" aria-label={t('requests')}>
+								<button type="button" class="ibtn req-accept" title={t('req_accept')} aria-label={t('req_accept')} onclick={() => acceptRequest(r.address)}><Icon name="check" size={22} /></button>
+								<button type="button" class="ibtn req-delete" title={t('req_delete')} aria-label={t('req_delete')} onclick={() => denyRequest(r.address)}><Icon name="trash" size={22} /></button>
+								<button type="button" class="ibtn req-block" title={t('block')} aria-label={t('block')} onclick={() => blockRequest(r.address)}><Icon name="block" size={22} /></button>
+							</div>
+						</section>
+					{:else}
+						<div class="req-empty"><Icon name="inbox" size={28} /><p>{t('req_none')}</p></div>
+					{/each}
+					{#if filtered}
+						<p class="req-filtered" role="status">
+							<Icon name="shield" size={16} /><span>{t('req_filtered_n', { n: filtered })}</span>
+							<button type="button" class="ibtn" title={t('req_filtered_clear')} aria-label={t('req_filtered_clear')} onclick={() => ((filtered = 0), saveFiltered(0))}><Icon name="close" size={16} /></button>
+						</p>
+						<p class="hint">{t('req_filtered_help')}</p>
 					{/if}
 				</div>
 			{:else if view === 'new'}
@@ -3305,6 +3538,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 						<button type="button" aria-label={t('cancel_edit')} title={t('cancel_edit')} onclick={cancelEdit}><Icon name="close" size={16} /></button>
 					</div>
 				{/if}
+				{#if powBusy.includes(activeContact.address)}
+					<p class="pow-note" role="status"><i class="pow-spin" aria-hidden="true"></i>{t('pow_preparing')}</p>
+				{/if}
 				{#if emojiOpen && EmojiPicker && !blocked.includes(activeContact.address)}
 					<EmojiPicker onpick={insertEmoji} />
 				{/if}
@@ -3467,7 +3703,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 {#if restoreOpen}
 	<RestoreDialog replacing={!!identity} onrestore={applyRestored} onclose={() => (restoreOpen = false)} />
 {/if}
-<Shortcuts {contacts} {chats} onchat={openChat} onhit={(address, message) => void openHit(address, message)} />
+<Shortcuts contacts={chatContacts} {chats} onchat={openChat} onhit={(address, message) => void openHit(address, message)} />
 {#if scanning}
 	<Scanner accept={scanning} onresult={scanned} onclose={() => (scanning = null)} />
 {/if}
@@ -5731,5 +5967,183 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			animation: none;
 			transition: none;
 		}
+	}
+
+	/* Message requests */
+	.req-avatar {
+		background: var(--panel-2);
+		color: var(--muted);
+	}
+	.req-page {
+		display: grid;
+		align-content: start;
+		gap: 0.75rem;
+	}
+	.req-card {
+		gap: 0.65rem;
+	}
+	.req-head {
+		display: flex;
+		align-items: center;
+		gap: 0.65rem;
+		min-width: 0;
+	}
+	.req-head .who {
+		display: grid;
+		flex: 1;
+		min-width: 0;
+	}
+	.req-head .who strong,
+	.req-head .who code {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.req-head .who code {
+		padding: 0;
+		border: 0;
+		background: none;
+		color: var(--muted);
+		font-size: 0.75rem;
+	}
+	.req-badge {
+		display: inline-flex;
+		flex: none;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 0.15rem 0.5rem;
+		border: 0.5px solid var(--danger);
+		border-radius: var(--radius);
+		color: var(--danger);
+		font-size: 0.7rem;
+		font-weight: 600;
+	}
+	.req-badge.ok {
+		border-color: var(--line-strong);
+		color: var(--muted);
+	}
+	.req-msgs {
+		display: grid;
+		gap: 0.35rem;
+		margin: 0;
+		padding: 0.6rem 0.75rem;
+		border-radius: var(--radius);
+		background: var(--panel-2);
+		list-style: none;
+	}
+	.req-msgs li {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.75rem;
+		min-width: 0;
+	}
+	.req-msgs li span {
+		display: -webkit-box;
+		overflow: hidden;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		overflow-wrap: anywhere;
+	}
+	.req-msgs small,
+	.req-msgs .more {
+		color: var(--muted);
+		font-size: 0.72rem;
+		white-space: nowrap;
+	}
+	.req-safety summary {
+		color: var(--muted);
+		font-size: 0.78rem;
+		cursor: pointer;
+	}
+	.req-safety code {
+		display: block;
+		margin-top: 0.4rem;
+		font-size: 0.78rem;
+		line-height: 1.5;
+		overflow-wrap: anywhere;
+	}
+	.req-actions {
+		display: flex;
+		gap: 0.5rem;
+		justify-content: flex-end;
+	}
+	.shell button.ibtn.ibtn.req-accept,
+	.shell button.ibtn.ibtn.req-delete,
+	.shell button.ibtn.ibtn.req-block {
+		width: 3rem;
+		height: 3rem;
+		min-height: 3rem;
+		border: 0.5px solid var(--line-strong);
+		border-radius: 50%;
+	}
+	.shell button.ibtn.ibtn.req-accept {
+		border-color: transparent;
+		background: var(--accent);
+		color: var(--accent-ink);
+	}
+	.shell button.ibtn.ibtn.req-accept:hover:not(:disabled) {
+		background: var(--accent);
+		color: var(--accent-ink);
+		filter: brightness(1.08);
+	}
+	.shell button.ibtn.ibtn.req-block {
+		color: var(--danger);
+	}
+	.req-empty {
+		display: grid;
+		justify-items: center;
+		gap: 0.5rem;
+		padding: 2rem 1rem;
+		color: var(--muted);
+		text-align: center;
+	}
+	.req-filtered {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin: 0;
+		color: var(--muted);
+		font-size: 0.85rem;
+	}
+	.req-filtered span {
+		flex: 1;
+	}
+	.pow-note {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin: 0;
+		padding: 0.25rem 0.9rem;
+		color: var(--muted);
+		font-size: 0.75rem;
+	}
+	.pow-spin {
+		width: 0.75rem;
+		height: 0.75rem;
+		border: 1.5px solid var(--line-strong);
+		border-top-color: var(--accent);
+		border-radius: 50%;
+		animation: pow-turn 0.9s linear infinite;
+	}
+	@keyframes pow-turn {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.pow-spin {
+			animation: none;
+		}
+	}
+	/* On phones the entry is a slim row above the chats. */
+	.shell:not(.desktop) .req-row .contact {
+		min-height: 0;
+		padding-block: 0.45rem;
+		border-bottom: 0.5px solid var(--line);
+	}
+	.shell:not(.desktop) .req-row .avatar {
+		width: 2rem;
+		height: 2rem;
 	}
 </style>

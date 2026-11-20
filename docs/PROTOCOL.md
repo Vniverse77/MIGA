@@ -395,6 +395,26 @@ are sent byte for byte so the animation survives. GIFs carry no EXIF; **MP4 and 
 `media` store, keyed by blob id, and removed when their message is deleted. There is no GIF search: it would
 send IP addresses and search words to a third party.
 
+## Message requests and first contact
+
+Client-side only. The relay is unchanged and learns nothing new: the proof of work below is inside the ciphertext.
+
+**Requests.** A message from an address that is not a contact (never added, never written to, not accepted) is not a chat. It is stored as a *request* and shown in a separate Requests inbox with the sender's short address, its safety number and a preview. The receiver can accept (it becomes a normal chat), delete (the request and its messages are removed; writing again makes a new request) or block (the address is added to the block list). Until accepted the receiver sends nothing back: no `ack` (delivered), no `seen`, no live typing, no profile name, and notifications show only "New message request". The relay-level `ack` is still sent, since the relay needs it to free its queue. On accept the receiver sends the delayed `ack` for the stored messages. A contact the user adds, or writes to, is never a request, and neither is an existing contact.
+
+**Proof of work.** A sender writing to an address that has not yet written to it attaches `"pow":{"v":1,"d":<UTC day = ms / 86 400 000>,"n":<nonce>}` to the plaintext. Valid when `SHA-256("miga-pow-v1:" + sender + ":" + recipient + ":" + d + ":" + n)` has at least 17 leading zero bits and `d` is within one day of the relay timestamp of the message. One solution serves one recipient for one day, so a sender solves once per recipient per day (about 2^17 hashes: roughly 0.2 to 0.5 s on a desktop, 1 to 3 s on a mid phone, in a Web Worker). Clients stop attaching it once the peer has written back.
+
+**Receiver rules for an unknown sender.**
+
+| Message | Result |
+|---|---|
+| valid `pow` | request, "Checked" |
+| no `pow` (older clients) | request, "Unverified" badge (not dropped in this release) |
+| `pow` present but wrong, or no `pow` while the optional "Hide unverified requests" setting is on | acknowledged to the relay, discarded, counted as "N filtered" |
+
+Clients that predate this field ignore `pow`. Linked devices: the `msg` sync copy carries `"req":true` for a request, and a new `accept` sync kind (`{"k":"accept","peer":addr}`) moves the chat out of Requests on the other devices; delete and block already sync through tombstones and the block list. The `state` contact record keeps `request`/`unverified`.
+
+Limits: this is a speed bump, not identity proof. A sender that omits `pow` still reaches Requests unless the receiver turns on the strict setting; a later release can make that the default.
+
 ## Safety numbers
 
 Because an address is the account's Ed25519 public key, two people can check that nobody sits
