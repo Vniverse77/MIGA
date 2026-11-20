@@ -38,6 +38,13 @@ export type Plain = {
 	live?: string;
 	/** Typing indicator (ephemeral, no bubble): true = typing now, false = stopped. */
 	typing?: boolean;
+}
+
+	/**
+	 * Profile photo control message (no top-level text, no bubble): `att` = the sender's new photo
+	 * (a normal encrypted attachment, 256x256), `off` = the sender removed or hid it.
+	 */
+	photo?: { att: Att } | { off: true };
 	/** First-contact proof of work (docs/PROTOCOL.md). Absent from old clients and from known contacts. */
 	pow?: Pow;
 };
@@ -234,6 +241,23 @@ export function encryptTyping(id: Identity, peer: string, typing: boolean): stri
 	return seal(id, peer, JSON.stringify({ v: 0, ts: Date.now(), typing }));
 }
 
+/** Profile photo control message. `att` null = the photo was removed or is now hidden from this contact. */
+export function encryptPhoto(id: Identity, peer: string, att: Att | null): string {
+	return seal(
+		id,
+		peer,
+		JSON.stringify({ v: 0, ts: Date.now(), photo: att ? { att: { ...att, del: undefined, thumb: '' } } : { off: true } })
+	);
+}
+
+/** Validates the `photo` field of a payload. Null when malformed. */
+export function cleanPhoto(value: unknown): { att: Att } | { off: true } | null {
+	const p = (value ?? {}) as { att?: unknown; off?: unknown };
+	if (p.off === true) return { off: true };
+	const att = cleanAtt(p.att);
+	return att && /^image\/(webp|jpeg|png)$/.test(att.mime) && att.size <= 200_000 ? { att } : null;
+}
+
 function seal(id: Identity, peer: string, plaintext: string): string {
 	const json = utf8ToBytes(plaintext);
 	const padded = new Uint8Array(Math.ceil(json.length / PAD) * PAD).fill(0x20);
@@ -261,6 +285,8 @@ export function decrypt(id: Identity, peer: string, body: string): Plain | null 
 			if (del.length) return { text: '', ts, del };
 			const edit = cleanEdit(parsed.edit);
 			if (edit) return { text: '', ts, edit };
+			const photo = cleanPhoto(parsed.photo);
+			if (photo) return { text: '', ts, photo };
 			if (typeof parsed.live?.text === 'string') {
 				return { text: '', ts, live: parsed.live.text.slice(0, MAX_TEXT) };
 			}

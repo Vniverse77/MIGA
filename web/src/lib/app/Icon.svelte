@@ -7,6 +7,7 @@
 		| 'send'
 		| 'pin'
 		| 'pin-off'
+		| 'camera'
 		| 'settings'
 		| 'plus'
 		| 'back'
@@ -70,6 +71,9 @@
 	{:else if name === 'send'}
 		<path d="M21 3 10 14" />
 		<path d="M21 3l-7 18-4-7-7-4z" />
+	{:else if name === 'camera'}
+		<path d="M4 8h3l1.5-2h7L17 8h3v11H4z" />
+		<circle cx="12" cy="13" r="3.5" />
 	{:else if name === 'settings'}
 		<path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
 		<circle cx="15" cy="7" r="2" />

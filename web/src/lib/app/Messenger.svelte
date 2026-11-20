@@ -8,8 +8,11 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	import QrCode from './QrCode.svelte';
 	import Attachment from './Attachment.svelte';
 	import Viewer from './Viewer.svelte';
-	import { MAX_ATTACHMENT, type Att } from '../attach';
-	import { AttachError, deleteMedia, deleteRemote, mediaIds, prepare, saveMedia, upload, type Prepared } from '../media';
+	import { MAX_ATTACHMENT, cleanAtt, type Att } from '../attach';
+	import { AttachError, deleteMedia, deleteRemote, fetchMedia, mediaIds, prepare, saveMedia, upload, type Prepared } from '../media';
+	import PhotoCrop from './PhotoCrop.svelte';
+	import { avatarUrl } from '../avatar';
+	import { PHOTO_SIZE, clearOwnPhoto, clearPeerPhoto, loadOwnPhoto, loadPeerPhoto, loadPhotoSent, openImage, saveOwnPhoto, savePeerPhoto, savePhotoSent, type OwnPhoto } from '../photo';
 	import Scanner from './Scanner.svelte';
 	import { GLOBAL_LIMIT, messageKey, searchAll, searchMessages, segments, snippet } from '../search';
 	import { appUrl, type Scanned } from '../qr';
@@ -27,6 +30,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		encryptEdit,
 		encryptLive,
 		encryptTyping,
+		encryptPhoto,
 		encryptReceipt,
 		MAX_TEXT,
 		MAX_DELETE,
@@ -682,6 +686,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		device = loadDevice();
 		devices = loadDevices();
 		sync = syncKey(me);
+		void initPhotos();
 
 		relay = new RelayClient(relayUrl(), me, {
 			onStatus: (s) => (status = s),
@@ -744,6 +749,11 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 						persist();
 						syncAll({ k: 'edit', peer: m.from, id: plain.edit.id, mine: false, text: plain.edit.text, ts });
 					}
+					return true;
+				}
+				// A profile photo update from a contact: never a bubble, never unread.
+				if (plain.photo) {
+					void takePeerPhoto(m.from, 'att' in plain.photo ? plain.photo.att : null, true);
 					return true;
 				}
 				// Receipts: control messages, never a bubble, never acknowledged themselves.
@@ -897,7 +907,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 							? contact.verified
 							: undefined;
 					if (known) {
-						Object.assign(known, { name: contact.name, custom: contact.custom });
+						Object.assign(known, { name: contact.name, custom: contact.custom, hidePhoto: contact.hidePhoto });
 						if (verified) Object.assign(known, { verified, keyChanged: undefined });
 						else delete known.verified;
 					} else contacts.push({ ...contact, verified });
@@ -1049,6 +1059,26 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				applyStatus(message.peer, cleanIds(message.ids), message.d, false);
 				break;
 			}
+			case 'photo': {
+				const att = message.att ? cleanAtt(message.att) : null;
+				if (message.peer !== undefined) {
+					if (isAddress(message.peer)) void takePeerPhoto(message.peer, att, false);
+				} else if (!att) {
+					ownPhoto = null;
+					setOwnUrl(null);
+					void clearOwnPhoto();
+				} else if (ownPhoto?.hash !== att.hash) {
+					void fetchMedia(att)
+						.then(async (blob) => {
+							ownPhoto = { blob, hash: att.hash, att, attTs: m.ts };
+							setOwnUrl(blob);
+							await saveOwnPhoto({ blob, hash: att.hash, att, attTs: m.ts });
+							void deleteMedia([att.blob]);
+						})
+						.catch(() => {});
+				}
+				break;
+			}
 			case 'receipts': {
 				receipts = message.on === true;
 				saveReceipts(receipts);
@@ -1085,6 +1115,10 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		syncSend(to, { k: 'state', muted: $state.snapshot(muted) });
 		syncSend(to, { k: 'state', pins: $state.snapshot(pins) });
 		syncSend(to, { k: 'receipts', on: receipts });
+		if (ownPhoto?.att) syncSend(to, { k: 'photo', att: { ...ownPhoto.att, del: undefined } });
+		for (const c of all) {
+			void loadPeerPhoto(c.address).then((p) => p?.att && syncSend(to, { k: 'photo', peer: c.address, att: p.att }));
+		}
 		for (let i = 0; i < all.length; i += 50) {
 			syncSend(to, { k: 'state', contacts: all.slice(i, i + 50) });
 		}
@@ -1618,6 +1652,168 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	const previewOf = (m: Message): string => m.text || (m.att ? t('att_photo') : '');
 
 	/** `request` set: a new address becomes a message request (it stays out of the chat list until accepted). */
+	// ── Profile photos ─────────────────────────────────────────────────────────────────────
+	// Own photo and contacts' photos stay in IndexedDB on this device. A photo reaches a contact as an encrypted
+	// attachment named by a `photo` control message; "off" tells them to drop it. Without a photo the default pixel figure shows.
+	let ownPhoto = $state<OwnPhoto | null>(null);
+	let ownPhotoUrl = $state('');
+	let photoUrls = $state<Record<string, string>>({});
+	let photoInput = $state<HTMLInputElement | null>(null);
+	let cropBitmap = $state<ImageBitmap | null>(null);
+	let photoSent: Record<string, string> = {};
+	let photoPushing = false;
+	let photoPushAgain = false;
+	const PHOTO_ATT_TTL = 7 * 24 * 3600_000;
+
+	/** Source of the picture for an address: the shared photo when there is one, else the pixel figure. */
+	const avSrc = (address: string): string => photoUrls[address] ?? avatarUrl(address);
+	const mySrc = $derived(ownPhotoUrl || (identity ? avatarUrl(identity.address) : ''));
+
+	function setPeerUrl(address: string, blob: Blob | null): void {
+		if (photoUrls[address]) URL.revokeObjectURL(photoUrls[address]);
+		if (blob) photoUrls[address] = URL.createObjectURL(blob);
+		else delete photoUrls[address];
+	}
+
+	function setOwnUrl(blob: Blob | null): void {
+		if (ownPhotoUrl) URL.revokeObjectURL(ownPhotoUrl);
+		ownPhotoUrl = blob ? URL.createObjectURL(blob) : '';
+	}
+
+	async function initPhotos(): Promise<void> {
+		ownPhoto = (await loadOwnPhoto()) ?? null;
+		setOwnUrl(ownPhoto?.blob ?? null);
+		photoSent = await loadPhotoSent();
+		for (const c of contacts) {
+			const p = await loadPeerPhoto(c.address);
+			if (p) setPeerUrl(c.address, p.blob);
+		}
+	}
+
+	async function choosePhoto(event: Event): Promise<void> {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file) return;
+		try {
+			cropBitmap = await openImage(file);
+		} catch {
+			notice = t('photo_err');
+		}
+	}
+
+	async function useCroppedPhoto(blob: Blob, hash: string): Promise<void> {
+		cropBitmap?.close();
+		cropBitmap = null;
+		const old = ownPhoto?.att;
+		ownPhoto = { blob, hash };
+		setOwnUrl(blob);
+		await saveOwnPhoto({ blob, hash });
+		if (old) void deleteRemote(old);
+	}
+
+	async function removePhoto(): Promise<void> {
+		const old = ownPhoto?.att;
+		ownPhoto = null;
+		setOwnUrl(null);
+		await clearOwnPhoto();
+		if (old) void deleteRemote(old);
+		syncAll({ k: 'photo', att: null });
+	}
+
+	/** The encrypted, uploaded copy of my photo (made once, then reused for every contact; re-made when a week old). */
+	async function ownPhotoAtt(): Promise<Att | null> {
+		const p = ownPhoto;
+		if (!p) return null;
+		if (p.att && Date.now() - (p.attTs ?? 0) < PHOTO_ATT_TTL) return p.att;
+		const bytes = new Uint8Array(await p.blob.arrayBuffer());
+		const up = upload({ bytes, mime: p.blob.type, w: PHOTO_SIZE, h: PHOTO_SIZE, thumb: '' }, () => {});
+		const att = await up.promise.catch(() => null);
+		if (!att || ownPhoto?.hash !== p.hash) {
+			if (att) void deleteRemote(att);
+			return null;
+		}
+		if (p.att) void deleteRemote(p.att);
+		p.att = att;
+		p.attTs = Date.now();
+		await saveOwnPhoto({ blob: p.blob, hash: p.hash, att, attTs: p.attTs });
+		syncAll({ k: 'photo', att: { ...att, del: undefined } });
+		return att;
+	}
+
+	/** Tells each contact which photo version they should have (a new one, or "none"), once per change. */
+	async function pushPhotos(): Promise<void> {
+		const me = identity;
+		if (!me || !relay) return;
+		if (photoPushing) {
+			photoPushAgain = true;
+			return;
+		}
+		photoPushing = true;
+		try {
+			const open = status === 'online';
+			for (const c of $state.snapshot(contacts)) {
+				if (!open || c.request || blocked.includes(c.address)) continue;
+				const share = !!ownPhoto && profile.share && profile.photo !== false && !c.hidePhoto;
+				const want = share ? ownPhoto!.hash : '';
+				const have = photoSent[c.address] ?? '';
+				if (want === have) continue;
+				let att: Att | null = null;
+				if (share) {
+					att = await ownPhotoAtt();
+					if (!att) continue;
+				}
+				if (relay?.send(c.address, randomId(), encryptPhoto(me, c.address, att))) {
+					photoSent[c.address] = want;
+					await savePhotoSent({ ...photoSent });
+				}
+			}
+		} finally {
+			photoPushing = false;
+			if (photoPushAgain) {
+				photoPushAgain = false;
+				void pushPhotos();
+			}
+		}
+	}
+
+	$effect(() => {
+		// Re-run whenever something that decides who gets which photo changes.
+		void [ownPhoto?.hash, profile.share, profile.photo, status, blocked.length, contacts.map((c) => `${c.address}${c.hidePhoto ? 1 : 0}${c.request ? 1 : 0}`).join()];
+		untrack(() => void pushPhotos());
+	});
+
+	/** A contact's photo arrived (or was removed), from the network or from another device of mine. */
+	async function takePeerPhoto(address: string, att: Att | null, forward: boolean): Promise<void> {
+		const contact = contacts.find((c) => c.address === address);
+		if (!contact || contact.request || blocked.includes(address)) return;
+		if (!att) {
+			setPeerUrl(address, null);
+			await clearPeerPhoto(address);
+		} else {
+			if ((await loadPeerPhoto(address))?.hash === att.hash) return;
+			try {
+				const blob = await fetchMedia(att);
+				if (!contacts.some((c) => c.address === address)) return;
+				await savePeerPhoto(address, { blob, hash: att.hash, att: { ...att, del: undefined } });
+				setPeerUrl(address, blob);
+				void deleteMedia([att.blob]);
+			} catch {
+				return;
+			}
+		}
+		if (forward) syncAll({ k: 'photo', peer: address, att: att ? { ...att, del: undefined } : null });
+	}
+
+	function toggleHidePhoto(address: string): void {
+		const contact = contacts.find((c) => c.address === address);
+		if (!contact) return;
+		if (contact.hidePhoto) delete contact.hidePhoto;
+		else contact.hidePhoto = true;
+		persist();
+		syncAll({ k: 'state', contacts: [$state.snapshot(contact)] });
+	}
+
 	function ensureContact(address: string, name?: string, request?: { unverified?: boolean }): void {
 		const clean = name?.trim().replace(/\s+/g, ' ').slice(0, 40);
 		const known = contacts.find((c) => c.address === address);
@@ -2894,11 +3090,25 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		<span>{t('profile_name')}</span>
 		<input bind:value={profile.name} placeholder={t('name_unknown')} autocomplete="off" maxlength="40" />
 	</label>
+	<div class="photo-edit">
+		<span class="avatar big" aria-hidden="true"><img src={mySrc} alt="" class:px={!ownPhotoUrl} /></span>
+		<div class="photo-actions">
+			<button type="button" class="ibtn" title={t('photo_change')} aria-label={t('photo_change')} onclick={() => photoInput?.click()}><Icon name="camera" size={18} /></button>
+			<input bind:this={photoInput} class="photo-file" type="file" accept="image/*" tabindex="-1" aria-hidden="true" onchange={choosePhoto} />
+			{#if ownPhoto}
+				<button type="button" class="ibtn" title={t('photo_remove')} aria-label={t('photo_remove')} onclick={removePhoto}><Icon name="trash" size={18} /></button>
+			{/if}
+		</div>
+	</div>
 	<label class="check">
 		<input type="checkbox" bind:checked={profile.share} />
 		<span>{t('profile_share')}</span>
 	</label>
-	<p class="hint">{t('profile_note')}</p>
+	<label class="check">
+		<input type="checkbox" bind:checked={profile.photo} disabled={!profile.share} />
+		<span>{t('photo_share')}</span>
+	</label>
+	<p class="hint">{t('profile_note')} {t('photo_note')}</p>
 {/snippet}
 
 <div class="shell" class:desktop={isDesktop} class:sub={view !== 'chat' && !!identity} class:chat-open={active !== null || view !== 'chat'} class:nav-fwd={nav === 'fwd'} class:nav-back={nav === 'back'} class:nav-fade={nav === 'fade'}>
@@ -3014,7 +3224,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 							onpointercancel={rowPressEnd}
 							onpointermove={rowPressMove}
 						>
-							<span class="avatar" aria-hidden="true">{initial(contact.name)}</span>
+							<span class="avatar" aria-hidden="true"><img src={avSrc(contact.address)} alt="" class:px={!photoUrls[contact.address]} /></span>
 							<span class="who">
 								<strong>{contact.name}{#if contact.verified}{@render verifiedMark(14)}{/if}</strong>
 								{#if typingIn[contact.address]}<small class="typing-sub" data-typing>{t('typing_now')}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></small>{:else}<small>{last ? previewOf(last) : shortAddress(contact.address)}</small>{/if}
@@ -3043,7 +3253,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				onclick={toggleSettings}
 				onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggleSettings())}
 			>
-				<span class="avatar" aria-hidden="true">{initial(myName || '?')}</span>
+				<span class="avatar" aria-hidden="true"><img src={mySrc} alt="" class:px={!ownPhotoUrl} /></span>
 				<span class="who">
 					<strong>{myName || t('name_unknown')}</strong>
 					<small>
@@ -3065,7 +3275,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		{:else}
 		<aside class="list-pane" onscroll={onListScroll}>
 			<div class="profile">
-				<span class="avatar" aria-hidden="true">{initial(myName || '?')}</span>
+				<span class="avatar" aria-hidden="true"><img src={mySrc} alt="" class:px={!ownPhotoUrl} /></span>
 				<span class="who">
 					<strong>{myName || t('name_unknown')}</strong>
 					<small>
@@ -3124,7 +3334,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 							onpointercancel={rowPressEnd}
 							onpointermove={rowPressMove}
 						>
-							<span class="avatar" aria-hidden="true">{initial(contact.name)}</span>
+							<span class="avatar" aria-hidden="true"><img src={avSrc(contact.address)} alt="" class:px={!photoUrls[contact.address]} /></span>
 							<span class="who">
 								<strong>{contact.name}{#if contact.verified}{@render verifiedMark(14)}{/if}</strong>
 								{#if typingIn[contact.address]}<small class="typing-sub" data-typing>{t('typing_now')}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></small>{:else}<small>{last ? previewOf(last) : shortAddress(contact.address)}</small>{/if}
@@ -3399,7 +3609,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 						{@const msgs = (chats[r.address] ?? []).filter((m) => !m.mine)}
 						<section class="card req-card" data-address={r.address}>
 							<div class="req-head">
-								<span class="avatar" aria-hidden="true">{initial(r.name)}</span>
+								<span class="avatar" aria-hidden="true"><img src={avSrc(r.address)} alt="" class:px={!photoUrls[r.address]} /></span>
 								<div class="who">
 									<strong>{r.name}</strong>
 									<code class="selectable" title={r.address}>{shortAddress(r.address)}</code>
@@ -3474,6 +3684,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 
 				<div class="settings">
 					<section class="card safety">
+						<span class="avatar big" aria-hidden="true"><img src={avSrc(activeContact.address)} alt="" class:px={!photoUrls[activeContact.address]} /></span>
 						<p class="hint">{t('safety_help', { name: activeContact.name })}</p>
 						<div class="safety-number selectable" data-safety={activeSafety} aria-label={groupSafety(activeSafety)}>
 							{#each groupSafety(activeSafety).split(' ') as group, i (i)}<span>{group}</span>{/each}
@@ -3503,7 +3714,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			{:else if activeContact}
 				<header class="chat-head">
 					<button type="button" class="ibtn back" title={t('back')} aria-label={t('back')} onclick={() => (active = null)}><Icon name="back" /></button>
-					<span class="avatar" aria-hidden="true">{initial(activeContact.name)}</span>
+					<span class="avatar" aria-hidden="true"><img src={avSrc(activeContact.address)} alt="" class:px={!photoUrls[activeContact.address]} /></span>
 					<div class="who">
 						<strong>{activeContact.name}{#if activeContact.verified}{@render verifiedMark(14)}{/if}{#if status !== 'online'}<i class="dot {status}" role="img" aria-label={t(`status_${status}`)} title={t(`status_${status}`)}></i>{/if}</strong>
 {#if typingIn[activeContact.address]}<small class="typing-sub" data-typing>{t('typing_now')}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></small>{:else}<small class="selectable">{shortAddress(activeContact.address)}</small>{/if}
@@ -3528,6 +3739,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 								</button>
 								<button type="button" role="menuitem" onclick={() => togglePinnedChat(activeContact.address)}>
 									<Icon name={pins.c.includes(activeContact.address) ? 'pin-off' : 'pin'} size={16} />{t(pins.c.includes(activeContact.address) ? 'unpin_chat' : 'pin_chat')}
+								</button>
+								<button type="button" role="menuitem" onclick={() => toggleHidePhoto(activeContact.address)}>
+									<Icon name={activeContact.hidePhoto ? 'eye' : 'eye-off'} size={16} />{t(activeContact.hidePhoto ? 'photo_show_for' : 'photo_hide_for')}
 								</button>
 								<button type="button" role="menuitem" onclick={() => toggleMute(activeContact.address)}>
 									<Icon name={muted.includes(activeContact.address) ? 'bell' : 'bell-off'} size={16} />{t(muted.includes(activeContact.address) ? 'unmute_chat' : 'mute_chat')}
@@ -3827,6 +4041,10 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	{/if}
 </div>
 
+{#if cropBitmap}
+	<PhotoCrop bitmap={cropBitmap} onsave={useCroppedPhoto} oncancel={() => { cropBitmap?.close(); cropBitmap = null; }} />
+{/if}
+
 {#if ctx}
 	<div class="menu ctx" role="menu" style:left="{ctx.x}px" style:top="{ctx.y}px">
 		<button type="button" role="menuitem" onclick={() => ctx && openVerify(ctx.address)}>
@@ -3834,6 +4052,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		</button>
 		<button type="button" role="menuitem" onclick={() => ctx && togglePinnedChat(ctx.address)}>
 			<Icon name={ctx && pins.c.includes(ctx.address) ? 'pin-off' : 'pin'} size={16} />{t(ctx && pins.c.includes(ctx.address) ? 'unpin_chat' : 'pin_chat')}
+								</button>
+		<button type="button" role="menuitem" onclick={() => ctx && toggleHidePhoto(ctx.address)}>
+			<Icon name={ctx && contacts.find((c) => c.address === ctx?.address)?.hidePhoto ? 'eye' : 'eye-off'} size={16} />{t(ctx && contacts.find((c) => c.address === ctx?.address)?.hidePhoto ? 'photo_show_for' : 'photo_hide_for')}
 		</button>
 		<button type="button" role="menuitem" onclick={() => ctx && toggleMute(ctx.address)}>
 			<Icon name={ctx && muted.includes(ctx.address) ? 'bell' : 'bell-off'} size={16} />{t(ctx && muted.includes(ctx.address) ? 'unmute_chat' : 'mute_chat')}
@@ -4640,7 +4861,17 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			background: transparent;
 		}
 	}
+	.avatar img {
+		display: block;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+	.avatar img.px {
+		image-rendering: pixelated;
+	}
 	.avatar {
+		overflow: hidden;
 		display: grid;
 		flex: none;
 		place-items: center;
@@ -4652,6 +4883,25 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		color: var(--link);
 		font-weight: 700;
 		text-transform: uppercase;
+	}
+	.avatar.big {
+		width: 4.5rem;
+		height: 4.5rem;
+	}
+	.safety > .avatar.big {
+		justify-self: center;
+	}
+	.photo-edit {
+		display: flex;
+		align-items: center;
+		gap: 0.9rem;
+	}
+	.photo-actions {
+		display: flex;
+		gap: 0.4rem;
+	}
+	.photo-file {
+		display: none;
 	}
 	.who {
 		display: grid;
