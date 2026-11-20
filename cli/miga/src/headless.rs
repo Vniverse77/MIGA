@@ -40,7 +40,13 @@ async fn wait_for<T>(
     .flatten()
 }
 
-pub async fn send(store: &Store, relay: &str, contact: &str, words: Vec<String>) -> Result<()> {
+pub async fn send(
+    store: &Store,
+    relay: &str,
+    contact: &str,
+    words: Vec<String>,
+    file: Option<std::path::PathBuf>,
+) -> Result<()> {
     let me = store.identity()?;
     let peer = resolve(store, &me, contact)?;
     if store.find_contact(&peer)?.is_none() {
@@ -51,6 +57,9 @@ pub async fn send(store: &Store, relay: &str, contact: &str, words: Vec<String>)
         tokio::io::stdin().read_to_string(&mut text).await?;
     }
     engine::check_peer(&me, &peer)?;
+    if let Some(file) = file {
+        return send_file(store, relay, peer, &file, &text).await;
+    }
     let out = engine::prepare_text(store, &me, &peer, &text)?;
     let store = Arc::new(Store::open_like(store));
     let (cmds, mut events, task) = start(&store, relay);
@@ -209,5 +218,60 @@ pub async fn devices(store: &Store, relay: &str, remove: Option<String>) -> Resu
     for d in miga_client::devices::devices(store) {
         println!("{}  {}", d["address"].as_str().unwrap_or("?"), d["label"].as_str().unwrap_or(""));
     }
+    Ok(())
+}
+
+async fn send_file(store: &Store, relay: &str, peer: String, file: &std::path::Path, caption: &str) -> Result<()> {
+    let store = Arc::new(Store::open_like(store));
+    let (cmds, mut events, task) = start(&store, relay);
+    wait_for(&mut events, Duration::from_secs(30), |e| matches!(e, HubEvent::Conn(hub::Conn::Online)).then_some(()))
+        .await
+        .ok_or_else(|| Error::Relay("could not reach the relay".into()))?;
+    let _ = cmds.send(Cmd::SendFile { peer, path: file.to_string_lossy().into_owned(), caption: caption.to_string() });
+    let mut error = None;
+    let done = wait_for(&mut events, Duration::from_secs(150), |e| match e {
+        HubEvent::Confirmed(id) => Some(id),
+        HubEvent::Notice(n) if n.starts_with("Could not") || n.starts_with("The relay refused") => {
+            error = Some(n);
+            Some(String::new())
+        }
+        HubEvent::Notice(n) => {
+            eprintln!("{n}");
+            None
+        }
+        _ => None,
+    })
+    .await;
+    if let Some(e) = error {
+        task.abort();
+        return Err(Error::Relay(e));
+    }
+    let id = done.ok_or_else(|| Error::Relay("the relay did not confirm the file".into()))?;
+    let _ = wait_for(&mut events, Duration::from_secs(8), |e| matches!(e, HubEvent::Drained).then_some(())).await;
+    task.abort();
+    println!("sent file {}", &id[..8.min(id.len())]);
+    Ok(())
+}
+
+pub async fn get(store: &Store, relay: &str, contact: &str, id: &str, out: Option<std::path::PathBuf>) -> Result<()> {
+    let me = store.identity()?;
+    let peer = resolve(store, &me, contact)?;
+    let msg = store
+        .chat(&peer)?
+        .into_iter()
+        .find(|m| m["id"].as_str().is_some_and(|i| i.starts_with(id)) && m["att"].is_object())
+        .ok_or_else(|| Error::Invalid("no attachment with that id in this chat (see `miga log`)".into()))?;
+    let att =
+        miga_core::attach::clean_att(&msg["att"], true).ok_or_else(|| Error::Invalid("damaged attachment".into()))?;
+    let relay = relay.to_string();
+    let a2 = att.clone();
+    let bytes = tokio::task::spawn_blocking(move || miga_client::files::download(&relay, &a2))
+        .await
+        .map_err(|e| Error::Invalid(e.to_string()))??;
+    let dir = out.unwrap_or_else(|| store.files_dir());
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(miga_client::files::saved_name(&att));
+    std::fs::write(&path, bytes)?;
+    println!("{}", path.display());
     Ok(())
 }

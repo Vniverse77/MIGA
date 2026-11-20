@@ -17,6 +17,8 @@ pub struct Config {
     pub confirm_delete: bool,
     /// Send read receipts (`seen`) for chats you look at.
     pub show_receipts: bool,
+    /// Send what you type to the open chat as it is typed (ephemeral; off by default).
+    pub live_text: bool,
     pub theme: ThemeConfig,
     pub notifications: NotifyConfig,
     pub keybinds: KeybindConfig,
@@ -71,6 +73,7 @@ impl Default for Config {
             open_command: "xdg-open".into(),
             confirm_delete: true,
             show_receipts: true,
+            live_text: false,
             theme: ThemeConfig::default(),
             notifications: NotifyConfig::default(),
             keybinds: KeybindConfig::default(),

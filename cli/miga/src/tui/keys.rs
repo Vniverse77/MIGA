@@ -43,6 +43,9 @@ pub enum Action {
     EditLast,
     OpenEditor,
     Cancel,
+    Search,
+    GlobalSearch,
+    Devices,
 }
 
 /// (action, config name, description for the help popup)
@@ -77,6 +80,9 @@ pub const ACTIONS: &[(Action, &str, &str)] = &[
     (Action::EditLast, "edit_last", "Edit your last message (empty composer)"),
     (Action::OpenEditor, "open_editor", "Write in $EDITOR"),
     (Action::Cancel, "cancel", "Cancel / close / leave the composer"),
+    (Action::Search, "search", "Search in this chat"),
+    (Action::GlobalSearch, "global_search", "Search in all chats"),
+    (Action::Devices, "devices", "Devices: link a new one, copy history"),
 ];
 
 pub fn action_from_name(name: &str) -> Option<Action> {
@@ -233,6 +239,9 @@ const DEFAULTS: &[(Mode, &str, Action)] = &[
     (Mode::Global, "ctrl+b", Action::Back),
     (Mode::Global, "f1", Action::Help),
     (Mode::Global, "f2", Action::Address),
+    (Mode::Global, "f3", Action::Devices),
+    (Mode::Global, "ctrl+f", Action::Search),
+    (Mode::Global, "alt+f", Action::GlobalSearch),
     (Mode::Global, "ctrl+c", Action::Quit),
     (Mode::Global, "ctrl+q", Action::Quit),
     (Mode::List, "j", Action::Down),

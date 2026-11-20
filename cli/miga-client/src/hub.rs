@@ -56,6 +56,23 @@ pub enum Cmd {
     CopyHistory(String),
     /// Leave the account on this device and erase all local data.
     EraseSelf,
+    /// Encrypt, upload and send a file with a caption.
+    SendFile {
+        peer: String,
+        path: String,
+        caption: String,
+    },
+    /// Download and decrypt an attachment into the files folder.
+    Fetch {
+        peer: String,
+        id: String,
+    },
+    /// Internal: an upload finished.
+    Uploaded {
+        peer: String,
+        caption: String,
+        att: Box<miga_core::attach::Att>,
+    },
 }
 
 #[derive(Debug)]
@@ -86,6 +103,12 @@ pub enum HubEvent {
         from: String,
         text: String,
     },
+    /// An attachment was saved to this path.
+    FileReady {
+        peer: String,
+        id: String,
+        path: String,
+    },
     /// Every sync message queued so far has left.
     Drained,
 }
@@ -100,6 +123,7 @@ struct Hub {
     owed: BTreeMap<String, Vec<String>>,
     rt: HxRuntime,
     link: Option<(Identity, i64)>,
+    inner: UnboundedSender<Cmd>,
     erase_at: Option<std::time::Instant>,
 }
 
@@ -110,7 +134,9 @@ pub async fn run(
     tx: UnboundedSender<HubEvent>,
 ) -> Result<()> {
     let keys = Keys::load(&store)?;
+    let (inner, mut inner_rx) = tokio::sync::mpsc::unbounded_channel::<Cmd>();
     let mut hub = Hub {
+        inner,
         store,
         keys,
         url,
@@ -136,7 +162,7 @@ pub async fn run(
                 backoff = 1;
                 while cmds.try_recv().is_ok() {}
                 let _ = hub.tx.send(HubEvent::Conn(Conn::Online));
-                match hub.session(&mut a, &mut d, &mut cmds).await {
+                match hub.session(&mut a, &mut d, &mut cmds, &mut inner_rx).await {
                     Ok(()) => return Ok(()),
                     Err(Error::Invalid(m)) if m == "erased" => return Ok(()),
                     Err(_) => {
@@ -223,7 +249,13 @@ impl Hub {
         Ok(())
     }
 
-    async fn session(&mut self, acct: &mut Relay, dev: &mut Relay, cmds: &mut UnboundedReceiver<Cmd>) -> Result<()> {
+    async fn session(
+        &mut self,
+        acct: &mut Relay,
+        dev: &mut Relay,
+        cmds: &mut UnboundedReceiver<Cmd>,
+        inner: &mut UnboundedReceiver<Cmd>,
+    ) -> Result<()> {
         self.inflight.clear();
         self.rt = HxRuntime::default();
         // Anything that never got a `sent` goes out again (fresh nonce and ts, same id).
@@ -260,6 +292,11 @@ impl Hub {
                             self.erase_everything()?;
                             return Err(Error::Invalid("erased".into()));
                         }
+                    }
+                }
+                cmd = inner.recv() => {
+                    if let Some(cmd) = cmd {
+                        self.on_cmd(acct, dev, cmd).await?;
                     }
                 }
                 cmd = cmds.recv() => {
@@ -375,6 +412,16 @@ impl Hub {
             }
             After::Delete { msg_id } => {
                 acct.unsend(peer, &msg_id).await?;
+                if let Some(att) = self
+                    .store
+                    .chat(peer)?
+                    .into_iter()
+                    .find(|m| m["mine"] == true && m["id"] == msg_id.as_str())
+                    .and_then(|m| miga_core::attach::clean_att(&m["att"], true))
+                {
+                    let url = self.url.clone();
+                    tokio::task::spawn_blocking(move || crate::files::delete_blob(&url, &att));
+                }
                 engine::apply_own_delete(&self.store, peer, &msg_id)?;
                 let t = Tomb { chat: peer.into(), kind: TombKind::Message, id: Some(msg_id), mine: true, ts: now_ms() };
                 for (to, m) in devices::remember_deletes(&self.store, &[t])? {
@@ -420,6 +467,61 @@ impl Hub {
                         self.queue_sync(Some(to), &m)?;
                     }
                 }
+            }
+            Cmd::SendFile { peer, path, caption } => {
+                let (url, tx, inner) = (self.url.clone(), self.tx.clone(), self.inner.clone());
+                tokio::task::spawn_blocking(move || {
+                    let res = crate::files::prepare(std::path::Path::new(&path)).and_then(|p| {
+                        let note = if p.stripped { " (metadata removed)" } else { "" };
+                        crate::files::upload(&url, &p).map(|a| (a, note))
+                    });
+                    match res {
+                        Ok((att, note)) => {
+                            let _ = tx.send(HubEvent::Notice(format!("Uploaded{note}; sending")));
+                            let _ = inner.send(Cmd::Uploaded { peer, caption, att: Box::new(att) });
+                        }
+                        Err(e) => {
+                            let _ = tx.send(HubEvent::Notice(format!("Could not send the file: {e}")));
+                            let _ = tx.send(HubEvent::Confirmed(String::new()));
+                        }
+                    }
+                });
+            }
+            Cmd::Uploaded { peer, caption, att } => {
+                let out = engine::prepare_attachment(&self.store, &self.keys.account, &peer, &caption, &att)?;
+                acct.send(&peer, &out.id, &out.body).await?;
+                self.inflight.insert(out.id.clone(), (peer.clone(), After::Sent));
+                self.emit(HubEvent::Changed { peer, shown: None });
+            }
+            Cmd::Fetch { peer, id } => {
+                let msg = self.store.chat(&peer)?.into_iter().find(|m| m["id"] == id.as_str());
+                let Some(att) = msg.and_then(|m| miga_core::attach::clean_att(&m["att"], true)) else {
+                    self.emit(HubEvent::Notice("No attachment in that message".into()));
+                    return Ok(false);
+                };
+                let dir = self.store.files_dir();
+                let (url, tx) = (self.url.clone(), self.tx.clone());
+                tokio::task::spawn_blocking(move || {
+                    let path = dir.join(crate::files::saved_name(&att));
+                    let res = if path.exists() {
+                        Ok(())
+                    } else {
+                        crate::files::download(&url, &att).and_then(|bytes| {
+                            std::fs::create_dir_all(&dir)?;
+                            std::fs::write(&path, bytes)?;
+                            Ok(())
+                        })
+                    };
+                    match res {
+                        Ok(()) => {
+                            let _ =
+                                tx.send(HubEvent::FileReady { peer, id, path: path.to_string_lossy().into_owned() });
+                        }
+                        Err(e) => {
+                            let _ = tx.send(HubEvent::Notice(format!("{e}")));
+                        }
+                    }
+                });
             }
             Cmd::EraseSelf => {
                 self.queue_sync(None, &json!({"k": "bye", "address": self.keys.device.address()}))?;

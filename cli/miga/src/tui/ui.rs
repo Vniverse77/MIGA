@@ -3,7 +3,7 @@ use super::app::{App, Conn, Delivery, Focus, Msg, Popup, Row, State};
 use super::keys::{describe, Action};
 use super::text::{pad_right, truncate, width, wrap};
 use ratatui::layout::{Alignment, Position, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols::border;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
@@ -132,6 +132,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
 fn conn_span(app: &App) -> Span<'static> {
     let t = &app.theme;
+    if let Some((done, total)) = app.history {
+        let pct = (done * 100).checked_div(total).unwrap_or(0).min(if done >= total { 100 } else { 99 });
+        return Span::styled(
+            format!("{} history {pct}%", glyph(app, "\u{25cf}", "*")),
+            Style::default().fg(t.warn).bg(t.card),
+        );
+    }
     let (txt, color) = match app.conn {
         Conn::Online => ("online", t.ok),
         Conn::Connecting => ("connecting", t.warn),
@@ -161,6 +168,25 @@ fn draw_header(f: &mut Frame, app: &App, a: &Areas) {
             Span::styled(truncate(&chat.name, 30), t.bold(t.card)),
             Span::styled(format!("  {}", short_addr(&chat.address)), t.dim(t.card)),
         ];
+        let mut marks = Vec::new();
+        if app.verified.contains(&chat.address) {
+            marks.push("verified");
+        }
+        if app.is_muted(&chat.address) {
+            marks.push("muted");
+        }
+        if app.is_blocked(&chat.address) {
+            marks.push("blocked");
+        }
+        if !marks.is_empty() {
+            spans.push(Span::styled(format!("  [{}]", marks.join(", ")), t.dim(t.card)));
+        }
+        if let Some(live) = app.live.get(&chat.address).filter(|l| !l.is_empty()) {
+            spans.push(Span::styled(
+                format!("  typing: {}", truncate(&super::text::one_line(live), 40)),
+                t.accent(t.card).add_modifier(Modifier::ITALIC),
+            ));
+        }
         if a.list.is_none() {
             let used: usize = spans.iter().map(|s| width(&s.content)).sum();
             let conn = conn_span(app);
@@ -596,8 +622,8 @@ fn message_lines(
         content.push(vec![(l, body_style)]);
     }
     if m.att {
-        let label = "[attachment: not supported yet]";
-        content.push(vec![(truncate(label, inner_max), sty(dim_fg).add_modifier(Modifier::ITALIC))]);
+        let label = format!("[attachment: {}]  o opens", m.att_info);
+        content.push(vec![(truncate(&label, inner_max), sty(dim_fg).add_modifier(Modifier::ITALIC))]);
     }
     if content.iter().all(|c| c.iter().all(|s| s.0.is_empty())) {
         content.push(vec![(" ".into(), body_style)]);
@@ -753,28 +779,180 @@ fn draw_popup(f: &mut Frame, app: &mut App, area: Rect, _footer: Rect) {
         Popup::None | Popup::Command(_) => {}
         Popup::Help { scroll } => draw_help(f, app, area, scroll),
         Popup::Address => {
-            let r = centered(area, 62, 10);
+            let r = centered(area, 66, 11);
             f.render_widget(Clear, r);
             let a = &app.me;
+            let (l1, l2) = if app.addr_reveal {
+                (a[..32].to_string(), a[32..].to_string())
+            } else {
+                (format!("{}{}{}", &a[..6], glyph(app, "\u{2022}", "*").repeat(20), &a[58..]), String::new())
+            };
+            let key = |k: &str| Span::styled(format!("  {k}"), t.accent(t.card).add_modifier(Modifier::BOLD));
             let lines = vec![
                 Line::from(""),
-                Line::from(Span::styled(format!("  {}", &a[..32]), t.bold(t.card))),
-                Line::from(Span::styled(format!("  {}", &a[32..]), t.bold(t.card))),
+                Line::from(Span::styled(format!("  {l1}"), t.bold(t.card))),
+                Line::from(Span::styled(format!("  {l2}"), t.bold(t.card))),
                 Line::from(""),
                 Line::from(Span::styled("  Share this address; anyone with it can message you.", t.dim(t.card))),
-                Line::from(Span::styled(
-                    format!("  Invite link: miga.vniverse77.com/app/#to={}\u{2026}", &a[..8]),
-                    t.dim(t.card),
-                )),
+                Line::from(Span::styled("  It is hidden here so a screen share does not leak it.", t.dim(t.card))),
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("  c", t.accent(t.card).add_modifier(Modifier::BOLD)),
+                    key("r"),
+                    Span::styled(if app.addr_reveal { " hide   " } else { " reveal   " }, t.dim(t.card)),
+                    Span::styled("c", t.accent(t.card).add_modifier(Modifier::BOLD)),
                     Span::styled(" copy   ", t.dim(t.card)),
+                    Span::styled("Shift+Q", t.accent(t.card).add_modifier(Modifier::BOLD)),
+                    Span::styled(" QR code   ", t.dim(t.card)),
                     Span::styled("Esc", t.accent(t.card).add_modifier(Modifier::BOLD)),
                     Span::styled(" close", t.dim(t.card)),
                 ]),
             ];
             f.render_widget(Paragraph::new(lines).block(panel(app, "Your address")), r);
+        }
+        Popup::Link { code, lines, url } => {
+            let qr_w = lines.first().map_or(0, |l| width(l)) as u16;
+            let h = (lines.len() as u16 + 9).min(area.height);
+            let r = centered(area, (qr_w + 8).max(70), h);
+            f.render_widget(Clear, r);
+            let mut out: Vec<Line> = Vec::new();
+            let white = Style::default().fg(Color::White).bg(Color::Black);
+            for l in &lines {
+                out.push(Line::from(vec![Span::styled("  ", t.on_card()), Span::styled(l.clone(), white)]));
+            }
+            out.push(Line::from(""));
+            out.push(Line::from(vec![
+                Span::styled("  Code: ", t.dim(t.card)),
+                Span::styled(miga_core::link::format_link_code(&code), t.bold(t.card)),
+            ]));
+            out.push(Line::from(Span::styled(
+                "  Scan with the MIGA app on your own phone, or type the code on the new device.",
+                t.dim(t.card),
+            )));
+            out.push(Line::from(Span::styled(
+                format!("  {}", truncate(&url.replace(&code, "<code>"), 64)),
+                t.dim(t.card),
+            )));
+            out.push(Line::from(vec![
+                Span::styled("  c", t.accent(t.card).add_modifier(Modifier::BOLD)),
+                Span::styled(" copy code   ", t.dim(t.card)),
+                Span::styled("Esc", t.accent(t.card).add_modifier(Modifier::BOLD)),
+                Span::styled(" cancel (valid 10 minutes)", t.dim(t.card)),
+            ]));
+            f.render_widget(Paragraph::new(out).block(panel(app, "Link a device")), r);
+        }
+        Popup::Qr { title, lines, note } => {
+            let qr_w = lines.first().map_or(0, |l| width(l)) as u16;
+            let h = (lines.len() as u16 + 5).min(area.height);
+            let r = centered(area, (qr_w + 8).max(52), h);
+            f.render_widget(Clear, r);
+            let white = Style::default().fg(Color::White).bg(Color::Black);
+            let mut out: Vec<Line> = Vec::new();
+            for l in &lines {
+                out.push(Line::from(vec![Span::styled("  ", t.on_card()), Span::styled(l.clone(), white)]));
+            }
+            out.push(Line::from(""));
+            out.push(Line::from(Span::styled(format!("  {note}"), t.dim(t.card))));
+            f.render_widget(Paragraph::new(out).block(panel(app, &title)), r);
+        }
+        Popup::Devices { sel } => {
+            let h = (app.devices.len() as u16 + 8).min(area.height);
+            let r = centered(area, 72, h);
+            f.render_widget(Clear, r);
+            let mut out = vec![Line::from("")];
+            out.push(Line::from(Span::styled(
+                format!("  {} (this device)", app.my_device.get(..12).unwrap_or(&app.my_device)),
+                t.bold(t.card),
+            )));
+            if app.devices.is_empty() {
+                out.push(Line::from(Span::styled("  No other devices linked yet.", t.dim(t.card))));
+            }
+            for (i, (addr, label)) in app.devices.iter().enumerate() {
+                let on = i == sel;
+                let style = if on { t.accent(t.card).add_modifier(Modifier::REVERSED) } else { t.on_card() };
+                out.push(Line::from(Span::styled(format!("  {}  {label}", addr.get(..12).unwrap_or(addr)), style)));
+            }
+            out.push(Line::from(""));
+            out.push(Line::from(vec![
+                Span::styled("  a", t.accent(t.card).add_modifier(Modifier::BOLD)),
+                Span::styled(" add (QR)   ", t.dim(t.card)),
+                Span::styled("c", t.accent(t.card).add_modifier(Modifier::BOLD)),
+                Span::styled(" copy history from it   ", t.dim(t.card)),
+                Span::styled("x", t.accent(t.card).add_modifier(Modifier::BOLD)),
+                Span::styled(" remove   ", t.dim(t.card)),
+                Span::styled("Esc", t.accent(t.card).add_modifier(Modifier::BOLD)),
+            ]));
+            f.render_widget(Paragraph::new(out).block(panel(app, "Devices")), r);
+        }
+        Popup::Safety { peer } => {
+            let r = centered(area, 60, 11);
+            f.render_widget(Clear, r);
+            let n = miga_core::crypto::safety_number(&app.me, &peer)
+                .map(|n| miga_core::crypto::group_safety(&n))
+                .unwrap_or_default();
+            let (l1, l2) = (n.get(..35).unwrap_or(&n).to_string(), n.get(36..).unwrap_or("").to_string());
+            let name = app.chats.iter().find(|c| c.address == peer).map_or("", |c| c.name.as_str());
+            let ver = if app.verified.contains(&peer) { "Verified" } else { "Not verified" };
+            let out = vec![
+                Line::from(""),
+                Line::from(Span::styled(format!("  With {name}: compare this number in person."), t.dim(t.card))),
+                Line::from(""),
+                Line::from(Span::styled(format!("  {l1}"), t.bold(t.card))),
+                Line::from(Span::styled(format!("  {l2}"), t.bold(t.card))),
+                Line::from(""),
+                Line::from(Span::styled(format!("  Status: {ver}"), t.accent(t.card))),
+                Line::from(vec![
+                    Span::styled("  v", t.accent(t.card).add_modifier(Modifier::BOLD)),
+                    Span::styled(" mark verified / not   ", t.dim(t.card)),
+                    Span::styled("c", t.accent(t.card).add_modifier(Modifier::BOLD)),
+                    Span::styled(" copy   ", t.dim(t.card)),
+                    Span::styled("Esc", t.accent(t.card).add_modifier(Modifier::BOLD)),
+                ]),
+            ];
+            f.render_widget(Paragraph::new(out).block(panel(app, "Safety number")), r);
+        }
+        Popup::Search { query, global, sel } => {
+            let results = app.search_results(query.text(), global);
+            let h = (results.len().clamp(1, 10) + 4) as u16;
+            let r = centered(area, 70, h);
+            f.render_widget(Clear, r);
+            let mut out = vec![Line::from(vec![
+                Span::styled(
+                    format!(" {} ", glyph(app, "\u{203a}", ">")),
+                    t.accent(t.card).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(query.text().to_string(), t.on_card()),
+            ])];
+            out.push(Line::from(""));
+            if results.is_empty() {
+                out.push(Line::from(Span::styled(
+                    if query.is_empty() { "  Type to search." } else { "  No match." },
+                    t.dim(t.card),
+                )));
+            }
+            let skip = sel.saturating_sub(9);
+            for (n, (_, _, line)) in results.iter().enumerate().skip(skip).take(10) {
+                let style = if n == sel { t.accent(t.card).add_modifier(Modifier::REVERSED) } else { t.on_card() };
+                out.push(Line::from(Span::styled(format!(" {}", pad_right(&truncate(line, 66), 66)), style)));
+            }
+            let title = if global { "Search all chats" } else { "Search this chat" };
+            f.render_widget(Paragraph::new(out).block(panel(app, title)), r);
+            f.set_cursor_position(Position::new(r.x + 4 + width(query.text()) as u16, r.y + 1));
+        }
+        Popup::Confirm { prompt, .. } => {
+            let r = centered(area, 66, 7);
+            f.render_widget(Clear, r);
+            let out = vec![
+                Line::from(""),
+                Line::from(Span::styled(format!("  {}", truncate(&prompt, 62)), t.on_card())),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  y", t.accent(t.card).add_modifier(Modifier::BOLD)),
+                    Span::styled(" yes   ", t.dim(t.card)),
+                    Span::styled("n", t.accent(t.card).add_modifier(Modifier::BOLD)),
+                    Span::styled(" no", t.dim(t.card)),
+                ]),
+            ];
+            f.render_widget(Paragraph::new(out).block(panel(app, "Confirm")), r);
         }
         Popup::Switcher { query, sel } => {
             let results = app.switcher_results(query.text());

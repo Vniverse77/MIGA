@@ -57,6 +57,8 @@ pub struct Msg {
     pub edited: bool,
     pub reply: Option<Quote>,
     pub att: bool,
+    /// `image/png, 120 KB, 800x600` for an attachment.
+    pub att_info: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -107,8 +109,25 @@ impl Msg {
             edited: v.get("edited").and_then(Value::as_f64).unwrap_or(0.0) > 0.0,
             reply,
             att: v.get("att").is_some_and(|a| !a.is_null()),
+            att_info: v.get("att").filter(|a| a.is_object()).map(att_label).unwrap_or_default(),
         })
     }
+}
+
+/// `image/png, 120 KB, 800x600`
+fn att_label(a: &Value) -> String {
+    let size = a.get("size").and_then(Value::as_f64).unwrap_or(0.0);
+    let human = if size >= 1_048_576.0 {
+        format!("{:.1} MB", size / 1_048_576.0)
+    } else {
+        format!("{:.0} KB", (size / 1024.0).max(1.0))
+    };
+    format!(
+        "{}, {human}, {}x{}",
+        a.get("mime").and_then(Value::as_str).unwrap_or("file"),
+        a.get("w").and_then(Value::as_u64).unwrap_or(0),
+        a.get("h").and_then(Value::as_u64).unwrap_or(0)
+    )
 }
 
 pub struct Chat {
@@ -158,28 +177,130 @@ impl Chat {
 /// Things the shell must do for the reducer.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intent {
-    Send { peer: String, text: String, reply: Option<Reply> },
-    Edit { peer: String, id: String, text: String },
-    Delete { peer: String, id: String },
-    Seen { peer: String, ids: Vec<String> },
+    Send {
+        peer: String,
+        text: String,
+        reply: Option<Reply>,
+    },
+    Edit {
+        peer: String,
+        id: String,
+        text: String,
+    },
+    Delete {
+        peer: String,
+        id: String,
+    },
+    Seen {
+        peer: String,
+        ids: Vec<String>,
+    },
     Copy(String),
     OpenUrl(String),
     ExternalEditor,
-    AddContact { address: String, name: String },
+    AddContact {
+        address: String,
+        name: String,
+    },
     SaveState,
     Quit,
+    /// Encrypt and upload a file, then send it with an optional caption.
+    Attach {
+        peer: String,
+        path: String,
+        caption: String,
+    },
+    /// Download (if needed), save and open an attachment.
+    OpenAttachment {
+        peer: String,
+        id: String,
+    },
+    AddDevice,
+    CancelLink,
+    RemoveDevice(String),
+    CopyHistory(String),
+    Mute {
+        peer: String,
+        on: bool,
+    },
+    Block {
+        peer: String,
+        on: bool,
+    },
+    DeleteChat {
+        peer: String,
+    },
+    DeleteContact {
+        peer: String,
+    },
+    Verify {
+        peer: String,
+        on: bool,
+    },
+    /// Show a QR code popup: `address` (invite link) or `safety`.
+    ShowQr(QrKind),
+    /// Live typing text of the open chat (opt-in).
+    Live {
+        peer: String,
+        text: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QrKind {
+    Address,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Popup {
     None,
-    Help { scroll: usize },
+    Help {
+        scroll: usize,
+    },
     Address,
-    Switcher { query: Composer, sel: usize },
-    NewChat { address: Composer, name: Composer, field: usize, error: Option<String> },
-    ConfirmDelete { peer: String, id: String },
+    Switcher {
+        query: Composer,
+        sel: usize,
+    },
+    NewChat {
+        address: Composer,
+        name: Composer,
+        field: usize,
+        error: Option<String>,
+    },
+    ConfirmDelete {
+        peer: String,
+        id: String,
+    },
     ConfirmQuit,
     Command(Composer),
+    /// A link code on offer: QR lines, the code and the app link.
+    Link {
+        code: String,
+        lines: Vec<String>,
+        url: String,
+    },
+    /// A QR code with a title and a note (your address).
+    Qr {
+        title: String,
+        lines: Vec<String>,
+        note: String,
+    },
+    Devices {
+        sel: usize,
+    },
+    Safety {
+        peer: String,
+    },
+    Search {
+        query: Composer,
+        global: bool,
+        sel: usize,
+    },
+    Confirm {
+        prompt: String,
+        intent: Box<Intent>,
+    },
 }
 
 /// Where things were drawn last, for the mouse.
@@ -218,6 +339,20 @@ pub struct App {
     pub list_top: usize,
     pub hit: Hit,
     pub version: &'static str,
+    /// Address popup shows the full address only after the reveal key.
+    pub addr_reveal: bool,
+    /// History copy progress `(done, total)`.
+    pub history: Option<(u64, u64)>,
+    pub muted: Vec<String>,
+    pub blocked: Vec<String>,
+    /// Chats whose safety number was marked verified.
+    pub verified: Vec<String>,
+    /// This account's devices `(address, label)` and this device's own address.
+    pub devices: Vec<(String, String)>,
+    pub my_device: String,
+    /// Live typing text of other people, by chat address.
+    pub live: std::collections::HashMap<String, String>,
+    last_live: String,
 }
 
 impl App {
@@ -244,6 +379,15 @@ impl App {
             list_top: 0,
             hit: Hit::default(),
             version: env!("CARGO_PKG_VERSION"),
+            addr_reveal: false,
+            history: None,
+            muted: Vec::new(),
+            blocked: Vec::new(),
+            verified: Vec::new(),
+            devices: Vec::new(),
+            my_device: String::new(),
+            live: std::collections::HashMap::new(),
+            last_live: String::new(),
         };
         for s in seeds {
             let mut chat = Chat {
@@ -536,8 +680,26 @@ impl App {
             if let Some(c) = self.chat_mut() {
                 c.composer.handle_key(&key, w);
             }
+            return self.live_intent();
         }
         vec![]
+    }
+
+    /// With `live_text` on, the composer text is sent as an ephemeral frame (shell throttles it).
+    fn live_intent(&mut self) -> Vec<Intent> {
+        if !self.cfg.live_text {
+            return vec![];
+        }
+        let Some(c) = self.chat() else { return vec![] };
+        if c.editing.is_some() || c.composer.text().starts_with('/') {
+            return vec![];
+        }
+        let (text, peer) = (c.composer.text().to_string(), c.address.clone());
+        if text == self.last_live {
+            return vec![];
+        }
+        self.last_live = text.clone();
+        vec![Intent::Live { peer, text }]
     }
 
     /// `None` means "not handled, treat as a plain key".
@@ -610,7 +772,12 @@ impl App {
                 }
             }
             Action::OpenLink => {
-                if let Some(m) = self.selected_msg() {
+                if let Some(m) = self.selected_msg().filter(|m| m.att) {
+                    if let Some(c) = self.chat() {
+                        out.push(Intent::OpenAttachment { peer: c.address.clone(), id: m.id });
+                        self.say("Opening the attachment...");
+                    }
+                } else if let Some(m) = self.selected_msg() {
                     let found = links(&m.text);
                     match found.first() {
                         Some(u) => {
@@ -637,6 +804,9 @@ impl App {
             }
             Action::OpenEditor => return Some(vec![Intent::ExternalEditor]),
             Action::Cancel => self.cancel_composer(),
+            Action::Search => self.open_search(false),
+            Action::GlobalSearch => self.open_search(true),
+            Action::Devices => self.popup = Popup::Devices { sel: 0 },
         }
         Some(out)
     }
@@ -782,6 +952,18 @@ impl App {
             return vec![];
         }
         let peer = chat.address.clone();
+        if let Some(rest) = text.strip_prefix("/attach ") {
+            let (path, caption) = match rest.split_once(" | ") {
+                Some((p, c)) => (p.trim(), c.trim()),
+                None => (rest.trim(), ""),
+            };
+            let path = path.trim_matches(|c| c == '"' || c == '\'').to_string();
+            let chat = self.chat_mut().expect("chat");
+            chat.composer.take();
+            self.offset = 0;
+            self.say("Sending the file...");
+            return vec![Intent::Attach { peer, path, caption: caption.to_string() }];
+        }
         if let Some(id) = chat.editing.clone() {
             let unchanged = chat.msg_by_id(&id).is_some_and(|m| m.text == text);
             let chat = self.chat_mut().expect("chat");
@@ -838,7 +1020,16 @@ impl App {
                     self.say("Address copied (terminal permitting)");
                     vec![Intent::Copy(self.me.clone())]
                 }
-                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter | KeyCode::F(2) => vec![],
+                KeyCode::Char('r') => {
+                    self.addr_reveal = !self.addr_reveal;
+                    self.popup = Popup::Address;
+                    vec![]
+                }
+                KeyCode::Char('Q') => vec![Intent::ShowQr(QrKind::Address)],
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter | KeyCode::F(2) => {
+                    self.addr_reveal = false;
+                    vec![]
+                }
                 _ => {
                     self.popup = Popup::Address;
                     vec![]
@@ -919,6 +1110,98 @@ impl App {
                     vec![]
                 }
             },
+            Popup::Link { code, lines, url } => match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => vec![Intent::CancelLink],
+                KeyCode::Char('c' | 'y') => {
+                    self.say("Code copied (terminal permitting)");
+                    self.popup = Popup::Link { code: code.clone(), lines, url };
+                    vec![Intent::Copy(code)]
+                }
+                _ => {
+                    self.popup = Popup::Link { code, lines, url };
+                    vec![]
+                }
+            },
+            Popup::Qr { title, lines, note } => match key.code {
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter => vec![],
+                _ => {
+                    self.popup = Popup::Qr { title, lines, note };
+                    vec![]
+                }
+            },
+            Popup::Devices { mut sel } => {
+                let n = self.devices.len();
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::F(3) => return vec![],
+                    KeyCode::Char('j') | KeyCode::Down => sel = (sel + 1).min(n.saturating_sub(1)),
+                    KeyCode::Char('k') | KeyCode::Up => sel = sel.saturating_sub(1),
+                    KeyCode::Char('a') => return vec![Intent::AddDevice],
+                    KeyCode::Char('c') => {
+                        if let Some((a, _)) = self.devices.get(sel).cloned() {
+                            self.say("Copying the history from that device...");
+                            return vec![Intent::CopyHistory(a)];
+                        }
+                    }
+                    KeyCode::Char('x') => {
+                        if let Some((a, l)) = self.devices.get(sel).cloned() {
+                            self.popup = Popup::Confirm {
+                                prompt: format!("Remove {l}? It erases itself the next time it connects."),
+                                intent: Box::new(Intent::RemoveDevice(a)),
+                            };
+                            return vec![];
+                        }
+                    }
+                    _ => {}
+                }
+                self.popup = Popup::Devices { sel };
+                vec![]
+            }
+            Popup::Safety { peer } => match key.code {
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter => vec![],
+                KeyCode::Char('v') => {
+                    let on = !self.verified.contains(&peer);
+                    self.set_verified(&peer, on);
+                    self.popup = Popup::Safety { peer: peer.clone() };
+                    vec![Intent::Verify { peer, on }]
+                }
+                KeyCode::Char('c') => {
+                    let n = miga_core::crypto::safety_number(&self.me, &peer).unwrap_or_default();
+                    self.popup = Popup::Safety { peer };
+                    vec![Intent::Copy(n)]
+                }
+                _ => {
+                    self.popup = Popup::Safety { peer };
+                    vec![]
+                }
+            },
+            Popup::Search { mut query, global, mut sel } => {
+                let results = self.search_results(query.text(), global);
+                match key.code {
+                    KeyCode::Esc => return vec![],
+                    KeyCode::Enter => {
+                        if let Some((ci, ri, _)) = results.get(sel) {
+                            self.jump_to(*ci, *ri);
+                        }
+                        return vec![];
+                    }
+                    KeyCode::Down | KeyCode::Tab => sel = (sel + 1).min(results.len().saturating_sub(1)),
+                    KeyCode::Up | KeyCode::BackTab => sel = sel.saturating_sub(1),
+                    _ => {
+                        query.handle_key(&key, 60);
+                        sel = 0;
+                    }
+                }
+                self.popup = Popup::Search { query, global, sel };
+                vec![]
+            }
+            Popup::Confirm { prompt, intent } => match key.code {
+                KeyCode::Char('y' | 'Y') | KeyCode::Enter => vec![*intent],
+                KeyCode::Char('n' | 'N') | KeyCode::Esc => vec![],
+                _ => {
+                    self.popup = Popup::Confirm { prompt, intent };
+                    vec![]
+                }
+            },
             Popup::Command(mut line) => match key.code {
                 KeyCode::Esc => vec![],
                 KeyCode::Enter => self.run_command(line.text()),
@@ -958,9 +1241,168 @@ impl App {
                 }
                 self.say("Usage: :add <address> [name]");
             }
+            "link" => return vec![Intent::AddDevice],
+            "devices" => self.popup = Popup::Devices { sel: 0 },
+            "search" => self.open_search_with(
+                false,
+                parts.next().map(|a| a.to_string() + &parts.next().map(|b| format!(" {b}")).unwrap_or_default()),
+            ),
+            "gsearch" => self.open_search_with(
+                true,
+                parts.next().map(|a| a.to_string() + &parts.next().map(|b| format!(" {b}")).unwrap_or_default()),
+            ),
+            "qr" => return vec![Intent::ShowQr(QrKind::Address)],
+            "attach" => {
+                let rest = line.trim().trim_start_matches(':').trim_start_matches("attach").trim();
+                let Some(peer) = self.chat().map(|c| c.address.clone()) else { return vec![] };
+                if rest.is_empty() {
+                    self.say("Usage: :attach <path> [| caption]");
+                } else {
+                    let (path, caption) = rest.split_once(" | ").unwrap_or((rest, ""));
+                    self.say("Sending the file...");
+                    return vec![Intent::Attach {
+                        peer,
+                        path: path.trim().trim_matches(|c| c == '"' || c == '\'').to_string(),
+                        caption: caption.trim().to_string(),
+                    }];
+                }
+            }
+            cmd @ ("mute" | "unmute" | "block" | "unblock" | "verify" | "unverify" | "safety") => {
+                let Some(peer) = self.chat().map(|c| c.address.clone()) else {
+                    self.say("Open a chat first");
+                    return vec![];
+                };
+                match cmd {
+                    "mute" | "unmute" => {
+                        let on = cmd == "mute";
+                        toggle(&mut self.muted, &peer, on);
+                        self.say(if on { "Muted: no bell or notification" } else { "Unmuted" });
+                        return vec![Intent::Mute { peer, on }];
+                    }
+                    "block" | "unblock" => {
+                        let on = cmd == "block";
+                        toggle(&mut self.blocked, &peer, on);
+                        self.say(if on { "Blocked: their messages are dropped" } else { "Unblocked" });
+                        return vec![Intent::Block { peer, on }];
+                    }
+                    "verify" | "unverify" => {
+                        let on = cmd == "verify";
+                        self.set_verified(&peer, on);
+                        self.say(if on { "Marked verified" } else { "Verification removed" });
+                        return vec![Intent::Verify { peer, on }];
+                    }
+                    _ => self.popup = Popup::Safety { peer },
+                }
+            }
+            "delete" => {
+                let Some((peer, name)) = self.chat().map(|c| (c.address.clone(), c.name.clone())) else {
+                    return vec![];
+                };
+                match parts.next() {
+                    Some("chat") => {
+                        self.popup = Popup::Confirm {
+                            prompt: format!("Delete the chat with {name} on all your devices? (Their copy stays.)"),
+                            intent: Box::new(Intent::DeleteChat { peer }),
+                        }
+                    }
+                    Some("contact") => {
+                        self.popup = Popup::Confirm {
+                            prompt: format!("Delete the contact {name} and the chat on all your devices?"),
+                            intent: Box::new(Intent::DeleteContact { peer }),
+                        }
+                    }
+                    _ => self.say("Usage: :delete chat | :delete contact"),
+                }
+            }
             other => self.say(format!("Unknown command: {other}")),
         }
         vec![]
+    }
+
+    // ---- search, lists and small state ------------------------------------------------------
+
+    fn open_search(&mut self, global: bool) {
+        self.open_search_with(global, None);
+    }
+
+    fn open_search_with(&mut self, global: bool, text: Option<String>) {
+        let mut query = Composer::default();
+        if let Some(t) = text {
+            query.insert(&t);
+        }
+        self.popup = Popup::Search { query, global, sel: 0 };
+    }
+
+    /// `(chat index, row index, line to show)` of messages containing `query` (case-insensitive).
+    pub fn search_results(&self, query: &str, global: bool) -> Vec<(usize, usize, String)> {
+        let q = query.trim().to_lowercase();
+        if q.is_empty() {
+            return vec![];
+        }
+        let mut out = Vec::new();
+        for (ci, chat) in self.chats.iter().enumerate() {
+            if !global && ci != self.cur {
+                continue;
+            }
+            for (ri, row) in chat.rows.iter().enumerate().rev() {
+                if let Row::Msg(m) = row {
+                    if m.text.to_lowercase().contains(&q) {
+                        let who = if global { format!("{}: ", chat.name) } else { String::new() };
+                        out.push((ci, ri, format!("{who}{}", one_line(&m.text))));
+                    }
+                }
+                if out.len() >= 200 {
+                    return out;
+                }
+            }
+        }
+        out
+    }
+
+    fn jump_to(&mut self, ci: usize, ri: usize) {
+        self.open_chat(ci);
+        self.focus = Focus::History;
+        if let Some(c) = self.chat_mut() {
+            c.sel = Some(ri);
+        }
+        self.reveal = true;
+    }
+
+    pub fn set_verified(&mut self, peer: &str, on: bool) {
+        toggle(&mut self.verified, peer, on);
+    }
+
+    pub fn is_muted(&self, peer: &str) -> bool {
+        self.muted.iter().any(|m| m == peer)
+    }
+
+    pub fn is_blocked(&self, peer: &str) -> bool {
+        self.blocked.iter().any(|m| m == peer)
+    }
+
+    /// Removes a chat from the list (deleted contact or conversation).
+    pub fn drop_chat(&mut self, peer: &str, whole_contact: bool) {
+        let keep = self.chat().map(|c| c.address.clone()).filter(|a| a != peer);
+        if whole_contact {
+            self.chats.retain(|c| c.address != peer);
+        } else if let Some(c) = self.chats.iter_mut().find(|c| c.address == peer) {
+            c.rows.clear();
+            c.unread = 0;
+        }
+        self.sort_chats(keep);
+        if self.cur >= self.chats.len() {
+            self.cur = 0;
+        }
+    }
+
+    /// Everything read up to `ts` (another device read it, or it is old history).
+    pub fn read_up_to(&mut self, peer: &str, ts: f64) {
+        if let Some(c) = self.chats.iter_mut().find(|c| c.address == peer) {
+            if ts > c.last_read {
+                c.last_read = ts;
+            }
+            c.unread = c.count_unread();
+        }
     }
 
     /// Chat indices matching the switcher query, best first.
@@ -1038,6 +1480,13 @@ impl App {
             _ => {}
         }
         vec![]
+    }
+}
+
+fn toggle(list: &mut Vec<String>, item: &str, on: bool) {
+    list.retain(|x| x != item);
+    if on {
+        list.push(item.to_string());
     }
 }
 

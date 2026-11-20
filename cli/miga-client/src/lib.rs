@@ -3,6 +3,7 @@
 
 pub mod devices;
 pub mod engine;
+pub mod files;
 pub mod hub;
 pub mod relay;
 pub mod store;

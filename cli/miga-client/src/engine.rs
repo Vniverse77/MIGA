@@ -220,15 +220,39 @@ pub fn prepare_message(
     Ok(Outgoing { id, body })
 }
 
+/// A message carrying an uploaded file: persisted as pending (the caption is its text).
+pub fn prepare_attachment(
+    store: &Store,
+    me: &Identity,
+    peer: &str,
+    caption: &str,
+    att: &miga_core::attach::Att,
+) -> Result<Outgoing> {
+    let caption = miga_core::js::slice_units_lossy(js_trim(caption), MAX_TEXT);
+    let id = miga_core::random_id()?;
+    let ts = now_ms();
+    let message = json!({"id": id, "mine": true, "text": caption, "ts": ts, "state": "pending", "att": att.to_value()});
+    store.merge(peer, &[message])?;
+    let name = store.profile_name()?;
+    let body = seal_json_with_nonce(
+        me,
+        peer,
+        &text_json(&caption, ts, name.as_deref(), None, Some(att)),
+        &miga_core::random_bytes::<24>()?,
+    )?;
+    Ok(Outgoing { id, body })
+}
+
 /// Re-encrypts a pending message for a resend (fresh nonce and `ts`, same id), like the web app.
 pub fn reseal_pending(store: &Store, me: &Identity, peer: &str, message: &Value) -> Result<Outgoing> {
     let text = message["text"].as_str().unwrap_or_default();
     let name = store.profile_name()?;
     let reply = message.get("reply").and_then(clean_reply);
+    let att = message.get("att").and_then(|a| miga_core::attach::clean_att(a, true));
     let body = seal_json_with_nonce(
         me,
         peer,
-        &text_json(text, now_ms(), name.as_deref(), reply.as_ref(), None),
+        &text_json(text, now_ms(), name.as_deref(), reply.as_ref(), att.as_ref()),
         &miga_core::random_bytes::<24>()?,
     )?;
     Ok(Outgoing { id: message["id"].as_str().unwrap_or_default().into(), body })

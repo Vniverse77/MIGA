@@ -43,7 +43,21 @@ enum Command {
     /// List contacts
     Contacts,
     /// Send a text message (text from arguments, or from stdin when none is given)
-    Send { contact: String, text: Vec<String> },
+    Send {
+        contact: String,
+        text: Vec<String>,
+        /// Send this image as an attachment (the text becomes its caption)
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+    },
+    /// Download and save an attachment of a stored message (id or unique id prefix from `miga log`)
+    Get {
+        contact: String,
+        id: String,
+        /// Folder to save into (default: the profile's files folder)
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// Print incoming messages until interrupted
     Listen {
         /// Stop after this many seconds
@@ -126,13 +140,20 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Send { .. } | Command::Listen { .. } if store.ui_running() => Err(Error::Invalid(
             "the miga chat UI is open for this profile; use it to send and receive (sending from another process while it runs arrives with a local socket in M3)".into(),
         )),
-        Command::Send { contact, text } => headless::send(&store, &cli.relay, &contact, text).await,
+        Command::Send { contact, text, file } => headless::send(&store, &cli.relay, &contact, text, file).await,
+        Command::Get { contact, id, out } => headless::get(&store, &cli.relay, &contact, &id, out).await,
         Command::Listen { timeout, count } => headless::listen(&store, &cli.relay, timeout, count).await,
         Command::Log { contact } => {
             let peer = resolve(&store, &store.identity()?, &contact)?;
             for m in store.chat(&peer)? {
+                let att = m["att"]
+                    .as_object()
+                    .map(|a| {
+                        format!(" [file {} {} bytes, id {}]", a["mime"].as_str().unwrap_or("?"), a["size"], &m["id"].as_str().unwrap_or_default()[..8])
+                    })
+                    .unwrap_or_default();
                 println!(
-                    "{} {} {}{}",
+                    "{} {} {}{att}{}",
                     stamp(m["ts"].as_f64().unwrap_or(0.0)),
                     if m["mine"] == true { ">" } else { "<" },
                     m["text"].as_str().unwrap_or_default(),

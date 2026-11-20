@@ -142,8 +142,7 @@ pub async fn run(store: Store, relay_url: String, config_path: Option<PathBuf>) 
     let store = Arc::new(store);
     let (cmd_tx, cmd_rx) = unbounded_channel();
     let (ev_tx, mut ev_rx) = unbounded_channel();
-    let net_identity = store.identity()?;
-    tokio::spawn(net::run(store.clone(), net_identity, relay_url, cmd_rx, ev_tx));
+    tokio::spawn(net::run(store.clone(), relay_url.clone(), cmd_rx, ev_tx));
 
     install_panic_hook(app.cfg.mouse);
     let mut screen = Screen::enter(app.cfg.mouse)?;
@@ -154,7 +153,9 @@ pub async fn run(store: Store, relay_url: String, config_path: Option<PathBuf>) 
     let mut saved = String::new();
     let mut editor_wanted = false;
     let first = app.mark_read();
-    let mut shell = Shell { store: store.clone(), me, cmds: cmd_tx, bell: false };
+    let mut shell =
+        Shell { store: store.clone(), me, cmds: cmd_tx, bell: false, relay: relay_url.clone(), last_live: 0 };
+    shell.sync_lists(&mut app);
     shell.exec(&mut app, first, &mut editor_wanted);
 
     loop {
@@ -213,9 +214,69 @@ struct Shell {
     me: Identity,
     cmds: tokio::sync::mpsc::UnboundedSender<net::Cmd>,
     bell: bool,
+    relay: String,
+    last_live: i64,
 }
 
 impl Shell {
+    /// Mute, block, verification and device lists from the store into the interface state.
+    fn sync_lists(&self, app: &mut App) {
+        app.muted = self.store.addresses("muted");
+        app.blocked = self.store.addresses("blocked");
+        app.my_device = self.store.device().map(|d| d.address().to_string()).unwrap_or_default();
+        app.devices = miga_client::devices::devices(&self.store)
+            .iter()
+            .filter_map(|d| {
+                Some((d["address"].as_str()?.to_string(), d["label"].as_str().unwrap_or("Device").to_string()))
+            })
+            .collect();
+        if let Ok(list) = self.store.contacts() {
+            app.verified = list
+                .iter()
+                .filter(|c| {
+                    c.verified.as_deref().is_some_and(|v| {
+                        miga_core::crypto::safety_number(self.me.address(), &c.address).is_ok_and(|n| n == v)
+                    })
+                })
+                .map(|c| c.address.clone())
+                .collect();
+        }
+    }
+
+    fn set_list(&self, key: &str, peer: &str, on: bool) -> miga_client::Result<()> {
+        let mut list = self.store.addresses(key);
+        list.retain(|a| a != peer);
+        if on {
+            list.push(peer.to_string());
+        }
+        self.store.set_meta(key, serde_json::json!(list))?;
+        self.forward(None, serde_json::json!({"k": "state", key: list}));
+        Ok(())
+    }
+
+    /// Deletes the conversation (or the contact too) here and on the other devices, with a tombstone.
+    fn delete(&self, app: &mut App, peer: &str, whole: bool) {
+        use miga_core::sync::{Tomb, TombKind};
+        let kind = if whole { TombKind::Contact } else { TombKind::Conversation };
+        let t = Tomb { chat: peer.to_string(), kind, id: None, mine: false, ts: now_ms() };
+        let result = miga_client::devices::remember_deletes(&self.store, std::slice::from_ref(&t))
+            .and_then(|msgs| miga_client::devices::apply_tombstones(&self.store, &[t]).map(|_| msgs));
+        match result {
+            Ok(msgs) => {
+                for (to, m) in msgs {
+                    self.forward(to, m);
+                }
+                app.drop_chat(peer, whole);
+                app.say(if whole { "Contact deleted on all your devices" } else { "Chat deleted on all your devices" });
+            }
+            Err(e) => app.say(e.to_string()),
+        }
+    }
+
+    fn forward(&self, to: Option<String>, m: serde_json::Value) {
+        let _ = self.cmds.send(net::Cmd::Sync(to, m));
+    }
+
     fn refresh(&self, app: &mut App, peer: &str) {
         let known = app.chats.iter().any(|c| c.address == peer);
         if let Ok(list) = self.store.contacts() {
@@ -234,12 +295,58 @@ impl Shell {
 
     fn on_net(&mut self, app: &mut App, ev: net::NetEvent) {
         match ev {
-            net::NetEvent::Conn(c) => app.conn = c,
+            net::NetEvent::Conn(c) => {
+                app.conn = match c {
+                    net::HubConn::Connecting => app::Conn::Connecting,
+                    net::HubConn::Online => app::Conn::Online,
+                    net::HubConn::Offline => app::Conn::Offline,
+                }
+            }
             net::NetEvent::Notice(m) => app.say(m),
+            net::NetEvent::Link { code, .. } => {
+                let url = crate::qr::link_url(&self.relay, &code);
+                let lines = crate::qr::lines(&url).unwrap_or_default();
+                app.popup = app::Popup::Link { code, lines, url };
+            }
+            net::NetEvent::LinkEnded(m) => {
+                if matches!(app.popup, app::Popup::Link { .. }) {
+                    app.popup = app::Popup::None;
+                }
+                if !m.is_empty() {
+                    app.say(m);
+                }
+                self.sync_lists(app);
+            }
+            net::NetEvent::Devices => self.sync_lists(app),
+            net::NetEvent::Progress(d, t) => {
+                app.history = if d >= t && t > 0 { None } else { Some((d, t)) };
+                if d >= t {
+                    app.say("History copied");
+                    if let Ok(list) = self.store.contacts() {
+                        for c in list {
+                            self.refresh(app, &c.address);
+                        }
+                    }
+                }
+            }
+            net::NetEvent::Read(peer, ts) => app.read_up_to(&peer, ts),
+            net::NetEvent::Erased => {
+                app.quit = true;
+            }
+            net::NetEvent::Live { from, text } => {
+                if text.is_empty() {
+                    app.live.remove(&from);
+                } else {
+                    app.live.insert(from, text);
+                }
+            }
+            net::NetEvent::FileReady { path, .. } => open_file(app, &path),
+            net::NetEvent::Confirmed(_) | net::NetEvent::Drained => {}
             net::NetEvent::Changed { peer, shown } => {
                 self.refresh(app, &peer);
                 if let Some(m) = shown {
-                    let quiet = app.is_watching(&peer) && !app.cfg.notifications.when_focused;
+                    app.live.remove(&peer);
+                    let quiet = (app.is_watching(&peer) && !app.cfg.notifications.when_focused) || app.is_muted(&peer);
                     if !quiet {
                         if app.cfg.notifications.bell {
                             self.bell = true;
@@ -269,7 +376,7 @@ impl Shell {
                             if app.conn == app::Conn::Online {
                                 self.send_cmd(
                                     app,
-                                    net::Cmd { peer, id: out.id, body: out.body, after: net::After::Sent },
+                                    net::Cmd::Send { peer, id: out.id, body: out.body, after: net::After::Sent },
                                 );
                             } else {
                                 app.say("Offline: the message is queued and goes out when you reconnect");
@@ -281,7 +388,7 @@ impl Shell {
                 Intent::Edit { peer, id, text } => match engine::prepare_edit(&self.me, &peer, &id, &text) {
                     Ok(c) => {
                         let after = net::After::Edit { msg_id: id, text: c.text, ts: c.ts };
-                        self.send_cmd(app, net::Cmd { peer, id: c.frame_id, body: c.body, after });
+                        self.send_cmd(app, net::Cmd::Send { peer, id: c.frame_id, body: c.body, after });
                     }
                     Err(e) => app.say(e.to_string()),
                 },
@@ -289,17 +396,30 @@ impl Shell {
                     Ok(c) => {
                         self.send_cmd(
                             app,
-                            net::Cmd { peer, id: c.frame_id, body: c.body, after: net::After::Delete { msg_id: id } },
+                            net::Cmd::Send {
+                                peer,
+                                id: c.frame_id,
+                                body: c.body,
+                                after: net::After::Delete { msg_id: id },
+                            },
                         );
                     }
                     Err(e) => app.say(e.to_string()),
                 },
                 Intent::Seen { peer, ids } => {
+                    if let Some(up_to) = self.store.chat(&peer).ok().and_then(|l| {
+                        l.iter()
+                            .filter(|m| m["mine"] == false && ids.iter().any(|i| m["id"] == i.as_str()))
+                            .filter_map(|m| m["ts"].as_f64())
+                            .reduce(f64::max)
+                    }) {
+                        self.forward(None, serde_json::json!({"k": "read", "peer": peer, "upTo": up_to}));
+                    }
                     if app.conn == app::Conn::Online {
                         if let (Ok(body), Ok(id)) =
                             (engine::seen_receipt(&self.me, &peer, &ids), miga_core::random_id())
                         {
-                            self.send_cmd(app, net::Cmd { peer, id, body, after: net::After::Nothing });
+                            self.send_cmd(app, net::Cmd::Send { peer, id, body, after: net::After::Nothing });
                         }
                     }
                 }
@@ -315,6 +435,57 @@ impl Shell {
                     let _ = self.store.save_ui_state(&app.export_state());
                 }
                 Intent::Quit => {}
+                Intent::Attach { peer, path, caption } => {
+                    self.send_cmd(app, net::Cmd::SendFile { peer, path, caption });
+                }
+                Intent::OpenAttachment { peer, id } => self.send_cmd(app, net::Cmd::Fetch { peer, id }),
+                Intent::AddDevice => self.send_cmd(app, net::Cmd::AddDevice),
+                Intent::CancelLink => self.send_cmd(app, net::Cmd::CancelLink),
+                Intent::RemoveDevice(a) => {
+                    self.send_cmd(app, net::Cmd::RemoveDevice(a));
+                    self.sync_lists(app);
+                }
+                Intent::CopyHistory(a) => self.send_cmd(app, net::Cmd::CopyHistory(a)),
+                Intent::Mute { peer, on } => {
+                    let _ = self.set_list("muted", &peer, on);
+                }
+                Intent::Block { peer, on } => {
+                    let _ = self.set_list("blocked", &peer, on);
+                }
+                Intent::Verify { peer, on } => {
+                    if let Ok(mut list) = self.store.contacts() {
+                        let number = miga_core::crypto::safety_number(self.me.address(), &peer).ok();
+                        if let Some(c) = list.iter_mut().find(|c| c.address == peer) {
+                            c.verified = if on { number } else { None };
+                        }
+                        let _ = self.store.save_contacts(&list);
+                        if let Some(c) = list.iter().find(|c| c.address == peer) {
+                            self.forward(
+                                None,
+                                serde_json::json!({"k": "state", "contacts": [miga_client::devices::contact_value(c)]}),
+                            );
+                        }
+                    }
+                }
+                Intent::DeleteChat { peer } => self.delete(app, &peer, false),
+                Intent::DeleteContact { peer } => self.delete(app, &peer, true),
+                Intent::ShowQr(app::QrKind::Address) => {
+                    let url = format!("{}/app/#to={}", crate::qr::app_origin(&self.relay), self.me.address());
+                    app.popup = app::Popup::Qr {
+                        title: "Your address".into(),
+                        lines: crate::qr::lines(&url).unwrap_or_default(),
+                        note: "Scan with MIGA to add you. It contains your address.".into(),
+                    };
+                }
+                Intent::Live { peer, text } => {
+                    let now = now_ms();
+                    if now - self.last_live >= 300 || text.is_empty() {
+                        self.last_live = now;
+                        if let Ok(body) = miga_core::payload::encrypt_live(&self.me, &peer, &text, now) {
+                            self.send_cmd(app, net::Cmd::Live { peer, body });
+                        }
+                    }
+                }
             }
         }
     }
@@ -327,6 +498,33 @@ fn copy_osc52(text: &str) {
     let mut out = stdout();
     let _ = write!(out, "\x1b]52;c;{encoded}\x07");
     let _ = out.flush();
+}
+
+/// Opens a saved attachment with `open_command`.
+fn open_file(app: &mut App, path: &str) {
+    let mut program = app.cfg.open_command.clone();
+    if program.is_empty() {
+        app.say(format!("Saved: {path}"));
+        return;
+    }
+    if program == "xdg-open" && cfg!(target_os = "macos") {
+        program = "open".into();
+    }
+    match std::process::Command::new(&program)
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(mut child) => {
+            app.say(format!("Saved to {path}"));
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+        Err(e) => app.say(format!("Saved to {path}; could not run {program}: {e}")),
+    }
 }
 
 fn open_url(app: &mut App, url: &str) {
