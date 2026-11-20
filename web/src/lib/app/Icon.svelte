@@ -5,6 +5,8 @@
 	 */
 	export type IconName =
 		| 'send'
+		| 'pin'
+		| 'pin-off'
 		| 'settings'
 		| 'plus'
 		| 'back'
@@ -59,7 +61,13 @@
 	stroke-linecap="round"
 	stroke-linejoin="round"
 >
-	{#if name === 'send'}
+	{#if name === 'pin'}
+		<path d="M9 4h6l-1 6 3 3v1.5H7V13l3-3z" />
+		<path d="M12 14.5V21" />
+	{:else if name === 'pin-off'}
+		<path d="M9 4h6l-1 6 3 3v1.5h-3M7 14.5V13l3-3-1-6" />
+		<path d="M12 14.5V21M4 4l16 16" />
+	{:else if name === 'send'}
 		<path d="M21 3 10 14" />
 		<path d="M21 3l-7 18-4-7-7-4z" />
 	{:else if name === 'settings'}

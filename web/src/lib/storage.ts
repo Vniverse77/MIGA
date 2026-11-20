@@ -11,6 +11,8 @@ import {
 import type { Att } from './attach';
 import { RECENT_EMOJI_KEY } from './emoji';
 import { deleteDb, openDb, req, tx, type MessageRecord } from './db';
+import { cleanPinState, type PinState } from './pins';
+import { resolveTypingMode, type TypingMode } from './typing';
 import { cleanHistoryJob, cleanTombs, pruneTombs, type HistoryJob, type Tomb } from './sync';
 
 /** `custom` marks a name the user typed; a name the contact shares never replaces it. */
@@ -61,6 +63,8 @@ const KEY_LINK = 'miga.link';
 const KEY_BLOCKED = 'miga.blocked';
 const KEY_RECEIPTS = 'miga.receipts';
 const KEY_LIVE = 'miga.live';
+const KEY_TYPING = 'miga.typing';
+const KEY_PINS = 'miga.pins';
 const KEY_FILTERED = 'miga.filtered';
 const KEY_STRICT = 'miga.strict';
 const KEY_UNREAD = 'miga.unread';
@@ -108,18 +112,18 @@ export function loadReceipts(): boolean {
 	}
 }
 
-/** Show what I type live (this device only). Off by default: the other side sees unfinished words. */
-export function loadLive(): boolean {
+/** Who sees that I am typing: off, a "typing..." indicator (default) or the live text. This device only. */
+export function loadTypingMode(): TypingMode {
 	try {
-		return localStorage.getItem(KEY_LIVE) === '1';
+		return resolveTypingMode(localStorage.getItem(KEY_TYPING), localStorage.getItem(KEY_LIVE));
 	} catch {
-		return false;
+		return 'typing';
 	}
 }
 
-export function saveLive(on: boolean): void {
+export function saveTypingMode(mode: TypingMode): void {
 	try {
-		localStorage.setItem(KEY_LIVE, on ? '1' : '0');
+		localStorage.setItem(KEY_TYPING, mode);
 	} catch {
 		// Ignored: the setting just does not persist.
 	}
@@ -283,6 +287,9 @@ export async function eraseAll(): Promise<void> {
 		KEY_FILTERED,
 		KEY_UNREAD,
 		KEY_MUTED,
+		KEY_LIVE,
+		KEY_TYPING,
+		KEY_PINS,
 		KEY_NOTIFY,
 		KEY_NOTIFY_BANNER,
 		KEY_TOMBS,
@@ -305,6 +312,8 @@ export type AppData = {
 	unread: Unread;
 	/** Chats that count unread messages but never notify. */
 	muted: string[];
+	/** Pinned messages and chats (pins.ts). Local to the account's devices. */
+	pins: PinState;
 	/** Remembered deletes (see sync.ts). Old ones are pruned on load. */
 	tombs: Tomb[];
 	/** An unfinished history copy from another device, if any. */
@@ -321,6 +330,7 @@ let storedContacts = new Map<string, string>();
 let storedBlocked = '';
 let storedUnread = '';
 let storedMuted = '';
+let storedPins = '';
 let storedTombs = '';
 let storedHx = '';
 
@@ -350,6 +360,7 @@ function legacyData(): AppData {
 	return {
 		unread: cleanUnread(readJson<unknown>(KEY_UNREAD, {})),
 		muted: cleanBlocked(readJson<unknown>(KEY_MUTED, [])),
+		pins: cleanPinState(readJson<unknown>(KEY_PINS, null)),
 		contacts: readJson<Contact[]>(KEY_CONTACTS, []),
 		chats: readJson<Chats>(KEY_CHATS, {}),
 		blocked: cleanBlocked(readJson<unknown>(KEY_BLOCKED, [])),
@@ -399,6 +410,7 @@ export async function loadData(): Promise<AppData> {
 			const blocked = cleanBlocked(await req(t.objectStore('meta').get('blocked')));
 			const unread = cleanUnread(await req(t.objectStore('meta').get('unread')));
 			const muted = cleanBlocked(await req(t.objectStore('meta').get('muted')));
+			const pins = cleanPinState(await req(t.objectStore('meta').get('pins')));
 			const tombs = cleanTombs(await req(t.objectStore('meta').get('tombs')));
 			const hx = cleanHistoryJob(await req(t.objectStore('meta').get('hx')));
 			const chats: Chats = {};
@@ -416,11 +428,12 @@ export async function loadData(): Promise<AppData> {
 			storedBlocked = JSON.stringify(blocked);
 			storedUnread = JSON.stringify(unread);
 			storedMuted = JSON.stringify(muted);
+			storedPins = JSON.stringify(pins);
 			pruneTombs(tombs);
 			storedTombs = JSON.stringify(tombs);
 			storedHx = JSON.stringify(hx);
 			void navigator.storage?.persist?.();
-			return { contacts, chats, blocked, unread, muted, tombs, hx };
+			return { contacts, chats, blocked, unread, muted, pins, tombs, hx };
 		});
 	} catch {
 		// No usable IndexedDB (some private modes): keep working from localStorage as before.
@@ -495,6 +508,18 @@ export function saveMuted(muted: string[]): void {
 		if (json === storedMuted) return;
 		await tx(db!, ['meta'], 'readwrite', (t) => void t.objectStore('meta').put(muted, 'muted'));
 		storedMuted = json;
+	});
+}
+
+/** Pinned messages and chats. */
+export function savePins(pins: PinState): void {
+	if (erased) return;
+	if (!db) return void localStorage.setItem(KEY_PINS, JSON.stringify(pins));
+	const json = JSON.stringify(pins);
+	queue(async () => {
+		if (json === storedPins) return;
+		await tx(db!, ['meta'], 'readwrite', (t) => void t.objectStore('meta').put(pins, 'pins'));
+		storedPins = json;
 	});
 }
 

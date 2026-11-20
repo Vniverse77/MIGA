@@ -280,3 +280,63 @@ Deno.test({
 		}
 	}
 });
+
+Deno.test({
+	name: 'typing and live text: ephemeral frames reach an online peer, are never queued for an offline one',
+	...opts,
+	async fn() {
+		const { encryptTyping, encryptLive, decrypt } = await import('./crypto.ts');
+		const h = new Harness();
+		await h.init();
+		try {
+			const alice = newIdentity();
+			const bob = newIdentity();
+			const a = connect(h, alice);
+			a.client.connect();
+			await a.waitReady(1);
+			// Bob is offline: the frames vanish, nothing waits for him.
+			a.client.sendLive(bob.address, encryptTyping(alice, bob.address, true));
+			a.client.sendLive(bob.address, encryptLive(alice, bob.address, 'hel'));
+			await sleep(300);
+			const seen: string[] = [];
+			const b = new RelayClient(
+				h.url,
+				bob,
+				{
+					onStatus: () => {},
+					onReady: () => {},
+					onMessage: (m) => (seen.push('queued:' + m.id), true),
+					onSent: () => {},
+					onLive: (f) => {
+						const plain = decrypt(bob, f.from, f.body);
+						if (plain?.typing !== undefined) seen.push(plain.typing ? 'typing' : 'stopped');
+						else if (plain?.live !== undefined) seen.push('live:' + plain.live);
+					},
+					onError: () => {}
+				},
+				TIMING
+			);
+			b.connect();
+			for (let i = 0; i < 300 && !b['ready']; i++) await sleep(10);
+			await sleep(300);
+			assertEq(seen.length, 0, 'offline frames must not be queued');
+			a.client.sendLive(bob.address, encryptTyping(alice, bob.address, true));
+			await sleep(5);
+			a.client.sendLive(bob.address, encryptLive(alice, bob.address, 'hello'));
+			await sleep(5);
+			a.client.sendLive(bob.address, encryptTyping(alice, bob.address, false));
+			await sleep(600);
+			// The relay forwards each ephemeral frame in its own goroutine, so arrival order is not guaranteed
+			// (the app orders them by the sender's timestamp inside the ciphertext). All three must arrive.
+			assertEq([...seen].sort().join(','), 'live:hello,stopped,typing', 'online frames arrive');
+			a.client.close();
+			b.close();
+		} finally {
+			await h.dispose();
+		}
+	}
+});
+
+function assertEq(a: unknown, b: unknown, msg: string): void {
+	if (a !== b) throw new Error(`${msg}: got ${String(a)}, want ${String(b)}`);
+}

@@ -149,6 +149,7 @@ belongs to the account. JSON kinds:
 | `edit` | `peer`, `id`, `mine`, `text`, `ts`: an edit one device already applied (own edit, or one received from the peer), so the others show the same text. |
 | `st` | `peer`, `ids`, `d` (`delivered` or `read`): a receipt one device already applied, so the others show the same ticks. `read` is applied only if read receipts are on. |
 | `receipts` | `on`: the account-wide read receipts setting. |
+| `state.pins` | `pins` = `{m: {<chat>: [<key>...]}, c: [<chat>...]}`: pinned messages (key = `m`/`t` + id, newest first, at most 3 per chat) and pinned chats (top first, at most 5). The complete set; it replaces the receiver's. Pins are local to the account's devices and are never sent to the other person. |
 | `bye` | `address` of a device that left or was removed. The named device erases itself. |
 
 The relay pushes a message for the account address to every device online at that moment and
@@ -299,9 +300,21 @@ acknowledge it to the relay); they keep showing the old text. Receiving rules:
   sync message. Only messages in state `sent` can be edited, and only while connected to the
   relay (like deleting for everyone).
 
-## Live typing
+## Typing indicator and live typing
 
-Optional, off by default (setting "Show what I type live", per device). While it is on, the
+Setting "Typing" (per device): **Off**, **Typing indicator** (default) or **Live text**. An older
+"Show what I type live" setting migrates to Live text when it was on, otherwise to the indicator.
+
+**Typing indicator.** While the composer has focus, the box is not empty and the chat is open (not a
+request, not blocked), the sender transmits `{"v":0,"ts":<ms>,"typing":true}` as an ephemeral frame,
+repeated at most every 3 s while the draft changes, and `{"typing":false}` when the box empties, on
+blur, on chat switch or when the app is hidden. No text, so old clients (which find no known key)
+drop it. The receiver shows "typing..." in the chat header and as a small row at the end of the
+chat, and in the chat list, and forgets it after 6 s without a frame. The relay forwards ephemeral
+frames concurrently, so receivers drop a frame whose `ts` is older than the newest one seen from
+that sender. Live text frames also mark the sender as typing.
+
+**Live text** (the rest of this section). While it is on, the
 composer has focus and the chat is open, the sender transmits what is in the message box:
 
 - `{"v":0,"ts":<ms>,"live":{"text":"<current draft>"}}`, at most 4000 characters, throttled to

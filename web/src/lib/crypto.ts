@@ -36,6 +36,8 @@ export type Plain = {
 	att?: Att;
 	/** Live typing (ephemeral, no bubble): the sender's unfinished text; empty = cleared. */
 	live?: string;
+	/** Typing indicator (ephemeral, no bubble): true = typing now, false = stopped. */
+	typing?: boolean;
 	/** First-contact proof of work (docs/PROTOCOL.md). Absent from old clients and from known contacts. */
 	pow?: Pow;
 };
@@ -224,6 +226,14 @@ export function encryptLive(id: Identity, peer: string, text: string): string {
 	return seal(id, peer, JSON.stringify({ v: 0, ts: Date.now(), live: { text: text.slice(0, MAX_TEXT) } }));
 }
 
+/**
+ * Typing indicator control message: only "typing" or "stopped", no text. Ephemeral relay frame only.
+ * Clients that predate it find no known key and drop it (decrypt returns null).
+ */
+export function encryptTyping(id: Identity, peer: string, typing: boolean): string {
+	return seal(id, peer, JSON.stringify({ v: 0, ts: Date.now(), typing }));
+}
+
 function seal(id: Identity, peer: string, plaintext: string): string {
 	const json = utf8ToBytes(plaintext);
 	const padded = new Uint8Array(Math.ceil(json.length / PAD) * PAD).fill(0x20);
@@ -254,6 +264,7 @@ export function decrypt(id: Identity, peer: string, body: string): Plain | null 
 			if (typeof parsed.live?.text === 'string') {
 				return { text: '', ts, live: parsed.live.text.slice(0, MAX_TEXT) };
 			}
+			if (typeof parsed.typing === 'boolean') return { text: '', ts, typing: parsed.typing };
 			const ack = cleanIds(parsed.ack);
 			const seen = cleanIds(parsed.seen);
 			return ack.length || seen.length
