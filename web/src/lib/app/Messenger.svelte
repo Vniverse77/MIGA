@@ -18,6 +18,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	import { GLOBAL_LIMIT, messageKey, searchAll, searchMessages, segments, snippet } from '../search';
 	import { appUrl, type Scanned } from '../qr';
 	import { linkify } from '../links';
+	import { cleanPreview, firstLink, type Preview } from '../preview';
+	import { fetchLinkPreview, previewsAvailable, type Fetched } from '../previewfetch';
+	import LinkCard from './LinkCard.svelte';
 	import { VERSION_LABEL, VERSION_TITLE } from '../version';
 	import { onMount, tick, untrack } from 'svelte';
 	import {
@@ -120,6 +123,8 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		loadNotifyBannerDismissed,
 		loadNotifyMode,
 		loadReceipts,
+		loadLinkPreviews,
+		saveLinkPreviews,
 		saveBackupInfo,
 		saveBlocked,
 		saveChats,
@@ -291,6 +296,53 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	}
 	let ready = $state(false);
 	let draft = $state('');
+	/** Link previews (apps only): this device fetches the page of the first link in the draft; off = never. */
+	let linkPreviews = $state(true);
+	type DraftPreview = { url: string; preview: Preview; prepared: Prepared | null; src: string };
+	let draftPreview = $state<DraftPreview | null>(null);
+	let previewTried = '';
+	let previewSending = false;
+	function clearDraftPreview(): void {
+		if (draftPreview?.src) URL.revokeObjectURL(draftPreview.src);
+		draftPreview = null;
+	}
+	$effect(() => {
+		const text = draft;
+		const peer = active;
+		const on = linkPreviews && previewsAvailable() && !editing && !!peer;
+		const link = on ? firstLink(text) : null;
+		untrack(() => {
+			if (!link) {
+				previewTried = '';
+				if (draftPreview) clearDraftPreview();
+			} else if (draftPreview && draftPreview.url !== link) clearDraftPreview();
+		});
+		if (!link || untrack(() => draftPreview?.url === link || previewTried === link)) return;
+		// Wait for a pause in typing, so half-typed addresses are not fetched.
+		const timer = setTimeout(async () => {
+			previewTried = link;
+			const got: Fetched | null = await fetchLinkPreview(link);
+			if (!got || firstLink(draft) !== link || active !== peer || !linkPreviews) return;
+			clearDraftPreview();
+			const { meta, image } = got;
+			draftPreview = {
+				url: link,
+				preview: { url: link, title: meta.title, desc: meta.desc, site: meta.site },
+				prepared: image,
+				src: image ? URL.createObjectURL(new Blob([image.bytes as BlobPart], { type: image.mime })) : ''
+			};
+		}, 700);
+		return () => clearTimeout(timer);
+	});
+	function removeDraftPreview(): void {
+		clearDraftPreview();
+		// previewTried stays set: the card does not come back for this address.
+	}
+	function setLinkPreviews(on: boolean): void {
+		linkPreviews = on;
+		saveLinkPreviews(on);
+		if (!on) clearDraftPreview();
+	}
 
 	// Android: the native Back button asks the page first (MainActivity.kt calls window.__migaBack). The page steps back
 	// inside the app (chat -> list, settings or safety number -> chat) and answers false only on the conversation list,
@@ -629,6 +681,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 			chats = data.chats;
 			blocked = data.blocked;
 			receipts = loadReceipts();
+			linkPreviews = loadLinkPreviews();
 			typingMode = loadTypingMode();
 			pins = data.pins;
 			filtered = loadFiltered();
@@ -797,7 +850,8 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 					ts: m.ts,
 					state: 'received',
 					...(plain.reply ? { reply: plain.reply } : {}),
-					...(plain.att ? { att: plain.att } : {})
+					...(plain.att ? { att: plain.att } : {}),
+					...(plain.prev ? { preview: plain.prev } : {})
 				};
 				// Every online device gets the message from the relay; offline ones get this copy.
 				if (addMessages(m.from, [message])) {
@@ -1643,7 +1697,10 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		clearTimeout(gcTimer);
 		gcTimer = setTimeout(async () => {
 			const used = new Set<string>();
-			for (const list of Object.values(chats)) for (const m of list) if (m.att) used.add(m.att.blob);
+			for (const list of Object.values(chats)) for (const m of list) {
+				if (m.att) used.add(m.att.blob);
+				if (m.preview?.img) used.add(m.preview.img.blob);
+			}
 			const stale = (await mediaIds()).filter((id) => !used.has(id));
 			if (stale.length) await deleteMedia(stale);
 		}, 800);
@@ -1866,7 +1923,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 				return false;
 			}
 		}
-		const ok = relay.send(peer, m.id, encrypt(me, peer, m.text, sharedName, m.reply, m.att, pow));
+		const ok = relay.send(peer, m.id, encrypt(me, peer, m.text, sharedName, m.reply, m.att, pow, m.preview));
 		if (ok) retryTrack.set(m.id, afterSend(retryTrack.get(m.id), Date.now()));
 		return ok;
 	}
@@ -2100,27 +2157,54 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		action();
 	}
 
-	function sendMessage(event: SubmitEvent): void {
+	/** The card for a message: the draft's preview if its link is in `text`, with its picture encrypted and uploaded. */
+	async function previewFor(text: string): Promise<Preview | undefined> {
+		const d = draftPreview;
+		if (!d || !linkPreviews || !linkify(text).some((p) => p.url === d.url)) return undefined;
+		const preview: Preview = { ...d.preview };
+		if (d.prepared) {
+			try {
+				const img = await upload(d.prepared, () => {}).promise;
+				void saveMedia(img.blob, new Blob([d.prepared.bytes as BlobPart], { type: img.mime }), img.mime);
+				preview.img = img;
+			} catch {
+				// The card goes out without its picture.
+			}
+		}
+		return cleanPreview(preview, text, true) ?? undefined;
+	}
+
+	async function sendMessage(event: SubmitEvent): Promise<void> {
 		event.preventDefault();
 		const text = draft.trim();
 		if (editing) return saveEdit(text);
-		if (!text || !active || !identity) return;
+		if (!text || !active || !identity || previewSending) return;
 		if (text.length > MAX_TEXT) {
 			notice = t('n_too_long', { max: MAX_TEXT });
 			return;
 		}
-		const id = randomId();
-		if (!chats[active]) chats[active] = [];
-		const reply = replyTo ?? undefined;
 		const peer = active;
+		previewSending = true;
+		let preview: Preview | undefined;
+		try {
+			preview = await previewFor(text);
+		} finally {
+			previewSending = false;
+		}
+		if (!identity || active !== peer || draft.trim() !== text) return;
+		const id = randomId();
+		if (!chats[peer]) chats[peer] = [];
+		const reply = replyTo ?? undefined;
 		chats[peer].push({
 			id,
 			mine: true,
 			text,
 			ts: Date.now(),
 			state: 'pending',
-			...(reply ? { reply } : {})
+			...(reply ? { reply } : {}),
+			...(preview ? { preview } : {})
 		});
+		clearDraftPreview();
 		persist();
 		draft = '';
 		replyTo = null;
@@ -2853,6 +2937,7 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 		relay.unsend(peer, message.id);
 		// The attachment itself too: only the sender holds the delete token.
 		if (message.att) void deleteRemote($state.snapshot(message.att));
+		if (message.preview?.img) void deleteRemote($state.snapshot(message.preview.img));
 		const items = [{ id: message.id, mine: true }];
 		if (chats[peer] && removeMessages(chats[peer], items)) persist();
 		dropPins(peer, items);
@@ -3485,6 +3570,17 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 						<p class="hint">{t('receipts_note')}</p>
 					</section>
 
+					{#if previewsAvailable()}
+						<section class="card">
+							<h2>{t('linkprev_title')}</h2>
+							<label class="check">
+								<input type="checkbox" checked={linkPreviews} onchange={(e) => setLinkPreviews(e.currentTarget.checked)} />
+								<span>{t('linkprev_label')}</span>
+							</label>
+							<p class="hint">{t('linkprev_note')}</p>
+						</section>
+					{/if}
+
 					<section class="card" id="message-requests">
 						<h2>{t('requests')}</h2>
 						<label class="check">
@@ -3873,6 +3969,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 							{#if message.text || !message.att}
 								<p class="selectable">{#if searchKeys.has(messageKey(message))}{#each segments(message.text, searchQuery) as seg, si (si)}{#if seg.hit}<mark class:cur={messageKey(message) === searchCurKey}>{seg.t}</mark>{:else}{seg.t}{/if}{/each}{:else}{#each linkify(message.text) as part, pi (pi)}{#if part.url}<a href={part.url} target="_blank" rel="noopener noreferrer" onclick={(e) => (e.preventDefault(), platform.openExternal(part.url as string))}>{part.t}</a>{:else}{part.t}{/if}{/each}{/if}</p>
 							{/if}
+							{#if message.preview}
+								<div class="bubble-card"><LinkCard preview={message.preview} /></div>
+							{/if}
 							<div class="foot">
 							<small>
 								{#if message.edited}<span class="edited">{t('edited')}</span>{' · '}{/if}{timeOf(message.ts)}{#if message.mine}{' · '}{#if message.state === 'sent'}{@const level = tickLevel(message)}<span
@@ -4015,6 +4114,9 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 					</div>
 				{:else}
 				{#if attError}<p class="att-error" role="alert">{attError}</p>{/if}
+				{#if draftPreview}
+					<div class="prevbar"><LinkCard preview={draftPreview.preview} src={draftPreview.src} onremove={removeDraftPreview} /></div>
+				{/if}
 				<form class="composer" onsubmit={sendMessage}>
 					<button type="button" class="attach-btn" aria-label={t('att_btn')} title={t('att_btn')} disabled={!!editing} onclick={pickFiles}>
 						<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -5503,6 +5605,19 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	}
 	.file-input {
 		display: none;
+	}
+	.prevbar {
+		padding: 0.5rem 1.25rem 0;
+		background: var(--panel);
+		border-top: 0.5px solid var(--line);
+	}
+	.prevbar + :global(.composer) {
+		border-top: 0;
+	}
+	.bubble-card {
+		margin: 0.35rem 0;
+		min-width: 0;
+		width: min(20rem, 100%);
 	}
 	.att-error {
 		margin: 0;

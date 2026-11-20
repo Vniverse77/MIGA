@@ -10,8 +10,11 @@
 // running without a way back. Also on desktop: single instance and remembered window size/position.
 // Tray and close-to-tray are desktop only; on Android the system owns the window lifecycle.
 //
+// Link previews (preview.rs) add two more commands, fetch_preview and fetch_preview_image; see that file for the guard.
 // The page may call four small commands (tray_state, set_keep_in_tray, set_notify, set_unread). They carry
 // booleans and one number; nothing else crosses from the page to the shell.
+mod preview;
+
 #[cfg(desktop)]
 mod shell {
     use serde::{Deserialize, Serialize};
@@ -304,10 +307,14 @@ pub fn run() {
             shell::tray_state,
             shell::set_keep_in_tray,
             shell::set_notify,
-            shell::set_unread
+            shell::set_unread,
+            preview::fetch_preview,
+            preview::fetch_preview_image
         ])
         .setup(shell::setup)
         .on_window_event(|window, event| shell::on_window_event(window, event));
+    #[cfg(mobile)]
+    let builder = builder.invoke_handler(tauri::generate_handler![preview::fetch_preview, preview::fetch_preview_image]);
     builder
         .run(tauri::generate_context!())
         .expect("error while running MIGA");

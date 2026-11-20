@@ -10,6 +10,7 @@ import {
 	PUBLIC_ORIGIN,
 	PUBLIC_RELAY,
 	type BackgroundControl,
+	type LinkPreviewFetcher,
 	type Notifier,
 	type NotifyPermission,
 	type Platform
@@ -29,6 +30,15 @@ function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
 	if (!internals) return Promise.reject(new Error('not in the app'));
 	return internals.invoke(cmd, args);
 }
+
+/** Link previews: two small commands of the shell (src-tauri/src/preview.rs). */
+const linkPreview: LinkPreviewFetcher = {
+	page: (url) => call<{ url: string; html: string }>('fetch_preview', { url }),
+	async image(url) {
+		const b64 = await call<string>('fetch_preview_image', { url });
+		return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+	}
+};
 
 const background: BackgroundControl = {
 	kind: 'tray',
@@ -107,6 +117,7 @@ export const platform: Platform = {
 		close: (tag) => (inTauri() ? nativeNotifier : webNotifier).close(tag)
 	},
 	background: inTauri() ? background : undefined,
+	linkPreview: inTauri() ? linkPreview : undefined,
 	setUnread: (count) => {
 		if (inTauri()) void call('set_unread', { count }).catch(() => {});
 	},

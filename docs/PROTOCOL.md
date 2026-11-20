@@ -408,6 +408,26 @@ are sent byte for byte so the animation survives. GIFs carry no EXIF; **MP4 and 
 `media` store, keyed by blob id, and removed when their message is deleted. There is no GIF search: it would
 send IP addresses and search words to a third party.
 
+## Link previews
+
+Like Signal, the **sender's** device makes the preview; the receiver never contacts the website. A text message
+may carry `"prev": {"url", "title", "desc", "site", "img"}` next to `text`, inside the same ciphertext:
+
+- `url` is a link that appears in `text` (a card for a link the text does not show is dropped), http or https only.
+  Caps: url 2048, title 200, desc 300, site 80 characters; control and bidi characters are removed.
+- `img` (optional) is an ordinary attachment (see above): a still WebP/JPEG/PNG, at most 512 px and 300 KB,
+  encrypted and uploaded once. The delete token is not sent.
+- Old clients ignore `prev` and show the text with the link. Messages with an attachment carry no `prev`.
+
+Fetching is done only by the desktop and Android apps (Rust commands `fetch_preview` and `fetch_preview_image`
+in `desktop/src-tauri/src/preview.rs`): http/https only, at most 3 redirects, 5 s total, HTML read up to 512 KB,
+images up to 300 KB, no cookies, generic User-Agent. An SSRF guard inside DNS resolution refuses loopback,
+private (10/8, 172.16/12, 192.168/16), link-local, 100.64/10, unique-local (fc00::/7), fe80::/10, multicast and
+other non-public addresses on every hop, for IP-literal hosts too; the checked address is the one connected to.
+The picture is shrunk and re-encoded in the page, which drops all metadata. The browser build never fetches
+(CORS, and it would expose the visitor's IP to arbitrary sites). Settings > Privacy > "Link previews" (on by
+default in the apps) turns it off; the website sees the sender's IP address when a preview is made.
+
 ## Message requests and first contact
 
 Client-side only. The relay is unchanged and learns nothing new: the proof of work below is inside the ciphertext.

@@ -11,6 +11,7 @@ import { hkdf } from '@noble/hashes/hkdf';
 import { sha256, sha512 } from '@noble/hashes/sha2';
 import { bytesToHex, hexToBytes, randomBytes, utf8ToBytes } from '@noble/hashes/utils';
 import { cleanAtt, type Att } from './attach.ts';
+import { cleanPreview, type Preview } from './preview.ts';
 import type { Message } from './storage';
 import { cleanPow, type Pow } from './pow';
 
@@ -34,6 +35,8 @@ export type Plain = {
 	edit?: Edit;
 	/** Attachment (photo, GIF, video). `text` is then the caption, possibly empty. */
 	att?: Att;
+	/** Link preview of the first link in `text`, fetched by the SENDER (receivers never contact the site). Old clients ignore it. */
+	prev?: Preview;
 	/** Live typing (ephemeral, no bubble): the sender's unfinished text; empty = cleared. */
 	live?: string;
 	/** Typing indicator (ephemeral, no bubble): true = typing now, false = stopped. */
@@ -144,7 +147,8 @@ export function encrypt(
 	name?: string,
 	reply?: Reply,
 	att?: Att,
-	pow?: Pow
+	pow?: Pow,
+	prev?: Preview
 ): string {
 	// With an attachment, `text` is the old-client fallback and `cap` the real caption.
 	const wire = att
@@ -159,7 +163,8 @@ export function encrypt(
 			ts: Date.now(),
 			...(name ? { name } : {}),
 			...(reply ? { reply } : {}),
-			...(pow ? { pow } : {})
+			...(pow ? { pow } : {}),
+			...(prev && !att ? { prev: { ...prev, ...(prev.img ? { img: { ...prev.img, del: undefined } } : {}) } } : {})
 		})
 	);
 }
@@ -298,9 +303,12 @@ export function decrypt(id: Identity, peer: string, body: string): Plain | null 
 		}
 		const att = parsed.att === undefined ? null : cleanAtt(parsed.att);
 		if (parsed.att !== undefined && !att) return null;
+		const text = att ? (typeof parsed.cap === 'string' ? parsed.cap.slice(0, MAX_TEXT) : '') : parsed.text;
+		const prev = att || parsed.prev === undefined ? null : cleanPreview(parsed.prev, text.slice(0, MAX_TEXT));
 		return {
 			text: att ? (typeof parsed.cap === 'string' ? parsed.cap.slice(0, MAX_TEXT) : '') : parsed.text,
 			...(att ? { att } : {}),
+			...(prev ? { prev } : {}),
 			ts: Number(parsed.ts) || Date.now(),
 			name: typeof parsed.name === 'string' ? parsed.name : undefined,
 			reply: cleanReply(parsed.reply) ?? undefined,

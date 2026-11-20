@@ -6,6 +6,7 @@ import {
 	PUBLIC_ORIGIN,
 	PUBLIC_RELAY,
 	type BackgroundControl,
+	type LinkPreviewFetcher,
 	type Notifier,
 	type NotifyPermission,
 	type Platform
@@ -113,8 +114,23 @@ const background: BackgroundControl = {
 	}
 };
 
+// Link previews: two commands of the Rust shell (src-tauri/src/preview.rs), called through the Tauri bridge.
+type Bridge = { invoke(cmd: string, args?: unknown): Promise<unknown> };
+const bridge = (): Bridge | undefined => (window as unknown as { __TAURI_INTERNALS__?: Bridge }).__TAURI_INTERNALS__;
+const linkPreview: LinkPreviewFetcher | undefined =
+	typeof window !== 'undefined' && bridge()
+		? {
+				page: (url) => bridge()!.invoke('fetch_preview', { url }) as Promise<{ url: string; html: string }>,
+				async image(url) {
+					const b64 = (await bridge()!.invoke('fetch_preview_image', { url })) as string;
+					return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+				}
+			}
+		: undefined;
+
 export const platform: Platform = {
 	background,
+	linkPreview,
 	target: 'mobile',
 	label: 'beta',
 	notifier: nativeNotifier,
