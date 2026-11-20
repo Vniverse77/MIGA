@@ -3220,8 +3220,8 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 							</small>
 							{#if message.mine && message.state === 'failed'}
 								<span class="failed-actions">
-									<button type="button" data-retry onclick={() => retryFailed(message)}>{t('att_retry')}</button>
-									<button type="button" data-discard onclick={() => discardFailed(message)}>{t('discard_failed')}</button>
+									<button type="button" data-retry aria-label={t('att_retry')} title={t('att_retry')} onclick={() => retryFailed(message)}><Icon name="refresh" size={18} /></button>
+									<button type="button" data-discard aria-label={t('discard_failed')} title={t('discard_failed')} onclick={() => discardFailed(message)}><Icon name="trash" size={18} /></button>
 								</span>
 							{/if}
 							</div>
@@ -4570,19 +4570,33 @@ import ConfirmDialog, { ask, askChoice, confirmOpen, dismissConfirm } from './Co
 	}
 	.failed-actions {
 		display: inline-flex;
-		gap: 0.75rem;
+		align-items: center;
+		gap: 0.25rem;
+		margin-left: 0.25rem;
+		vertical-align: middle;
 	}
 	.failed-actions button {
+		display: grid;
+		place-items: center;
+		width: 2.25rem;
+		height: 2.25rem;
+		min-height: 0;
+		padding: 0;
 		border: 0;
+		border-radius: 50%;
 		background: none;
-		padding: 0.1rem 0;
-		font: inherit;
-		font-size: 0.8rem;
 		color: var(--danger);
 		cursor: pointer;
 	}
-	.failed-actions button:first-child {
-		font-weight: 600;
+	.failed-actions button:hover,
+	.failed-actions button:focus-visible {
+		background: var(--panel-2);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.failed-actions button {
+			width: 1.75rem;
+			height: 1.75rem;
+		}
 	}
 	.bubble p {
 		margin: 0 0 0.15rem;
