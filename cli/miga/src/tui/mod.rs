@@ -157,12 +157,21 @@ pub async fn run(store: Store, relay_url: String, config_path: Option<PathBuf>) 
     terminal.clear()?;
     let mut events = Some(EventStream::new());
     let mut tick = interval(Duration::from_secs(1));
+    let mut live_tick = interval(Duration::from_millis(300));
     let mut saved = String::new();
     let mut editor_wanted = false;
     let first = app.mark_read();
     let bcast = crate::ipc::serve(store.clone(), cmd_tx.clone());
-    let mut shell =
-        Shell { store: store.clone(), me, cmds: cmd_tx, bell: false, relay: relay_url.clone(), last_live: 0, bcast };
+    let mut shell = Shell {
+        store: store.clone(),
+        me,
+        cmds: cmd_tx,
+        bell: false,
+        relay: relay_url.clone(),
+        last_live: 0,
+        live_pending: None,
+        bcast,
+    };
     shell.sync_lists(&mut app);
     shell.exec(&mut app, first, &mut editor_wanted);
 
@@ -189,6 +198,7 @@ pub async fn run(store: Store, relay_url: String, config_path: Option<PathBuf>) 
                 Some(Err(_)) | None => break,
             },
             Some(ne) = ev_rx.recv() => shell.on_net(&mut app, ne),
+            _ = live_tick.tick() => shell.flush_live(&mut app),
             _ = tick.tick() => {
                 app.tick(now_ms() as f64);
                 let state = app.export_state().to_string();
@@ -272,6 +282,7 @@ struct Shell {
     bell: bool,
     relay: String,
     last_live: i64,
+    live_pending: Option<(String, String)>,
     bcast: Option<tokio::sync::broadcast::Sender<String>>,
 }
 
@@ -327,6 +338,20 @@ impl Shell {
                 app.say(if whole { "Contact deleted on all your devices" } else { "Chat deleted on all your devices" });
             }
             Err(e) => app.say(e.to_string()),
+        }
+    }
+
+    fn send_live(&mut self, app: &mut App, peer: String, text: String) {
+        let now = now_ms();
+        self.last_live = now;
+        if let Ok(body) = miga_core::payload::encrypt_live(&self.me, &peer, &text, now) {
+            self.send_cmd(app, net::Cmd::Live { peer, body });
+        }
+    }
+
+    fn flush_live(&mut self, app: &mut App) {
+        if let Some((peer, text)) = self.live_pending.take() {
+            self.send_live(app, peer, text);
         }
     }
 
@@ -543,10 +568,11 @@ impl Shell {
                 Intent::Live { peer, text } => {
                     let now = now_ms();
                     if now - self.last_live >= 300 || text.is_empty() {
-                        self.last_live = now;
-                        if let Ok(body) = miga_core::payload::encrypt_live(&self.me, &peer, &text, now) {
-                            self.send_cmd(app, net::Cmd::Live { peer, body });
-                        }
+                        self.live_pending = None;
+                        self.send_live(app, peer, text);
+                    } else {
+                        // Trailing edge: the newest text goes out on the next live tick.
+                        self.live_pending = Some((peer, text));
                     }
                 }
             }
