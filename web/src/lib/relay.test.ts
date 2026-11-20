@@ -231,3 +231,52 @@ Deno.test({
 });
 
 export { randomId };
+
+Deno.test({
+	name: 'queued messages survive a relay restart and arrive exactly once despite repeated sends',
+	...opts,
+	async fn() {
+		const h = new Harness();
+		await h.init();
+		try {
+			const alice = newIdentity();
+			const bob = newIdentity();
+			const ids = [randomId(), randomId(), randomId()];
+			const pending = new Set(ids);
+			const a = connect(h, alice, { ...TIMING });
+			// Same pattern as Messenger: everything pending is sent again at every (re)connect, with the same id.
+			const resend = () => {
+				for (const id of pending) a.client.send(bob.address, id, `body-${id}`);
+			};
+			const origReady = a.waitReady;
+			a.client.connect();
+			await origReady(1);
+			a.client.send(bob.address, ids[0], `body-${ids[0]}`); // accepted before the outage
+			while (!a.sent.includes(ids[0])) await sleep(10);
+			pending.delete(ids[0]);
+
+			await h.stopRelay();
+			// Offline: the sends fail and the messages stay pending.
+			if (a.client.send(bob.address, ids[1], 'x')) throw new Error('send must fail while offline');
+			await h.startRelay();
+			// Reconnect (backoff 1 s), then the resend pass. ids[1] and ids[2] never reached the relay.
+			await origReady(2);
+			resend();
+			resend(); // a duplicate retry on purpose
+			await sleep(300);
+
+			const b = connect(h, bob);
+			b.client.connect();
+			await b.waitReady(1);
+			await sleep(1500);
+			const counts = new Map<string, number>();
+			for (const m of b.got) counts.set(m.id, (counts.get(m.id) ?? 0) + 1);
+			for (const id of ids) if (counts.get(id) !== 1) throw new Error(`id ${id} delivered ${counts.get(id) ?? 0} times`);
+			if (b.got.length !== 3) throw new Error(`expected 3 deliveries, got ${b.got.length}`);
+			a.client.close();
+			b.client.close();
+		} finally {
+			await h.dispose();
+		}
+	}
+});

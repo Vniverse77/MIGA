@@ -181,6 +181,11 @@ export class RelayClient {
 		this.ws?.close();
 	}
 
+	/** True when authenticated and able to send. */
+	get isReady(): boolean {
+		return this.ready && !!this.ws;
+	}
+
 	/** Returns false when offline; the caller keeps the message pending. */
 	send(to: string, id: string, body: string): boolean {
 		if (!this.ready || !this.ws) return false;

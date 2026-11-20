@@ -33,6 +33,8 @@ export type Message = {
 	text: string;
 	ts: number;
 	state: 'pending' | 'sent' | 'failed' | 'received';
+	/** Time (ms) of the last manual "Retry" on a failed own message; the 24 h pending window restarts from it. */
+	retried?: number;
 	reply?: Reply;
 	/** Photo, GIF or video. `text` is then the caption (may be empty). Own messages also keep the blob delete token. */
 	att?: Att;
