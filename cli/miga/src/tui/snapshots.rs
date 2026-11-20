@@ -203,3 +203,85 @@ fn header_row_is_filled_edge_to_edge() {
         }
     }
 }
+
+// ---- M3 screens -----------------------------------------------------------------------------
+
+#[test]
+fn link_popup_with_qr() {
+    let mut a = sample();
+    let url = "https://miga.example/app/#link=G8576A7ENR5M".to_string();
+    a.popup = super::app::Popup::Link { code: "G8576A7ENR5M".into(), lines: crate::qr::lines(&url).unwrap(), url };
+    check("link_qr", &render(&mut a, 90, 40));
+}
+
+#[test]
+fn address_is_masked_until_revealed() {
+    let mut a = sample();
+    a.popup = super::app::Popup::Address;
+    let masked = render(&mut a, 90, 24);
+    assert!(!masked.contains(&a.me[10..50]), "the middle of the address must not show");
+    check("address_masked", &masked);
+    a.handle_key(key(KeyCode::Char('r')));
+    let shown = render(&mut a, 90, 24);
+    assert!(shown.contains(&a.me[..32]));
+}
+
+#[test]
+fn devices_and_history_banner() {
+    let mut a = sample();
+    a.my_device = "d".repeat(64);
+    a.devices =
+        vec![("e".repeat(64), "Android \u{b7} MIGA Mobile".into()), ("f".repeat(64), "Linux \u{b7} MIGA CLI".into())];
+    a.history = Some((420, 1000));
+    a.popup = super::app::Popup::Devices { sel: 1 };
+    check("devices", &render(&mut a, 90, 24));
+}
+
+#[test]
+fn safety_number_view() {
+    let mut a = sample();
+    a.popup = super::app::Popup::Safety { peer: ANNA.into() };
+    check("safety_unverified", &render(&mut a, 90, 24));
+    a.handle_key(key(KeyCode::Char('v')));
+    assert!(render(&mut a, 90, 24).contains("Status: Verified"));
+}
+
+#[test]
+fn search_in_chat_and_global() {
+    let mut a = sample();
+    a.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+    typed(&mut a, "ok");
+    check("search_chat", &render(&mut a, 90, 24));
+    a.handle_key(key(KeyCode::Esc));
+    a.handle_key(alt(KeyCode::Char('f')));
+    typed(&mut a, "build");
+    check("search_global", &render(&mut a, 90, 24));
+    a.handle_key(key(KeyCode::Enter));
+    assert_eq!(a.chat().unwrap().name, "Boris");
+}
+
+#[test]
+fn attachment_bubble_and_mute_marks() {
+    let mut photo = msg("p1", false, "look at this", NOW - 5.0 * MIN);
+    photo["att"] = json!({"blob":"a".repeat(32),"key":"b".repeat(64),"nonce":"c".repeat(48),"hash":"d".repeat(64),
+        "mime":"image/jpeg","size":183_000,"w":1024,"h":768,"thumb":""});
+    let mut a = app(vec![seed(ANNA, "Anna", vec![msg("m0", false, "morning!", NOW - 40.0 * MIN), photo])]);
+    a.now = NOW;
+    a.open_chat(0);
+    a.muted = vec![ANNA.into()];
+    a.verified = vec![ANNA.into()];
+    check("attachment_marks", &render(&mut a, 100, 24));
+}
+
+#[test]
+fn confirm_delete_chat_command() {
+    let mut a = sample();
+    a.handle_key(key(KeyCode::Char(':')));
+    a.focus = Focus::List;
+    a.handle_key(key(KeyCode::Char(':')));
+    typed(&mut a, "delete chat");
+    a.handle_key(key(KeyCode::Enter));
+    check("confirm_delete_chat", &render(&mut a, 90, 24));
+    let intents = a.handle_key(key(KeyCode::Char('y')));
+    assert!(matches!(intents.first(), Some(super::app::Intent::DeleteChat { .. })));
+}

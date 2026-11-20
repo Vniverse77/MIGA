@@ -2,6 +2,7 @@
 pub mod app;
 pub mod composer;
 pub mod config;
+pub mod first;
 pub mod keys;
 pub mod net;
 pub mod text;
@@ -129,8 +130,14 @@ pub async fn run(store: Store, relay_url: String, config_path: Option<PathBuf>) 
         Some(l) => l,
         None => return Err(Error::Invalid("miga is already open for this profile".into())),
     };
-    let me = store.identity()?;
     let (cfg, config_problem) = config::load(config_path.as_deref());
+    if !store.has_identity() {
+        let theme = theme::Theme::new(theme::ColorMode::detect(&cfg.theme.color), &cfg.theme);
+        if !first_run(&store, &relay_url, &cfg, &theme).await? {
+            return Ok(());
+        }
+    }
+    let me = store.identity()?;
     let theme = theme::Theme::new(theme::ColorMode::detect(&cfg.theme.color), &cfg.theme);
     let (keymap, key_problems) = keys::KeyMap::new(&cfg.keybinds);
     let seeds = load_seeds(&store, &me)?;
@@ -153,8 +160,9 @@ pub async fn run(store: Store, relay_url: String, config_path: Option<PathBuf>) 
     let mut saved = String::new();
     let mut editor_wanted = false;
     let first = app.mark_read();
+    let bcast = crate::ipc::serve(store.clone(), cmd_tx.clone());
     let mut shell =
-        Shell { store: store.clone(), me, cmds: cmd_tx, bell: false, relay: relay_url.clone(), last_live: 0 };
+        Shell { store: store.clone(), me, cmds: cmd_tx, bell: false, relay: relay_url.clone(), last_live: 0, bcast };
     shell.sync_lists(&mut app);
     shell.exec(&mut app, first, &mut editor_wanted);
 
@@ -204,9 +212,57 @@ pub async fn run(store: Store, relay_url: String, config_path: Option<PathBuf>) 
         }
     }
     let _ = store.save_ui_state(&app.export_state());
+    let _ = std::fs::remove_file(crate::ipc::socket_path(&store));
     drop(terminal);
     drop(screen);
     Ok(())
+}
+
+/// The guided first run. Returns false when the user quit without an account.
+async fn first_run(store: &Store, relay: &str, cfg: &Config, theme: &theme::Theme) -> Result<bool> {
+    install_panic_hook(false);
+    let screen = Screen::enter(false)?;
+    let mut terminal: Term = Terminal::new(CrosstermBackend::new(stdout()))?;
+    terminal.clear()?;
+    let mut events = EventStream::new();
+    let mut first = first::First::default();
+    let _ = cfg;
+    let done = loop {
+        terminal.draw(|f| first::draw(f, &first, theme))?;
+        let action = match events.next().await {
+            Some(Ok(TermEvent::Key(k))) => first.handle_key(k),
+            Some(Ok(TermEvent::Paste(p))) => {
+                first.paste(&p);
+                first::Do::Nothing
+            }
+            Some(Ok(_)) => first::Do::Nothing,
+            _ => first::Do::Quit,
+        };
+        match action {
+            first::Do::Nothing => {}
+            first::Do::Quit => break false,
+            first::Do::Create(name) => match store.create_identity(Some(&name)) {
+                Ok(_) => break true,
+                Err(e) => {
+                    first.error = Some(e.to_string());
+                    first.step = first::Step::Choice { sel: 0 };
+                }
+            },
+            first::Do::Join(code) => {
+                terminal.draw(|f| first::draw(f, &first, theme))?;
+                match miga_client::hub::join(store, relay, &code).await {
+                    Ok(()) => break true,
+                    Err(e) => {
+                        first.error = Some(e.to_string());
+                        first.step = first::Step::Code(composer::Composer::default());
+                    }
+                }
+            }
+        }
+    };
+    drop(terminal);
+    drop(screen);
+    Ok(done)
 }
 
 struct Shell {
@@ -216,6 +272,7 @@ struct Shell {
     bell: bool,
     relay: String,
     last_live: i64,
+    bcast: Option<tokio::sync::broadcast::Sender<String>>,
 }
 
 impl Shell {
@@ -345,6 +402,12 @@ impl Shell {
             net::NetEvent::Changed { peer, shown } => {
                 self.refresh(app, &peer);
                 if let Some(m) = shown {
+                    if let Some(b) = &self.bcast {
+                        let _ = b.send(
+                            serde_json::json!({"name": m.name, "text": m.text, "ts": m.ts, "attachment": m.has_attachment})
+                                .to_string(),
+                        );
+                    }
                     app.live.remove(&peer);
                     let quiet = (app.is_watching(&peer) && !app.cfg.notifications.when_focused) || app.is_muted(&peer);
                     if !quiet {

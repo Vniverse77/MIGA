@@ -57,6 +57,27 @@ pub async fn send(
         tokio::io::stdin().read_to_string(&mut text).await?;
     }
     engine::check_peer(&me, &peer)?;
+    // The chat UI owns the relay connection while it runs: hand the job to it.
+    if store.ui_running() {
+        let req = match &file {
+            Some(f) => {
+                let path = std::fs::canonicalize(f)?;
+                serde_json::json!({"op": "sendfile", "to": peer, "path": path, "caption": text})
+            }
+            None => serde_json::json!({"op": "send", "to": peer, "text": text}),
+        };
+        let answer = crate::ipc::request(store, &req)
+            .await
+            .ok_or_else(|| Error::Invalid("the chat UI is open but its local socket did not answer".into()))?;
+        if answer["ok"] != true {
+            return Err(Error::Invalid(answer["err"].as_str().unwrap_or("refused").to_string()));
+        }
+        println!(
+            "handed to the open chat UI{}",
+            answer["id"].as_str().map(|i| format!(" ({})", &i[..8])).unwrap_or_default()
+        );
+        return Ok(());
+    }
     if let Some(file) = file {
         return send_file(store, relay, peer, &file, &text).await;
     }
@@ -87,6 +108,9 @@ pub async fn send(
 pub async fn listen(store: &Store, relay: &str, limit: Option<u64>, count: Option<usize>) -> Result<()> {
     let me = store.identity()?;
     eprintln!("listening as {} on {relay}", me.address());
+    if store.ui_running() {
+        return listen_ui(store, limit, count).await;
+    }
     let store = Arc::new(Store::open_like(store));
     let (_cmds, mut events, task) = start(&store, relay);
     let deadline = limit.map(|s| tokio::time::Instant::now() + Duration::from_secs(s));
@@ -273,5 +297,38 @@ pub async fn get(store: &Store, relay: &str, contact: &str, id: &str, out: Optio
     let path = dir.join(miga_client::files::saved_name(&att));
     std::fs::write(&path, bytes)?;
     println!("{}", path.display());
+    Ok(())
+}
+
+/// `listen` while the chat UI runs: follow its events over the local socket.
+async fn listen_ui(store: &Store, limit: Option<u64>, count: Option<usize>) -> Result<()> {
+    let mut lines = crate::ipc::subscribe(store)
+        .await
+        .ok_or_else(|| Error::Invalid("the chat UI is open but its local socket did not answer".into()))?;
+    eprintln!("(following the open chat UI)");
+    let deadline = limit.map(|s| tokio::time::Instant::now() + Duration::from_secs(s));
+    let mut received = 0usize;
+    loop {
+        let next = match deadline {
+            Some(d) => match tokio::time::timeout_at(d, lines.next_line()).await {
+                Ok(l) => l,
+                Err(_) => break,
+            },
+            None => lines.next_line().await,
+        };
+        let Ok(Some(line)) = next else { break };
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap_or_default();
+        println!(
+            "[{}] {}: {}{}",
+            stamp(v["ts"].as_f64().unwrap_or(0.0)),
+            v["name"].as_str().unwrap_or("?"),
+            v["text"].as_str().unwrap_or_default(),
+            if v["attachment"] == true { " [attachment]" } else { "" }
+        );
+        received += 1;
+        if count.is_some_and(|n| received >= n) {
+            break;
+        }
+    }
     Ok(())
 }

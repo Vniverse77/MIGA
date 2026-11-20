@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 mod headless;
+mod ipc;
 mod qr;
 mod tui;
 
@@ -137,9 +138,6 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Join { code } => headless::join(&store, &cli.relay, &code).await,
         Command::Link { stay } => headless::link(&store, &cli.relay, stay).await,
         Command::Devices { remove } => headless::devices(&store, &cli.relay, remove).await,
-        Command::Send { .. } | Command::Listen { .. } if store.ui_running() => Err(Error::Invalid(
-            "the miga chat UI is open for this profile; use it to send and receive (sending from another process while it runs arrives with a local socket in M3)".into(),
-        )),
         Command::Send { contact, text, file } => headless::send(&store, &cli.relay, &contact, text, file).await,
         Command::Get { contact, id, out } => headless::get(&store, &cli.relay, &contact, &id, out).await,
         Command::Listen { timeout, count } => headless::listen(&store, &cli.relay, timeout, count).await,
@@ -149,7 +147,12 @@ async fn run(cli: Cli) -> Result<()> {
                 let att = m["att"]
                     .as_object()
                     .map(|a| {
-                        format!(" [file {} {} bytes, id {}]", a["mime"].as_str().unwrap_or("?"), a["size"], &m["id"].as_str().unwrap_or_default()[..8])
+                        format!(
+                            " [file {} {} bytes, id {}]",
+                            a["mime"].as_str().unwrap_or("?"),
+                            a["size"],
+                            &m["id"].as_str().unwrap_or_default()[..8]
+                        )
                     })
                     .unwrap_or_default();
                 println!(
