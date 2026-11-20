@@ -468,7 +468,7 @@ raises `epoch` by at least 1.
 **Payloads.** All group payloads are the pairwise plaintext with **no top-level `text`**: `{"v":0,"ts":..,"group":{..}}`
 (control) or `{"v":0,"ts":..,"g":{..}}` (content). Both stay inside the ciphertext.
 
-Admin-signed control, `group` = `{"op":<op>,"st":<state>,"sig":<hex>}` plus optional `"pow"` (invite to a stranger),
+Admin-signed control, `group` = `{"op":<op>,"st":<state>,"sig":<hex>}` (an invite to a stranger also carries the usual top-level `"pow"`),
 sent by the admin to every member of the new state and, for `remove`/`ban`, to the removed address too. `op` is a hint
 for display (`invite` | `remove` | `ban` | `rename` | `transfer`); receivers act on the state, not on `op`.
 Unsigned member control, `group` = `{"op":"accept"|"leave"|"want","gid":..,"epoch":n}`: `accept` is sent to the admin
@@ -496,8 +496,9 @@ longer listed are forgotten.
 `invited`, the sender is not in `members` of my known state, is in `banned`, is me, or has sent `leave`. Duplicates are
 dropped by `(gid, id)`, so a relay redelivery, a linked-device copy and a retry never show twice. `edit` and `del` only
 touch a message whose author is the sender (delete for everyone is author-only). A message whose `epoch` is higher than
-mine makes the client send `want` to the admin once per epoch. Messages from a member who has not accepted yet are not
-possible, but messages that arrive while *I* have not accepted are held and shown after accept.
+mine makes the client send `want` to the admin once per epoch (the admin answers with `op:"update"` and the current
+state). Messages that arrive while *I* have not accepted yet are stored, shown after accept and never notify. A deleted
+message id is remembered (300 per group) so a late copy cannot bring it back.
 
 **Flows.**
 - *Create*: admin makes a state (epoch 1), sends it to each invitee. Invitees are members at once but are `invited`
@@ -517,7 +518,7 @@ possible, but messages that arrive while *I* have not accepted are held and show
 **Fan-out.** Sender encrypts the payload for every member except itself, with one relay id per recipient
 (`hex(SHA-256(gid ":" id ":" recipient))` first 32 chars), so the relay's `sent` frame says which copy arrived. Each copy is retried like a
 normal message (see outbox: 2 s, 5 s, 15 s, 30 s, then every 60 s, 24 h limit). Own other devices get a sync copy
-(`grp` = the group record, `gmsg` = one group message; unknown to old devices, which ignore them) and also receive group
+(`grp` = the group record, `gmsg` = one group message, `gdel`, `gedit`; unknown kinds, which old devices ignore) and also receive group
 messages from the relay like any message sent to the account. Typing and live frames go as ephemeral frames to members
 only, never queued.
 
@@ -528,13 +529,15 @@ member's envelope; the delete token stays with the sender. "Delete for everyone"
 notify for it.
 
 **Requests.** An invite from an address that is not a contact is a request until accepted, classified like a first
-message (proof of work in `group.pow`, same rules and "unverified" badge; a wrong proof is dropped and counted as
+message (proof of work in the top-level `pow`, same rules and "unverified" badge; a wrong proof is dropped and counted as
 filtered). The sender attaches `pow` to an invite when the invitee has never written to it.
+
+**Transfer.** The old admin signs the state that names the new admin (receivers verify against the admin they know); the new admin signs every later state. A client stores which address made the signature it holds (`signer`).
 
 **Old clients.** Payloads have no top-level `text` and none of the keys older clients know, so they fail to read them,
 acknowledge and discard them: no bubble, no error (the same path as `typing`). Their owner just does not see the group
-and cannot be invited meaningfully. Verified by test against the unchanged v0.9.4 reader logic (`decrypt` returns a result
-only for new keys).
+and cannot be invited meaningfully. Checked by a test that runs a copy of the v0.9.4 reader over real group payloads (it
+returns nothing for them).
 
 Limits: members see each other's addresses. The admin is trusted for membership; a malicious member can only send
 messages like a normal contact. No forward secrecy (same as v0). Delivery to members is per copy; there are no group
