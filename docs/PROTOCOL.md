@@ -534,6 +534,16 @@ filtered). The sender attaches `pow` to an invite when the invitee has never wri
 
 **Transfer.** The old admin signs the state that names the new admin (receivers verify against the admin they know); the new admin signs every later state. A client stores which address made the signature it holds (`signer`).
 
+**Unban.** The admin lifts a ban with a new signed state whose `banned` list no longer holds the address and whose epoch is higher (`op: "unban"`; receivers treat every state alike, the op name is informative). The person is not added back; they have to be invited again.
+
+**System lines.** "A added B", "B left", renames and the like are never sent. Each device derives them from signed state
+changes (a higher epoch: members added or removed, `banned` changed, name, admin) and from `accept` (joined), and stores
+them next to the messages with a derived id (`sha256` of group, epoch, kind and address), so a second device or a replay
+writes the same row. A removed member whose address is in `left` reads "left", else "removed".
+
+**Mention text.** In the text a mention is `@Name` with spaces turned into `_`; `mentions` carries the addresses. A reader
+shows a chip using its own name for the member and falls back to the token position when the sender used another name.
+
 **Old clients.** Payloads have no top-level `text` and none of the keys older clients know, so they fail to read them,
 acknowledge and discard them: no bubble, no error (the same path as `typing`). Their owner just does not see the group
 and cannot be invited meaningfully. Checked by a test that runs a copy of the v0.9.4 reader over real group payloads (it

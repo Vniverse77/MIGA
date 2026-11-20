@@ -504,8 +504,10 @@ export class GroupEngine {
 			if (!member || from === rec.state.admin || rec.left.includes(from)) return;
 			const marked = { ...rec, left: [...rec.left, from] };
 			// The admin turns the announcement into a signed state; everybody else waits for it.
-			if (rec.state.admin === this.me && rec.status === 'active') await this.publish(marked, withoutMember(rec.state, from), 'remove', [from]);
-			else await this.save(marked, false);
+			if (rec.state.admin === this.me && rec.status === 'active') {
+				await this.save(marked, false); // so the system line reads "left", not "removed"
+				await this.publish(marked, withoutMember(rec.state, from), 'remove', [from]);
+			} else await this.save(marked, false);
 		} else if (group.op === 'want') {
 			if (rec.state.admin === this.me && rec.status === 'active' && member) {
 				await this.enqueue(from, gid, { group: { op: 'update', st: rec.state, sig: rec.sig } });
