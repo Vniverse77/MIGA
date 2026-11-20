@@ -208,6 +208,27 @@ func TestProxyHeaderOnlyWhenTrusted(t *testing.T) {
 	if clientIP(r, false) != "10.0.0.1" || clientIP(r, true) != "203.0.113.9" {
 		t.Fatal("ip selection")
 	}
+	// X-Forwarded-For is client-controllable and must be ignored; a missing header means "no key".
+	r2 := httptest.NewRequest("GET", "/", nil)
+	r2.RemoteAddr = "127.0.0.1:1"
+	r2.Header.Set("X-Forwarded-For", "198.51.100.7")
+	if clientIP(r2, true) != "" {
+		t.Fatal("missing CF header must give empty key")
+	}
+	r2.Header.Set("CF-Connecting-IP", "not-an-ip")
+	if clientIP(r2, true) != "" {
+		t.Fatal("invalid header must give empty key")
+	}
+}
+
+func TestEmptyKeyIsNotLimited(t *testing.T) {
+	g := newGuard(defaultLimits(), true)
+	now := time.Now()
+	for i := 0; i < 5000; i++ {
+		if !g.msgRate.allow("", now) || !g.conns.acquire("", 1) {
+			t.Fatal("empty key must not be limited")
+		}
+	}
 }
 
 func TestBlobUploadConcurrencyPerIP(t *testing.T) {
@@ -289,7 +310,7 @@ func TestLimitsFromEnvDefaults(t *testing.T) {
 	t.Setenv("MIGA_QUEUE_MSGS", "7")
 	t.Setenv("MIGA_BLOB_QUOTA", "12345")
 	l := limitsFromEnv()
-	if l.QueueMsgs != 7 || l.BlobQuota != 12345 || l.MaxConnsPerIP != 20 || l.QueueTotalBytes != 512<<20 {
+	if l.QueueMsgs != 7 || l.BlobQuota != 12345 || l.MaxConnsPerIP != 300 || l.QueueTotalBytes != 512<<20 {
 		t.Fatalf("%+v", l)
 	}
 }

@@ -348,7 +348,7 @@ encrypted message. The relay stores opaque bytes and a size; it cannot tell a ph
   next to `MIGA_DB`), metadata (id, size, created, expires, token hash) in SQLite.
 - CORS follows `MIGA_ORIGINS` (same patterns as the WebSocket); the page's own origin is always allowed.
 - The client IP is used only for the in-memory rate limit. Behind a proxy set `MIGA_TRUST_PROXY=1` to read
-  `CF-Connecting-IP` / `X-Forwarded-For`. Blob ids and IPs are never logged.
+  `CF-Connecting-IP` only; without it per-IP limits are skipped, never shared. Blob ids and IPs are never logged.
 
 Delete token: the sender gets `del` at upload and keeps it in its own copy of the message (it also reaches the
 sender's other devices through sync). It is **not** put into the message to the recipient: a recipient may have

@@ -19,21 +19,21 @@ The service runs as the unprivileged user `miga` (`deploy/miga-relay.service`: `
 ## Limits
 
 All limits are in-memory counters keyed by IP, pruned automatically, never stored or logged.
-Set `MIGA_TRUST_PROXY=1` behind Cloudflare so the real client IP is used.
+Set `MIGA_TRUST_PROXY=1` behind Cloudflare so the real client IP (`CF-Connecting-IP`, set by Cloudflare) is used. `X-Forwarded-For` is ignored (client-controllable). If the header is missing, per-IP limits are skipped for that request (no shared bucket) and one warning is logged. Per-IP defaults are generous on purpose: many users can share one carrier or office IP. The global queue and blob quotas are the real protection.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `MIGA_MAX_CONNS_PER_IP` | 20 | simultaneous WebSocket connections per IP (HTTP 429 beyond) |
-| `MIGA_CONNS_PER_MIN` | 60 | new WebSocket connections per minute per IP (HTTP 429) |
-| `MIGA_MSGS_PER_MIN` | 240 | stored messages and unsends per minute per IP, all connections together (`rate_limited`) |
-| `MIGA_NEW_RCPT_PER_HOUR` | 30 | first messages to recipients that have an empty queue and are offline, per IP per hour (`rate_limited`) |
+| `MIGA_MAX_CONNS_PER_IP` | 300 | simultaneous WebSocket connections per IP (HTTP 429 beyond) |
+| `MIGA_CONNS_PER_MIN` | 600 | new WebSocket connections per minute per IP (HTTP 429) |
+| `MIGA_MSGS_PER_MIN` | 3000 | stored messages and unsends per minute per IP, all connections together (`rate_limited`) |
+| `MIGA_NEW_RCPT_PER_HOUR` | 300 | first messages to recipients that have an empty queue and are offline, per IP per hour (`rate_limited`) |
 | `MIGA_QUEUE_MSGS` | 1000 | queued messages per recipient (`queue_full`) |
 | `MIGA_QUEUE_BYTES` | 8388608 | queued bytes per recipient (`queue_full`) |
 | `MIGA_QUEUE_TOTAL_BYTES` | 536870912 | queued bytes in total (`queue_full`) |
 | `MIGA_BLOB_QUOTA` | 1073741824 | total blob bytes on disk (HTTP 507) |
-| `MIGA_BLOB_UPLOADS_PER_IP` | 2 | concurrent uploads per IP (HTTP 429) |
-| `MIGA_BLOB_DOWNLOADS_PER_IP` | 8 | concurrent downloads per IP (HTTP 429) |
-| `MIGA_BLOB_UPLOADS_PER_10MIN` | 30 | uploads per 10 minutes per IP (HTTP 429) |
+| `MIGA_BLOB_UPLOADS_PER_IP` | 20 | concurrent uploads per IP (HTTP 429) |
+| `MIGA_BLOB_DOWNLOADS_PER_IP` | 60 | concurrent downloads per IP (HTTP 429) |
+| `MIGA_BLOB_UPLOADS_PER_10MIN` | 300 | uploads per 10 minutes per IP (HTTP 429) |
 
 Fixed: 25 MiB per blob, 4 concurrent uploads in total, 32 KiB per frame, 24,000 characters per
 message body, 30 messages per 10 s per connection, 30 day expiry.

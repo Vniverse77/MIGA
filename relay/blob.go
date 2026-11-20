@@ -30,7 +30,7 @@ const (
 	defaultBlobQuota = 1 << 30
 	blobTTL          = 30 * 24 * time.Hour
 	blobRateWindow   = 10 * time.Minute
-	blobRateLimit    = 30
+	blobRateLimit    = 300
 	maxActiveUploads = 4
 	tempMaxAge       = time.Hour
 )
@@ -143,6 +143,9 @@ func (b *blobStore) originAllowed(u *url.URL, requestHost string) bool {
 func (b *blobStore) clientIP(r *http.Request) string { return clientIP(r, b.trustXFF) }
 
 func (b *blobStore) allow(ip string) bool {
+	if ip == "" {
+		return true
+	}
 	now := time.Now()
 	b.mu.Lock()
 	defer b.mu.Unlock()

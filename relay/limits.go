@@ -33,9 +33,9 @@ type limits struct {
 
 func defaultLimits() limits {
 	return limits{
-		MaxConnsPerIP: 20, ConnPerMin: 60, MsgPerMin: 240, NewRcptPerHour: 30,
+		MaxConnsPerIP: 300, ConnPerMin: 600, MsgPerMin: 3000, NewRcptPerHour: 300,
 		QueueMsgs: maxQueue, QueueBytes: 8 << 20, QueueTotalBytes: 512 << 20,
-		BlobQuota: 1 << 30, BlobPerIPUploads: 2, BlobPerIPReads: 8, BlobPerWindow: blobRateLimit,
+		BlobQuota: 1 << 30, BlobPerIPUploads: 20, BlobPerIPReads: 60, BlobPerWindow: blobRateLimit,
 	}
 }
 
@@ -90,6 +90,9 @@ func newBucketSet(perPeriod int, period time.Duration) *bucketSet {
 }
 
 func (s *bucketSet) allow(key string, now time.Time) bool {
+	if key == "" {
+		return true
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b := s.m[key]
@@ -127,6 +130,9 @@ type counters struct {
 }
 
 func (c *counters) acquire(key string, max int) bool {
+	if key == "" {
+		return true
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.m == nil {
@@ -140,6 +146,9 @@ func (c *counters) acquire(key string, max int) bool {
 }
 
 func (c *counters) release(key string) {
+	if key == "" {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.m[key] <= 1 {
@@ -180,15 +189,21 @@ func (g *guard) pruneLoop() {
 	}
 }
 
-// ip returns the address used as a counter key. Behind Cloudflare/a proxy set MIGA_TRUST_PROXY=1.
+var noIPWarned atomic.Bool
+
+// clientIP returns the address used as a counter key. With MIGA_TRUST_PROXY=1 only CF-Connecting-IP is
+// used (Cloudflare sets it itself and overwrites any client-supplied value; X-Forwarded-For can carry a
+// client-supplied first entry, so it is ignored). If the header is missing or not an IP the result is
+// "" and per-IP limits are skipped for that request (never a shared bucket); a warning is logged once.
 func clientIP(r *http.Request, trustProxy bool) string {
 	if trustProxy {
-		if v := r.Header.Get("CF-Connecting-IP"); v != "" {
+		if v := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); net.ParseIP(v) != nil {
 			return v
 		}
-		if v := r.Header.Get("X-Forwarded-For"); v != "" {
-			return strings.TrimSpace(strings.Split(v, ",")[0])
+		if noIPWarned.CompareAndSwap(false, true) {
+			log.Printf("warning: MIGA_TRUST_PROXY=1 but a request had no valid CF-Connecting-IP; per-IP limits are skipped for such requests")
 		}
+		return ""
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
