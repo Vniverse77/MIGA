@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="miga_service_title">MIGA is connected</string>
+    <string name="miga_service_text">Receiving messages in the background</string>
+    <string name="miga_channel_service">Background connection</string>
+    <string name="miga_channel_service_desc">Quiet notification shown while MIGA stays connected in the background. You can hide it here; messages still arrive.</string>
+    <string name="miga_channel_messages">Messages</string>
+</resources>

@@ -6,7 +6,18 @@ import android.graphics.ColorFilter
 import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.drawable.Drawable
+import android.Manifest
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
@@ -62,9 +73,49 @@ class MainActivity : TauriActivity() {
     web?.evaluateJavascript("window.__migaSaved && window.__migaSaved('$answer')", null)
   }
 
+  // Notification permission (Android 13+): asked only when the page asks, from a click.
+  private val askNotify = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+    val answer = if (granted) "granted" else "denied"
+    // The service's own notification was suppressed while the permission was missing: post it again.
+    if (granted) applyBackground()
+    web?.evaluateJavascript("window.__migaPerm && window.__migaPerm('$answer')", null)
+  }
+
+  private fun prefs() = getSharedPreferences("miga", Context.MODE_PRIVATE)
+
+  // "Background connection" setting (default on): the foreground service in MigaService.kt.
+  private fun applyBackground() {
+    val intent = Intent(this, MigaService::class.java)
+    if (prefs().getBoolean("bg", true)) {
+      try {
+        ContextCompat.startForegroundService(this, intent)
+      } catch (e: Exception) {
+        // The system refused (for example no foreground start allowed right now); the app still works.
+      }
+    } else {
+      stopService(intent)
+    }
+  }
+
+  // A tap on a message notification: the page knows which chat the tag belongs to.
+  private fun routeTap(intent: Intent?) {
+    val tag = intent?.getStringExtra("miga_tag") ?: return
+    intent.removeExtra("miga_tag")
+    val quoted = org.json.JSONObject.quote(tag)
+    web?.evaluateJavascript("window.__migaTap && window.__migaTap($quoted)", null)
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    routeTap(intent)
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    MigaService.ensureChannels(this)
+    applyBackground()
     window.setBackgroundDrawable(backdrop)
     val content = findViewById<android.view.View>(android.R.id.content)
     ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
@@ -103,6 +154,81 @@ class MainActivity : TauriActivity() {
 
   // Called by the page (platform/mobile.ts): whenever the app theme changes, the screen changes and a layer opens or closes.
   inner class Chrome {
+    // ── Notifications and the background connection (platform/mobile.ts) ──
+    @JavascriptInterface
+    fun notifyPermission(): String {
+      if (MigaService.canNotify(this@MainActivity)) return "granted"
+      val asked = prefs().getBoolean("asked_notify", false)
+      return if (Build.VERSION.SDK_INT >= 33 && !asked) "default" else "denied"
+    }
+
+    @JavascriptInterface
+    fun requestNotifyPermission() {
+      runOnUiThread {
+        prefs().edit().putBoolean("asked_notify", true).apply()
+        if (Build.VERSION.SDK_INT >= 33) askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
+        else web?.evaluateJavascript("window.__migaPerm && window.__migaPerm('${if (MigaService.canNotify(this@MainActivity)) "granted" else "denied"}')", null)
+      }
+    }
+
+    // One notification per tag (the tag is "chat-<address>"): a new one replaces the old. Tapping it opens the app
+    // and the page opens that chat.
+    @JavascriptInterface
+    fun notify(tag: String, title: String, body: String) {
+      if (!MigaService.canNotify(this@MainActivity)) return
+      val open = PendingIntent.getActivity(
+        this@MainActivity, tag.hashCode(),
+        Intent(this@MainActivity, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra("miga_tag", tag),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+      )
+      val note = NotificationCompat.Builder(this@MainActivity, MigaService.CHANNEL_MESSAGES)
+        .setSmallIcon(R.drawable.ic_stat_miga)
+        .setContentTitle(title)
+        .setContentText(body)
+        .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+        .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setAutoCancel(true)
+        .setOnlyAlertOnce(false)
+        .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+        .setContentIntent(open)
+        .build()
+      try {
+        NotificationManagerCompat.from(this@MainActivity).notify(tag, 2, note)
+      } catch (e: SecurityException) {
+        // permission revoked in the meantime
+      }
+    }
+
+    @JavascriptInterface
+    fun cancel(tag: String) {
+      NotificationManagerCompat.from(this@MainActivity).cancel(tag, 2)
+    }
+
+    @JavascriptInterface
+    fun getBackground(): Boolean = prefs().getBoolean("bg", true)
+
+    @JavascriptInterface
+    fun setBackground(on: Boolean) {
+      prefs().edit().putBoolean("bg", on).apply()
+      runOnUiThread { applyBackground() }
+    }
+
+    // Optional: lets the system keep the connection running in Doze. The system shows its own confirmation.
+    @JavascriptInterface
+    fun batteryExemption() {
+      runOnUiThread {
+        try {
+          val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+          if (!power.isIgnoringBatteryOptimizations(packageName)) {
+            startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+          }
+        } catch (e: Exception) {
+          startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        }
+      }
+    }
+
     // A light tick for a long-press (platform.haptic). View haptics need no permission, unlike the Vibration API.
     @JavascriptInterface
     fun haptic() {
