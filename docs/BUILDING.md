@@ -80,8 +80,8 @@ bash android-patch/apply.sh                       # after every init: insets, ke
 npx tauri android build --apk --target aarch64 --target armv7 # ONE universal APK
 ```
 `desktop/src-tauri/tauri.android.conf.json` is merged over `tauri.conf.json` on Android: it points
-`frontendDist` at `web/build-mobile`, sets the version to `0.8.6` (versionName; Tauri rejects pre-release
-suffixes for Android) and `versionCode` 806. Tray and close-to-tray are `#[cfg(desktop)]` in `src/lib.rs`, and
+`frontendDist` at `web/build-mobile`, sets the version to `0.8.7` (versionName; Tauri rejects pre-release
+suffixes for Android) and `versionCode` 807. Tray and close-to-tray are `#[cfg(desktop)]` in `src/lib.rs`, and
 the `tray-icon` feature sits in a non-Android target dependency in `Cargo.toml`.
 
 Sign the unsigned APK (debug key for beta sideloading; use a real upload key for Play Store):
@@ -89,8 +89,8 @@ Sign the unsigned APK (debug key for beta sideloading; use a real upload key for
 U=src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
 zipalign -f -p 4 $U aligned.apk
 apksigner sign --ks ~/.android/debug.keystore --ks-pass pass:android --key-pass pass:android \
-  --ks-key-alias androiddebugkey --out MIGA_0.8.6-beta_android.apk aligned.apk
-apksigner verify --print-certs MIGA_0.8.6-beta_android.apk
+  --ks-key-alias androiddebugkey --out MIGA_0.8.7-beta_android.apk aligned.apk
+apksigner verify --print-certs MIGA_0.8.7-beta_android.apk
 ```
 (`keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"` if the keystore is missing.)
 The relay will also need `http://tauri.localhost` in `MIGA_ORIGINS`.
