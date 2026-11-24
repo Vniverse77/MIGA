@@ -12,3 +12,7 @@
 # OS / editors
 .DS_Store
 .vscode/
+assets-src/
+
+# Local project notes (never commit)
+notes/
